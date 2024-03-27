@@ -5,20 +5,32 @@ import imgui
 from imgui.integrations.pygame import PygameRenderer
 import numpy as np
 import logging
-
+from Object import *
 def screen_to_world(x, y, width, height, modelview, projection, viewport):    
     y = height - y  # OpenGL's y axis  is reversed of pygame's y axis
     z = glReadPixels(x, y, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT)
     return gluUnProject(x, y, z, modelview, projection, viewport)
 
-class Camera:
+class Camera(Object):
     def __init__(self, fov, position, target,width, height):
+        super().__init__("Camera")
         self.fov = fov
-        self.position = position
+        # self.position = position
+        self.init_position = position
         self.target = target
         self.width = width
         self.height = height
-
+        self.last_mouse_pos = None
+        self.rotation_matrix = np.eye(4)  # Initialize as identity matrix for rotation
+        self.create_variable("position",position,False)
+        self.create_variable("color",[1,1,1,1],False)
+        self.appendGuiCustomization(ValueGuiCustomization("color","vec4",{'widget': 'color_picker'}) )
+        
+        self.addAction("reset position", lambda object: object.resetCamera() )
+    def resetCamera(self):
+        self.position = self.init_position
+        self.rotation_matrix = np.eye(4)
+        self.fov = 45.0
     def update_windowSize(self, width, height):
         """Update the perspective projection based on new width and height."""
         self.width = width
@@ -40,11 +52,46 @@ class Camera:
     def apply_view(self):
         """Apply the camera view."""
         glLoadIdentity()
+        position=list(self.getValue("position")) 
+        position.append(1)
+        positionNew = np.dot( self.rotation_matrix, np.array(position) ) [:3]
         gluLookAt(
-            *self.position,  # Camera position
+            *positionNew,  # Camera position
             *self.target,    # Look-at target
             0.0, 1.0, 0.0    # Up vector
         )
+        
+    def handle_mouse_move(self, x, y):
+        """Handle the mouse movement to rotate the camera around the target."""
+        if self.last_mouse_pos is None:
+            self.last_mouse_pos = (x, y)
+            return
+
+        dx, dy = x - self.last_mouse_pos[0], y - self.last_mouse_pos[1]
+        self.last_mouse_pos = (x, y)
+
+        # Convert mouse movement to rotation angle
+        sensitivity = 0.005  # Adjust this value based on your preference
+        angle_x = dy * sensitivity
+        angle_y = dx * sensitivity
+
+        # Update rotation_matrix based on mouse movement
+        rotation_x = np.array([
+            [1, 0, 0, 0],
+            [0, np.cos(angle_x), -np.sin(angle_x), 0],
+            [0, np.sin(angle_x), np.cos(angle_x), 0],
+            [0, 0, 0, 1]
+        ])
+        
+        rotation_y = np.array([
+            [np.cos(angle_y), 0, np.sin(angle_y), 0],
+            [0, 1, 0, 0],
+            [-np.sin(angle_y), 0, np.cos(angle_y), 0],
+            [0, 0, 0, 1]
+        ])
+
+        # Apply the rotations
+        self.rotation_matrix = np.dot(rotation_y, np.dot(rotation_x, self.rotation_matrix))
     
 
 
@@ -103,7 +150,18 @@ class Renderable:
         glEnd()
         glPopMatrix()  # Restore the matrix state
 
+from ImageLoader import ImageLoader
+globalImageLoader=ImageLoader()
 
+class LicParameter(Object):
+    def __init__(self,name):
+        super().__init__(name)
+        self.create_variable("StepSize",0.01,True,0.01)
+        self.create_variable("MaximumStepSize",100000,True,1) 
+        self.create_variable("NoiseImage","assets//noise//512x512.png",True)
+        self.addAction("reload NoiseImage", lambda object: globalImageLoader.load_image(object.getValue("NoiseImage")) )
+        testDictionary = {"a": 1, "b": 2, "StepSize2": 3.0}
+        self.create_variable("testDictionary",testDictionary,True)
 
 def main():
     pygame.init()
@@ -117,7 +175,6 @@ def main():
     glEnable(GL_DEPTH_TEST)
     glEnable(GL_TEXTURE_2D)  # Enable texture mapping
     glClearColor(0.1, 0.1, 0.1, 1)
-    camera = Camera(45.0, (0, 0, 5), (0, 0, 0),size[0],size[1])
 
     # Setup ImGui context and the pygame renderer for ImGui
     imgui.create_context()
@@ -131,27 +188,45 @@ def main():
     
     renderable_object = Renderable(lic_texture_data,2,2,-20)
     
+    # all the objects in the scene
+    scene=Scene("DefaultScene")
+    renderParamterPage=LicParameter("LicParameter")
+    camera = Camera(45.0, (0, 0, 5), (0, 0, 0),size[0],size[1])
+ 
+    scene.add_object(renderParamterPage)
+    scene.add_object(camera)
+    scene.restore_state_all()
+    
     clock = pygame.time.Clock()
     running = True
+    mouse_down=False
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.MOUSEBUTTONDOWN :
+                if event.button == 1:  # Left mouse button
+                    mouse_down = True
                 # Zoom in
                 if event.button == 4:
                     camera.zoom('in')
                 # Zoom out
                 elif event.button == 5:
                     camera.zoom('out')
-                elif event.button == 1:# left button
+                elif event.button == 2:# mid button
                     x, y = event.pos
                     modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
                     projection = glGetDoublev(GL_PROJECTION_MATRIX)
                     viewport = glGetIntegerv(GL_VIEWPORT)
                     world_coordinates = screen_to_world(x, y, viewport[2], viewport[3], modelview, projection, viewport)
                     renderable_object.check_collision(world_coordinates[:3])
-
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1:  # Left mouse button
+                    mouse_down = False
+            elif event.type == pygame.MOUSEMOTION:
+                if mouse_down:  # Only rotate when the left button is down
+                    x, y = event.pos  # Use relative motion for smoother rotation
+                    camera.handle_mouse_move(x, y)
             elif event.type == pygame.VIDEORESIZE:
                 # Update the window size
                 screen = pygame.display.set_mode((event.w, event.h), pygame.DOUBLEBUF | pygame.OPENGL | pygame.RESIZABLE)
@@ -169,26 +244,20 @@ def main():
         camera.apply_view()
       
 
-
-        #  Start new ImGui frame
         imgui.new_frame()
-        # Example ImGui window
-        if imgui.begin("Your GUI Window"):
-            imgui.text("Hello, world!")
-            # You can add more GUI elements here as needed
-        imgui.end()
+        scene.DrawGui()
         imgui.render()
         imgui.end_frame()
+        
+        scene.draw_all()
         renderable_object.draw()
         impl.render(imgui.get_draw_data())
-     
-
-
-
+    
 
         pygame.display.flip()
         pygame.time.wait(10)# Limit to 60 frames per second
      
+    scene.save_state()
     impl.shutdown()
     pygame.quit()
 

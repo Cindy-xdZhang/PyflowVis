@@ -1,0 +1,10 @@
+rendering:
+  # image_path: 'path/to/your/image.png'
+  window_size: [800, 600]
+  quad_size: [1.0, 1.0]
+
+network:
+  input_size: 784
+  hidden_layers: [128, 64]
+  output_size: 10
+  activation: 'relu'
