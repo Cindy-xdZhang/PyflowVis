@@ -6,14 +6,152 @@ import os
 import imgui
 from typing import Dict, Any
 
+def input_vecn_int_float(label, vecn):
+    # Simulate a vec3 input using three separate float input fields.
+    # label: The label to display for the vec3 input
+    # vec3: A list or tuple containing three float numbers representing the x, y, z components of the vector
+    changed = False  # Flag to track if there was a change
+    n=len(vecn)
+    imgui.text(label)
+    if all(isinstance(x, float) for x in vecn):
+        for i in range(n):
+            imgui.same_line()  # Keep the next input on the same line
+            changed_iterm, vecn[i] = imgui.input_float(f"{label}[{i}]", vecn[i])
+            changed = changed_iterm or changed   
+    else:
+        for i in range(n):
+            imgui.same_line()  # Keep the next input on the same line
+            changed_iterm, vecn[i] = imgui.input_int(f"{label}[{i}]", vecn[i])
+            changed = changed_iterm or changed   
+    return changed, vecn
+def operate_on_dict(dict_to_operate, key_list, new_value, index=0):
+        """
+        Recursively navigates through a nested dictionary using a list of keys and updates the value at the
+        deepest level specified by these keys.
+
+        :param dict_to_operate: The dictionary to operate on.
+        :param key_list: A list of keys specifying the path to the value to be updated.
+        :param new_value: The new value to be set at the specified path.
+        :param index: The current index in key_list being processed.
+        # Example usage:
+        # Commenting out the call to ensure compliance with instructions.
+        #dict_example = {"key1": {"key2": {"key3": "original_value"}}}
+        #key_list = ["key1", "key2", "key3"]
+        #new_value = "updated_value"
+        #operate_on_dict(dict_example, key_list, new_value)
+        #print(dict_example)
+        """
+        # Check if we've reached the end of the key list
+        if index == len(key_list) - 1:
+            # Update the value
+            dict_to_operate[key_list[index]] = new_value
+            return
+        
+        key = key_list[index]
+        # Check if the current key exists and leads to a dictionary
+        if key in dict_to_operate and isinstance(dict_to_operate[key], dict):
+            # Recurse with the next level of the dictionary and the next index
+            operate_on_dict(dict_to_operate[key], key_list, new_value, index + 1)
+        else:
+            # Handle cases where the path does not lead to a dictionary
+            raise KeyError(f"Key '{key}' does not exist or does not lead to a dictionary at index {index}.")  
+
 valid_customizations = {
-            'float': [{'widget': 'slider_float', 'min': 0.0, 'max': 1.0}, {'widget': 'input_float'}],
-            'int': [{'widget': 'input_int'}, {'widget': 'checkbox'}], # add radio_button in future
-            'vec4': [{'widget': 'color_picker'}, {'widget': 'drag_float4'}],
-            'float_array': [{'widget': 'plot_lines'}],
-            'string': [{'widget': 'input_text'}],
+            'float': [{'widget': 'slider_float', 'min': 0.0, 'max': 1.0}, {'widget': 'input'}],
+            'int': [{'widget': 'input'}, {'widget': 'checkbox'}],
+            'vec3': [{'widget': 'color_picker'}, {'widget': 'input'}],
+            'vec4': [{'widget': 'color_picker'}, {'widget': 'input'}],
+            'ivec3': [{'widget': 'input'},{'widget': 'color_picker'}],
+            'ivec4': [{'widget': 'input'},{'widget': 'color_picker'}],
+            'bool': [{'widget': 'checkbox'}],
+            'str': [{'widget': 'input'}],
+            'ivecn': [{'widget': 'input'}],
+            'vecn': [{'widget': 'input'},{'widget': 'plot_lines'}],
             # Add more types as needed
         }
+
+
+
+def getTypeName(value):
+    if isinstance(value, bool) :
+        return "bool"
+    elif isinstance(value, (list, tuple)) and all(isinstance(x, bool) for x in value):
+        return "bvecn"
+    elif isinstance(value, (list, tuple)) and len(value) == 3 and all(isinstance(x, float) for x in value):
+        return "vec3"
+    if isinstance(value, (list, tuple)) and len(value) == 3 and all(isinstance(x, int) for x in value):
+        return "ivec3"
+    elif isinstance(value, (list, tuple)) and len(value) == 4 and all(isinstance(x, float) for x in value):
+        return "vec4"
+    elif isinstance(value, (list, tuple)) and len(value) == 4 and all(isinstance(x, int) for x in value):
+        return "ivec4"
+    elif isinstance(value, (list, tuple)) and all(isinstance(x, int) for x in value):
+        return "ivecn"
+    elif isinstance(value, (list, tuple)) and all(isinstance(x, float) for x in value):
+        return "vecn"
+    else:
+        return type(value).__name__
+        
+                    
+
+def get_imgui_widget_for_type(Value_type, customization):
+    """
+    Selects and returns the appropriate ImGui widget based on customization type and entry.
+
+    :param customization_type: The type of the customization (e.g., 'float', 'int', 'vec3').
+    :param customization_entry: A dictionary representing a customization entry for the type.
+    :return: A callable representing the corresponding imgui widget for the type.
+    """
+    widget_map_by_type = {
+        'bool': {         
+            'checkbox': imgui.checkbox,
+        },
+        'float': {
+             'input': imgui.input_float,
+            'slider_float': lambda label, value: imgui.slider_float(label, value, customization.get('min') , customization.get('max')),
+        },
+        'int': {
+            'input': imgui.input_int,
+            'checkbox':  imgui.checkbox,
+        },
+         'ivec3': {
+            'input': lambda label, value: imgui.drag_int3(label, *value),
+             
+        },
+        'ivec4': {
+            'input': lambda label, value:  imgui.drag_int3(label, *value), 
+        },
+        'vec3': {  
+            'input': lambda label, value: input_vecn_int_float(label, list(value)) , 
+            'color_picker': lambda label, value:  imgui.color_edit3(label, *value), 
+        },
+        'vec4': {
+             'input': lambda label, value: imgui.input_vec4(label,*value),
+            'color_picker':lambda label, value:  imgui.color_edit4(label, *value), 
+        },
+         'vecn': {  
+            'input': lambda label, value: input_vecn_int_float(label, list(value)) , 
+            'plot_lines': lambda label, value: imgui.plot_lines(label, np.array(value,dtype=np.float32)) , 
+        },
+        'ivecn': {  
+            'input': lambda label, value: input_vecn_int_float(label, list(value)) , 
+        },
+        'str': {
+            'input': lambda label,value:imgui.input_text(label, value, 256),
+        },
+        # add more
+    }
+
+    widget_map = widget_map_by_type.get(Value_type)
+    if widget_map:
+        callable=widget_map.get(customization.get('widget'), None) if customization else None
+        if callable is None:
+            first_key = next(iter(widget_map))
+            callable=widget_map[first_key]
+        return callable
+    print(f"Error: No ImGui widget found for type '{Value_type}' and option '{widget_option}'.")
+    return   imgui.text
+
 
 class ValueGuiCustomization:
     '''ValueGuiCustomization class to store the customization parameters for draw the gui for a value;
@@ -24,7 +162,7 @@ class ValueGuiCustomization:
     def __init__(self,name,value_type,customizationsParamter:Dict[str,Any]):
         self.name = name
         self.value_type = value_type
-        if self.check_customization_parameters(customizationsParamter):
+        if  self.check_customization_parameters(customizationsParamter):
             self.customizationsParamter = customizationsParamter
         else: 
             self.customizationsParamter = None
@@ -32,7 +170,7 @@ class ValueGuiCustomization:
     def valid(self):
         return self.customizationsParamter is not None
     
-    def get_customization(self, value_type)->Dict[str,Any]:
+    def get_customization(self)->Dict[str,Any]:
         return  self.customizationsParamter 
     def get(self,key:str)->Any:
         return self.customizationsParamter[key]
@@ -48,41 +186,7 @@ class ValueGuiCustomization:
         else:
             print(f"Error: Customization parameters for {self.name} of type {self.value_type} are invalid.")
             return False
-def input_vec3(label, vec3):
-    # Simulate a vec3 input using three separate float input fields.
-    # label: The label to display for the vec3 input
-    # vec3: A list or tuple containing three float numbers representing the x, y, z components of the vector
-    changed = False  # Flag to track if there was a change
 
-    # Begin on the same line
-    imgui.text(label)
-    imgui.same_line()
-
-    # X component
-    changed_x, vec3[0] = imgui.input_float(f"##{label}_x", vec3[0])
-    imgui.same_line()  # Keep the next input on the same line
-
-    # Y component
-    changed_y, vec3[1] = imgui.input_float(f"##{label}_y", vec3[1])
-    imgui.same_line()  # Keep the next input on the same line
-
-    # Z component
-    changed_z, vec3[2] = imgui.input_float(f"##{label}_z", vec3[2])
-
-    # If any component was changed, set the changed flag to True
-    if changed_x or changed_y or changed_z:
-        changed = True
-
-    # Return whether there was a change and the updated vector
-    return changed, vec3
-
-def getTypeName(value):
-    if isinstance(value, (list, tuple)) and len(value) == 3:
-        return "vec3"
-    elif isinstance(value, (list, tuple)) and len(value) == 4:
-        return "vec4"
-    else:
-        return type(value).__name__
 
 class Object:
     def __init__(self, name,autoSaveFolderPath = "autosave"):
@@ -94,9 +198,12 @@ class Object:
         self.customizations=[]
         self.actions = {}
         self.drawGui=True
-    def stDrawGui(self,drawGui:bool):
+        
+    def setGuiVisibility(self,drawGui:bool):
         self.drawGui=drawGui
         
+        
+            
     def appendGuiCustomization(self, customization: ValueGuiCustomization):
         if customization.valid():
             self.customizations.append (customization) 
@@ -107,6 +214,8 @@ class Object:
                 return customization
         # If no matching customization is found, return None
         return None
+    
+    
     def draw(self):
         pass  
     def addAction(self, action_name:str, function: callable):
@@ -148,8 +257,13 @@ class Object:
             with open(file_path, 'w') as file:
                 file.write(jsonpickle.encode(self.persistentProperties))
 
-
-    def create_variable(self, name:str, value:any, persistent:bool, default_value=None):
+    def create_variable_gui(self, name:str, value:any, persistent:bool=False, customizationsParamter:Dict[str,Any]=None,default_value=None):
+        self.create_variable(name, value, persistent, default_value)
+        if customizationsParamter is not None:
+            cust=ValueGuiCustomization(name,getTypeName(value),customizationsParamter)
+            self.appendGuiCustomization(cust)
+        
+    def create_variable(self, name:str, value:any, persistent:bool=False, default_value=None):
         # Create a new variable, persistent or non-persistent
         if persistent:            
             if name not in self.persistentPropertyDefaultValues:  # Set default if not exist                
@@ -180,64 +294,46 @@ class Object:
             raise AttributeError(f"'{self.name}' object has no attribute '{name}'")
     def hasValue(self, name:str):
         return name in self.persistentProperties or name in self.nonPersistentProperties
-    
-    def DrawPropertiesInGui(self,propertyMap:dict[str, Any],level=0):        
-            for key, value in propertyMap.items():
-                typeName=getTypeName(value)
+
+
+
+    def DrawPropertiesInGui(self,propertyMap:dict[str, Any],parentNamelist:list=None):        
+       
+        for key, value in propertyMap.items():
+            if isinstance(value, dict):
+                # flag= imgui.TREE_NODE_DEFAULT_OPEN|imgui.TREE_NODE_LEAF if noSonDictionary(value) else imgui.TREE_NODE_DEFAULT_OPEN
+                expanded = imgui.tree_node(key,imgui.TREE_NODE_DEFAULT_OPEN)   
+                if expanded:
+                    parentNamelist=[key] if parentNamelist==None  else parentNamelist+[key]
+                    self.DrawPropertiesInGui(value,parentNamelist=parentNamelist)
+                    imgui.tree_pop() 
+            else:
+                typeName=getTypeName(value)#MAP PYTHON TYPE TO IMGUI TYPE NAME(KEY to get imgui function)
                 cust=self.getGuiCustomization(key,typeName)
-                if isinstance(value, dict):
-                    expanded = imgui.tree_node(key, imgui.TREE_NODE_DEFAULT_OPEN)
-                    if expanded:
-                        self.DrawPropertiesInGui(value,level=level+1)
-                        imgui.tree_pop() if level==0 else None
-                # Check type of value and render the appropriate ImGui widget
-                elif isinstance(value, float):
-                    if  cust is not None and cust.get('widget') == 'slider_float':
-                        changed, new_value = imgui.slider_float(key, value, cust['min'], cust['max'])
-                        if changed:
-                            self.updateValue(key, new_value)                    
-                    elif cust is None or cust.get('widget') == 'input_float' :
-                        changed, new_value = imgui.input_float(key, value)
-                        if changed:
-                            self.updateValue(key, new_value)
-                    else:
-                        print(f"Error: Invalid customization for {key} of type {type(value).__name__}.")      
-                elif isinstance(value, int):
-                    # Integer value, use input int
-                    if  cust is not None and cust.get('widget') == 'checkbox' :
-                        changed, new_value = imgui.checkbox(key, bool(value))
-                        if changed:
-                            self.updateValue(key, new_value)
-                    elif cust is  None or cust.get('widget') == 'input_int':
-                        changed, new_value = imgui.input_int(key, value)
-                        if changed:
-                            self.updateValue(key, new_value)
-                    else:
-                        print(f"Error: Invalid customization for {key} of type {type(value).__name__}.")
-                elif isinstance(value, (list, tuple)) and len(value) == 3:
-                    changed, new_value = input_vec3(key, list(value))
-                    if changed:
-                            self.updateValue(key, new_value)
-                elif isinstance(value, (list, tuple)) and len(value) == 4:
-                    if  cust is not None and cust.get('widget') == 'color_picker': 
-                        changed, new_value = imgui.color_edit4(key, *value)
-                        if changed:
-                            self.updateValue(key, new_value)
-                    elif cust is None or cust.get('widget') == 'drag_float4':
-                        changed, new_value = imgui.drag_float4(f"##{key}", *value)
-                        if changed:
-                            self.updateValue(key, new_value)
-                    else:
-                         print(f"Error: Invalid customization for {key} of type {type(value).__name__}.")
-            
-                elif isinstance(value, str):
-                    buffer_size = 256  # maximum number of characters
-                    input_changed, input_value = imgui.input_text(key, value, buffer_size)
-                    if input_changed:
-                        self.updateValue(key, input_value)
+                callableF= get_imgui_widget_for_type(typeName,cust)
+                if  cust is not None and cust.get('widget')=='plot_lines':
+                    callableF(key,value)  
                 else:
-                    # For other types, use text for now
-                    imgui.text(f"{key}: {value}")
+                    changed, new_value = callableF(key,value)
+                    if changed:
+                        if parentNamelist==None:
+                            self.updateValue(key, new_value)
+                        else:
+                           #parentName is a list of keys to reach the parent dictionary                           
+                            valueDictToOperate=self.getValue(parentNamelist[0]) 
+                            if len(parentNamelist)==1:
+                                valueDictToOperate[key]=new_value                           
+                            else:
+                                operate_on_dict(valueDictToOperate,parentNamelist[1:]+[key],new_value,0)
+                            
+                            
+               
+                       
+                            
+                  
+                        
+           
+        
         
     def DrawActionButtons(self):
         """
@@ -257,7 +353,8 @@ class Object:
             
         
     def DrawGui(self):
-        if imgui.begin(self.name):
+        if self.drawGui :
+            imgui.begin(self.name)
             # Draw persistent properties with appropriate ImGui controls
             self.DrawPropertiesInGui(self.persistentProperties)
             self.DrawPropertiesInGui(self.nonPersistentProperties)
@@ -274,6 +371,8 @@ class Scene(Object):
         self.objects[obj.name]= obj
     def hasObject(self, name):
         return name in self.objects.keys()
+    def getObject(self, name): 
+        return self.objects.get(name, None)    
     def DrawGui(self):
         super().DrawGui()
         for obj in self.objects.values():
@@ -299,6 +398,15 @@ class Scene(Object):
             # Initialize the instance once:
             Object.__init__(cls._instance, name,autoSaveFolderPath=autoSaveFolderPath)            
         return cls._instance
+    
+    def toggle_object_visibility(self,ObjectName:str):
+        """toggle an onbject's visibility in gui 
+
+        Returns:
+            _type_: _description_
+        """        
+        obj=self.getObject(ObjectName)  
+        obj.setGuiVisibility(not obj.drawGui) if obj else None            
     
     
     
