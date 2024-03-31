@@ -5,6 +5,7 @@ import unittest
 import os
 import imgui
 from typing import Dict, Any
+from typeguard import typechecked
 
 def input_vecn_int_float(label, vecn):
     # Simulate a vec3 input using three separate float input fields.
@@ -94,7 +95,43 @@ def getTypeName(value):
         
                     
 
-def get_imgui_widget_for_type(Value_type, customization):
+
+class ValueGuiCustomization:
+    '''ValueGuiCustomization class to store the customization parameters for draw the gui for a value;
+    The usage is to create a ValueGuiCustomization object with "name" "type" and append it to the an Object .
+    The Object's propertie with that name and type will be drawn in the gui with the customization parameters.
+    Mismatch in name or type will make the valueguicustomization get ignored.
+    '''
+    def __init__(self,name,value_type,customizationsParamter:Dict[str,Any]):
+        self.name = name
+        self.value_type = value_type
+        if  self.check_customization_parameters(customizationsParamter):
+            self.customizationsParamter = customizationsParamter
+        else: 
+            self.customizationsParamter = None
+        
+    def valid(self):
+        return self.customizationsParamter is not None
+    
+    def get_customization(self)->Dict[str,Any]:
+        return  self.customizationsParamter 
+    def get(self,key:str)->Any:
+        return self.customizationsParamter[key]
+    
+    def check_customization_parameters(self,customDict:Dict[str,Any]):
+        valid_params = valid_customizations.get(self.value_type, [])        
+        # Check if any of valid customization options match the provided customization parameters
+        for option in valid_params:
+            keys1 = set(option.keys())
+            keys2 = set(customDict.keys())
+            if keys1 == keys2:
+                return True
+        else:
+            print(f"Error: Customization parameters for {self.name} of type {self.value_type} are invalid.")
+            return False
+
+
+def get_imgui_widget_for_type(Value_type:str, customization:ValueGuiCustomization):
     """
     Selects and returns the appropriate ImGui widget based on customization type and entry.
 
@@ -153,43 +190,8 @@ def get_imgui_widget_for_type(Value_type, customization):
     return   imgui.text
 
 
-class ValueGuiCustomization:
-    '''ValueGuiCustomization class to store the customization parameters for draw the gui for a value;
-    The usage is to create a ValueGuiCustomization object with "name" "type" and append it to the an Object .
-    The Object's propertie with that name and type will be drawn in the gui with the customization parameters.
-    Mismatch in name or type will make the valueguicustomization get ignored.
-    '''
-    def __init__(self,name,value_type,customizationsParamter:Dict[str,Any]):
-        self.name = name
-        self.value_type = value_type
-        if  self.check_customization_parameters(customizationsParamter):
-            self.customizationsParamter = customizationsParamter
-        else: 
-            self.customizationsParamter = None
-        
-    def valid(self):
-        return self.customizationsParamter is not None
-    
-    def get_customization(self)->Dict[str,Any]:
-        return  self.customizationsParamter 
-    def get(self,key:str)->Any:
-        return self.customizationsParamter[key]
-    
-    def check_customization_parameters(self,customDict:Dict[str,Any]):
-        valid_params = valid_customizations.get(self.value_type, [])        
-        # Check if any of valid customization options match the provided customization parameters
-        for option in valid_params:
-            keys1 = set(option.keys())
-            keys2 = set(customDict.keys())
-            if keys1 == keys2:
-                return True
-        else:
-            print(f"Error: Customization parameters for {self.name} of type {self.value_type} are invalid.")
-            return False
-
-
 class Object:
-    def __init__(self, name,autoSaveFolderPath = "autosave"):
+    def __init__(self, name:str,autoSaveFolderPath = "autosave"):
         self.name = name
         self.persistentPropertyDefaultValues={}
         self.persistentProperties = {}
@@ -197,17 +199,22 @@ class Object:
         self.autoSaveFolderPath =autoSaveFolderPath
         self.customizations=[]
         self.actions = {}
-        self.drawGui=True
+        self.GuiVisible=True
+        self.renderVisible=False
         
+    @typechecked
     def setGuiVisibility(self,drawGui:bool):
-        self.drawGui=drawGui
+        self.GuiVisible=drawGui
+    @typechecked
+    def setRenderingVisibility(self,renderVisible:bool):
+        self.renderVisible=renderVisible
         
-        
-            
+    @typechecked
     def appendGuiCustomization(self, customization: ValueGuiCustomization):
         if customization.valid():
             self.customizations.append (customization) 
-    def getGuiCustomization(self, name, type_name):
+    @typechecked
+    def getGuiCustomization(self, name:str, type_name:str):
         # Iterate over all customizations and find the one with matching name and type_name
         for customization in self.customizations:
             if customization.name == name and customization.value_type == type_name:
@@ -215,9 +222,13 @@ class Object:
         # If no matching customization is found, return None
         return None
     
+    def render(self):
+        pass
     
     def draw(self):
-        pass  
+        if self.renderVisible:
+            self.render()        
+    @typechecked
     def addAction(self, action_name:str, function: callable):
         # Add a new action to the actions dictionary
         self.actions[action_name] = function
@@ -256,13 +267,15 @@ class Object:
             # Save persistent properties to a file
             with open(file_path, 'w') as file:
                 file.write(jsonpickle.encode(self.persistentProperties))
-
+                
+   
     def create_variable_gui(self, name:str, value:any, persistent:bool=False, customizationsParamter:Dict[str,Any]=None,default_value=None):
         self.create_variable(name, value, persistent, default_value)
         if customizationsParamter is not None:
             cust=ValueGuiCustomization(name,getTypeName(value),customizationsParamter)
             self.appendGuiCustomization(cust)
-        
+            
+    @typechecked
     def create_variable(self, name:str, value:any, persistent:bool=False, default_value=None):
         # Create a new variable, persistent or non-persistent
         if persistent:            
@@ -282,7 +295,7 @@ class Object:
         else:
             # If the attribute is not found, raise AttributeError
             raise AttributeError(f"'{self.name}' object has no attribute '{name}'")
-
+    @typechecked
     def getValue(self, name:str):
         # Override to handle custom property retrieval
         if name in self.persistentProperties:
@@ -292,7 +305,8 @@ class Object:
         else:
             # If the attribute is not found, raise AttributeError
             raise AttributeError(f"'{self.name}' object has no attribute '{name}'")
-    def hasValue(self, name:str):
+    @typechecked
+    def hasValue(self, name:str)->bool:
         return name in self.persistentProperties or name in self.nonPersistentProperties
 
 
@@ -325,16 +339,7 @@ class Object:
                                 valueDictToOperate[key]=new_value                           
                             else:
                                 operate_on_dict(valueDictToOperate,parentNamelist[1:]+[key],new_value,0)
-                            
-                            
-               
-                       
-                            
-                  
-                        
-           
-        
-        
+         
     def DrawActionButtons(self):
         """
         Draw buttons for all actions defined in the provided object.
@@ -348,12 +353,11 @@ class Object:
             if imgui.button(f"{action_name}"):
                 # Execute the associated action
                 self.runAction(action_name,self)
-
-            
-            
-        
-    def DrawGui(self):
-        if self.drawGui :
+     
+    def drawGui(self):
+        """Overwrite this function to change the content get rendered  in the ImGui window.
+        """
+        if self.GuiVisible:
             imgui.begin(self.name)
             # Draw persistent properties with appropriate ImGui controls
             self.DrawPropertiesInGui(self.persistentProperties)
@@ -373,10 +377,10 @@ class Scene(Object):
         return name in self.objects.keys()
     def getObject(self, name): 
         return self.objects.get(name, None)    
-    def DrawGui(self):
-        super().DrawGui()
+    def drawGui(self):
+        super().drawGui()
         for obj in self.objects.values():
-            obj.DrawGui()
+            obj.drawGui()
             
     def draw_all(self):
         for obj in self.objects.values():
