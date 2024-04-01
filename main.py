@@ -8,6 +8,8 @@ import logging
 from Object import *
 from mainCommandUI import MainUICommand
 from EventRegistrar import EventRegistrar
+from train_vector_field import *
+from flowCreator import *
 
 def screen_to_world(x, y, width, height, modelview, projection, viewport):    
     y = height - y  # OpenGL's y axis  is reversed of pygame's y axis
@@ -230,6 +232,32 @@ class Renderable:
             
 
 
+class ActiveField(Object):
+    def __init__(self):
+        super().__init__("ActiveField")
+        self.active_vector_field_name="rotation_four_center"
+        self.pause=False
+        self.create_variable_gui("time",0.0,False, {'widget': 'input'})
+        self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
+
+    def time(self):
+        return self.getValue("time")
+
+    def eventCallBacks(self,event):        
+        time=self.getValue("time")
+        if self.pause==False and  time<2*np.pi:
+            time=time+self.getValue("animationSpeed")
+            self.setValue("time",time)
+        elif self.pause==False:
+            self.pause=True
+
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+                time=0.0 if time>= 2*np.pi and self.pause==True else time
+                self.pause = not self.pause
+                self.setValue("time",time)
+        
+        
+
 
 
                     
@@ -242,7 +270,59 @@ globalImageLoader=ImageLoader()
 
 
         
+def drawVectorGlyph(vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0):
+    """
+    Draw vector glyphs representing a vector field interpolated between two time steps.
 
+    :param vector_field: A VectorField2D object representing the vector field.
+    :param time: The specific time to interpolate the vector field at.
+    :param position: The position where to start drawing the vector field.
+    :param scale: Scale factor for drawing glyphs.
+    """
+    gl.glPushMatrix()  # Save the current matrix state
+    gl.glTranslatef(*position)  # Move to the specified position
+
+    # Calculate the interpolation index
+    time_idx = (time - vector_field.domainMinBoundary[2]) / vector_field.timeInterval
+    lower_idx = int(np.floor(time_idx))
+    upper_idx = int(np.ceil(time_idx))
+    alpha = time_idx - lower_idx
+
+    # Ensure indices are within the bounds of the vector field time steps
+    lower_idx = max(0, min(vector_field.time_steps - 1, lower_idx))
+    upper_idx = max(0, min(vector_field.time_steps - 1, upper_idx))
+
+    # Get the two time slices of the vector field
+    lower_field = vector_field.field[lower_idx].detach().numpy()
+    upper_field = vector_field.field[upper_idx].detach().numpy()
+
+    # Interpolate between the two time slices
+    interpolated_field = (1 - alpha) * lower_field + alpha * upper_field
+
+    for y in range(interpolated_field.shape[0]):
+        for x in range(interpolated_field.shape[1]):
+            vx, vy = interpolated_field[y, x,:]  # Extract the vector components
+            gl.glPushMatrix()  # Save the matrix state
+            posX,posY=x * vector_field.gridInterval[0]+vector_field.domainMinBoundary[0], y * vector_field.gridInterval[1]+vector_field.domainMinBoundary[1]
+            gl.glTranslatef(posX,posY, 0)  # Position the glyph
+            
+            # Calculate the angle of the vector
+            angle = np.arctan2(vy, vx) * 180 / np.pi
+            
+            gl.glRotatef(angle, 0, 0, 1)  # Rotate the glyph to match the vector direction
+            gl.glScalef(scale, scale, 1)  # Scale the glyph
+            
+            # Draw the glyph as a simple line for now
+            gl.glBegin(gl.GL_LINES)
+            gl.glColor3f(1.0, 0.0, 0.0) 
+            gl.glVertex2f(0, 0)
+            gl.glColor3f(0.0, 1.0, 0.0) 
+            gl.glVertex2f(1, 0)  # Draw line in the direction of the vector
+            gl.glEnd()
+       
+            gl.glPopMatrix()  # Restore the matrix state
+    
+    gl.glPopMatrix()  # Restore the original matrix state
     
     
 def main():
@@ -267,29 +347,34 @@ def main():
     lic_texture_data = np.random.rand(100, 100, 3)*128   # Use random data as an example
     lic_texture_data = lic_texture_data.astype('uint8')
     
-    renderable_object = Renderable(lic_texture_data,2,2,-20)
+    # renderable_object = Renderable(lic_texture_data,2,2,-20)
     
     # all the objects in the scene
     scene=Scene("DefaultScene")
     # renderParamterPage=LicParameter("LicParameter")
     camera = Camera(45.0, (0, 0, 5), (0, 0, 0),size[0],size[1])
     eventRegister=EventRegistrar(impl)
-    
-
-    eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
-    eventRegister.register(lambda event: camera.eventCallBacks(event))
-
+    actFieldWidget=ActiveField()
+    scene.add_object(actFieldWidget)
     scene.add_object(MainUICommand("mainCommandUI"))
     scene.add_object(GuiTest())
+
+    # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
+    eventRegister.register(lambda event: camera.eventCallBacks(event))
+    eventRegister.register(lambda event: actFieldWidget.eventCallBacks(event))
+    eventRegister.register(lambda event: scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
+            
+      
+   
     # scene.add_object(renderParamterPage)
     # scene.add_object(camera)
     scene.restore_state_all()
     
     
+    vectorField2d= constant_rotation((16,16),16)
+    resUfield=train_pipeline(vectorField2d)
     clock = pygame.time.Clock()
-    running = True
-    mouse_down=False
-    while running:
+    while eventRegister.running:
         eventRegister.handle_events()
         # Rendering
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -303,14 +388,16 @@ def main():
         imgui.end_frame()
         
         scene.draw_all()
-        renderable_object.draw()
+
         impl.render(imgui.get_draw_data())
+
+        drawVectorGlyph(resUfield, actFieldWidget.time())
 
         pygame.display.flip()
         pygame.time.wait(10)# Limit to 60 frames per second
      
      
-    scene.save_state()
+    # scene.save_state_all()
     impl.shutdown()
     pygame.quit()
 

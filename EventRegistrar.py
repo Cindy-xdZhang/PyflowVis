@@ -4,6 +4,7 @@ class EventRegistrar:
     def __init__(self,imgui_impl):
         self.event_actions = []
         self.imgui_impl=imgui_impl
+        self.running=True
       
 
     def register(self,  action):
@@ -22,7 +23,7 @@ class EventRegistrar:
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
+                self.running = False
             elif event.type == pygame.VIDEORESIZE:
                 # Update the window size
                 screen = pygame.display.set_mode((event.w, event.h), pygame.DOUBLEBUF | pygame.OPENGL | pygame.RESIZABLE)
@@ -30,7 +31,10 @@ class EventRegistrar:
             self.handle_register_event(event)
             # Pass the pygame events to the ImGui Pygame renderer if we need imgui react(map pygame key to ImGui key etc.)
             self.imgui_impl.process_event(event) 
-    
+      
+    def running(self)->bool:
+        return self.running
+
 if __name__ == '__main__':
     import unittest
     from unittest.mock import MagicMock, patch

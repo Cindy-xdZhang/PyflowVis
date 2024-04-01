@@ -410,7 +410,9 @@ class Scene(Object):
             _type_: _description_
         """        
         obj=self.getObject(ObjectName)  
-        obj.setGuiVisibility(not obj.drawGui) if obj else None            
+        obj.setGuiVisibility(not obj.drawGui) if obj else None     
+        
+
     
     
     
