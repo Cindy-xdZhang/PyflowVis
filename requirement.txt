@@ -3,3 +3,7 @@ numpy
 imgui
 pyopengl
 pygame
+numexpr
+typeguard
+jsonpickle
+yaml

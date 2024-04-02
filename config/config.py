@@ -6,7 +6,20 @@ import numpy as np
 
 def load_config(path):
     with open(path, 'r') as file:
-        return yaml.safe_load(file)
+        args = yaml.safe_load(file)
+    # ==> Device
+    num_gpus = torch.cuda.device_count()
+    args['num_gpus'] = num_gpus
+    device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
+    args['device'] = device
+     # ==> Logger
+    set_logger(result_dir)
+    logging.info(args)
+    if  args['wandb']==True:
+        # wandb init
+        pass
+    return args
+    
 
 
 def test_yaml_config_loading():

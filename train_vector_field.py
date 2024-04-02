@@ -19,15 +19,16 @@ from VectorField2d import VectorField2D
 
 
 
-def train_pipeline(INputFieldV):
+def train_pipeline(INputFieldV,args):
 
     time_steps,Ydim,Xdim = INputFieldV.time_steps,INputFieldV.Ydim,INputFieldV.Xdim
     # Create an instance of VectorField2D
     vector_field = VectorField2D(Xdim, Ydim, time_steps)
-
+    vector_field.to(args['device'])
+    INputFieldV.to(args['device'])
     # Training setup
-    epochs = 5000
-    optimizer = torch.optim.Adam(vector_field.parameters(), lr=0.005)
+    epochs = args["epochs"]
+    optimizer = torch.optim.Adam(vector_field.parameters(), lr=0.1)
     
     # Training loop
     for epoch in range(epochs):
@@ -39,7 +40,8 @@ def train_pipeline(INputFieldV):
         if epoch % 50 == 0:
             print(f'Epoch {epoch+1}, Loss: {loss.item()}')
 
-    
+    vector_field.to('cpu')
+    INputFieldV.to('cpu')
     return vector_field
 
 

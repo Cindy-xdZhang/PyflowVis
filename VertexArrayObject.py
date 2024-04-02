@@ -1,6 +1,6 @@
 
 from OpenGL import GL as gl
-from Object import Object
+from GuiObjcts.Object import Object
     
 
 class VertexArrayObject(Object):
@@ -48,6 +48,7 @@ class VertexArrayObject(Object):
         gl.glDrawElements(gl.GL_TRIANGLES, len(self.indices), gl.GL_UNSIGNED_INT, None)
         # Unbind VAO
         gl.glBindVertexArray(0)
+
     def createPlane(self, gridSize, domainSize):
         self.vertices.clear()  # Clear any existing vertices
         self.indices.clear()  # Clear any existing indices

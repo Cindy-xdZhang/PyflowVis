@@ -1,5 +1,5 @@
 import scipy.ndimage as ndimage
-from Object import Object
+from assets.noise.GuiObjcts.Object import Object
 
 def lic_noise(size):
     """

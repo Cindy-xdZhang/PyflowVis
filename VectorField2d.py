@@ -24,7 +24,7 @@ class VectorFieldLinearOperation():
     @staticmethod
     def compute_killing_energy(v):
         # Calculate the Killing energy for the vector field
-        energy = torch.tensor(0.0)
+        energy =None
         energyTimeSlice = []
         for t in range(v.time_steps):
             field_t = v.field[t]
@@ -33,21 +33,22 @@ class VectorFieldLinearOperation():
             # let field_Xminus = torch.roll(field_t, shifts=-1, dims=1) then at position(x,y) matrix  field_Xminus 
             # it is the  vector2d U(x+1,y), so the difference  is the forward difference in x direction.
             # but at the last column the difference is between the last column and the first column.
-            dx_forward_difference = torch.roll(field_t, shifts=-1, dims=1) - field_t
-            dx_forward_difference[:, -1] = 0
-            dx_backward_difference = field_t-torch.roll(field_t, shifts=1, dims=1) 
-            dx_backward_difference[:, 0] = 0
+            dx_forward_difference = torch.roll(field_t, shifts=-1, dims=1) - field_t#Ux+1-Ux
+            dx_forward_difference[:, -1,:] = 0#last column is the difference between the last column and the first column
+            dx_backward_difference = field_t-torch.roll(field_t, shifts=1, dims=1) #Ux-Ux-1
+            dx_backward_difference[:, 0,:] = 0 #first column is the difference between the first column and the last column
             dudx = (dx_forward_difference + dx_backward_difference) / (2*v.gridInterval[0])
 
-            dy_forward_difference = torch.roll(field_t, shifts=-1, dims=0) - field_t
-            dy_forward_difference[:, -1] = 0
-            dy_backward_difference = field_t-torch.roll(field_t, shifts=1, dims=0) 
-            dy_backward_difference[:, 0] = 0
-            dudy = (dx_forward_difference + dx_backward_difference) / (2*v.gridInterval[1])
-            dudy[:, -1] *= 2.0            
-            dudy[:, -1] *= 2.0
-            dudx[:, 0] *= 2.0
-            dudx[:, 0] *= 2.0
+            dy_forward_difference = torch.roll(field_t, shifts=-1, dims=0) - field_t#Uy+1-Uy
+            dy_forward_difference[-1,:,:] = 0
+            dy_backward_difference = field_t-torch.roll(field_t, shifts=1, dims=0) #Uy-Uy-1
+            dy_backward_difference[0,:,:] = 0
+
+            dudy = (dy_forward_difference + dy_backward_difference) / (2*v.gridInterval[1])
+            dudx[:, -1,:] *= 2.0            
+            dudx[:, -1,:] *= 2.0
+            dudy[-1, :,:] *= 2.0
+            dudy[0, :,:] *= 2.0
 
             
             # Correcting dimensions to match for addition
@@ -58,9 +59,10 @@ class VectorFieldLinearOperation():
             transposed_gradient = gradient.permute(0, 1, 3, 2)  # Adjust dimensions as  transpose operation
 
             # Ensure dimensions match and compute the Killing energy
-            killing_energy = (gradient + transposed_gradient) ** 2
+            nablaUPlus_nablauT=gradient + transposed_gradient
+            killing_energy = (nablaUPlus_nablauT) ** 2
             Ke=killing_energy.sum()
-            energy += Ke
+            energy =Ke if energy is None else energy+Ke
             # energyTimeSlice.append(Ke)
 
         return energy 

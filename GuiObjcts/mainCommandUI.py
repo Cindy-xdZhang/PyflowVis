@@ -1,12 +1,61 @@
 import imgui
-from Object import Object
+from .Object import Object
+import logging
+
 imguiStackMargin = 10
 leftWindowsWidth = 305
 # lastWindowHeightPolyscope = 200
 # lastWindowHeightUser = 200
 # rightWindowsWidth = 500
 
+class LoggingWidget(Object):
+    _instance = None
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(LoggingWidget, cls).__new__(cls)
+        return cls._instance
 
+    def __init__(self, name):
+        super().__init__(name)
+        self.loggerOptionSet =  ["wandb","logging"]
+        self.loggingLevelSet=  ["DEBUG","INFO","WARNING","ERROR","CRITICAL"]
+        self.create_variable_gui("logger", self.loggerOptionSet, False)
+        self.create_variable_gui("loggingLevel",    self.loggingLevelSet, False)
+        self.updateOptionValue("logger", "logging")
+        self.updateOptionValue("loggingLevel", "DEBUG")
+
+    def updateOptionValue(self,key,value):
+        super().updateOptionValue(key,value)
+        if key=="loggingLevel":            
+            if value=="DEBUG":
+                logging.getLogger().setLevel(level=logging.DEBUG)
+            elif value=="INFO":
+                logging.getLogger().setLevel(level=logging.INFO)
+            elif value=="WARNING":
+                logging.getLogger().setLevel(level=logging.WARNING)
+            elif value=="ERROR":
+                logging.getLogger().setLevel(level=logging.ERROR)
+            elif value=="CRITICAL":
+                logging.getLogger().setLevel(level=logging.CRITICAL)
+
+
+    def debug(self, *args):    
+        logging.debug(*args)
+    
+    def info(self, *args):    
+        logging.info(*args)
+
+    def warning(self, *args):    
+        logging.warning(*args)    
+    def error(self, *args):    
+        logging.error(*args)    
+
+    def critical(self, *args):    
+        logging.critical(*args)
+        
+         
+def getlogger() -> LoggingWidget:
+    return LoggingWidget("Logger")
 
 class MainUICommand(Object):
    
@@ -15,6 +64,7 @@ class MainUICommand(Object):
         self.screenshotExtension = ".png"
         self.screenshotTransparency = False
         self.posX,self.posY=None,None
+        self.loggingWidget=getlogger()
             
         
         # self.pick=None      
@@ -93,10 +143,16 @@ class MainUICommand(Object):
             imgui.text_unformatted("     that element will be shown on the right. Use [right click]")
             imgui.text_unformatted("     to clear the selection.")
             imgui.end()
+   
+        #   draw logger
+        if imgui.tree_node("logger", imgui.TREE_NODE_DEFAULT_OPEN):
+            self.loggingWidget.DrawPropertiesInGui(self.loggingWidget.persistentProperties)
+            self.loggingWidget.DrawPropertiesInGui(self.loggingWidget.nonPersistentProperties)
+            imgui.tree_pop()
+
         #   fps
         io = imgui.get_io()
         fps = io.framerate
         ms_per_frame = 1000.0 / fps if fps != 0 else 0.0
         imgui.text(f"{ms_per_frame:.1f} ms/frame ({fps:.1f} FPS)")
-
         imgui.end()

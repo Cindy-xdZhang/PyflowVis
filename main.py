@@ -1,19 +1,37 @@
 import pygame
+import OpenGL.GL as gl
 from OpenGL.GL import *
 from OpenGL.GLU import *
 import imgui
 from imgui.integrations.pygame import PygameRenderer
 import numpy as np
 import logging
-from Object import *
-from mainCommandUI import MainUICommand
+from GuiObjcts  import *
 from EventRegistrar import EventRegistrar
 from train_vector_field import *
 from flowCreator import *
+from functools import wraps
 
+
+def draw_on_dirty(func):
+    """Decorator to skip drawing if the parameters have not changed.(wip)"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not hasattr(wrapper, "last_call_signature"):
+            wrapper.last_call_signature = None
+
+        current_call_signature = (args, tuple(sorted(kwargs.items())))
+        
+        if current_call_signature == wrapper.last_call_signature:
+            print("Skipping drawing, parameters have not changed.")
+            return
+        else:
+            wrapper.last_call_signature = current_call_signature
+            return f
+        
 def screen_to_world(x, y, width, height, modelview, projection, viewport):    
     y = height - y  # OpenGL's y axis  is reversed of pygame's y axis
-    z = glReadPixels(x, y, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT)
+    z = gl.glReadPixels(x, y, 1, 1, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT)
     return gluUnProject(x, y, z, modelview, projection, viewport)
 
 class GuiTest(Object):
@@ -49,132 +67,6 @@ class GuiTest(Object):
    
    
         
- 
-
-
-class Camera(Object):
-    def __init__(self, fov, position, target,width, height):
-        super().__init__("Camera")
-        self.fov = fov
-        # self.position = position
-        self.init_position = position
-        self.target = target
-        self.width = width
-        self.height = height
-        self.last_mouse_pos = None
-        self.mouse_down = False
-        self.rotation_matrix = np.eye(4)  # Initialize as identity matrix for rotation
-        self.create_variable("position",position,False)
-        
-        
-        self.addAction("reset position", lambda object: object.resetCamera() )
-    def resetCamera(self):
-        self.position = self.init_position
-        self.rotation_matrix = np.eye(4)
-        self.fov = 45.0
-    def update_windowSize(self, width, height):
-        """Update the perspective projection based on new width and height."""
-        self.width = width
-        self.height = height
-    
-
-    def apply_projection(self):
-        """Apply the perspective projection."""
-        width= self.width 
-        height= self.height
-        aspect_ratio = width / height
-        glMatrixMode(GL_PROJECTION)
-        glLoadIdentity()
-        gluPerspective(self.fov, aspect_ratio, 0.1, 200.0)
-        glMatrixMode(GL_MODELVIEW)
-        
-
-
-    def apply_view(self):
-        """Apply the camera view."""
-        glLoadIdentity()
-        position=list(self.getValue("position")) 
-        position.append(1)
-        positionNew = np.dot( self.rotation_matrix, np.array(position) ) [:3]
-        gluLookAt(
-            *positionNew,  # Camera position
-            *self.target,    # Look-at target
-            0.0, 1.0, 0.0    # Up vector
-        )
-        
-    def handle_mouse_move(self, x, y,up=False):
-        """Handle the mouse movement to rotate the camera around the target."""
-        if up==True:
-            self.last_mouse_pos = None
-            return
-        if self.last_mouse_pos is None:
-            self.last_mouse_pos = (x, y)
-            return
-
-        dx, dy = x - self.last_mouse_pos[0], y - self.last_mouse_pos[1]
-        self.last_mouse_pos = (x, y)
-
-        # Convert mouse movement to rotation angle
-        sensitivity = 0.0025  # Adjust this value based on your preference
-        angle_x = dy * sensitivity
-        angle_y = dx * sensitivity
-
-        # Update rotation_matrix based on mouse movement
-        rotation_x = np.array([
-            [1, 0, 0, 0],
-            [0, np.cos(angle_x), -np.sin(angle_x), 0],
-            [0, np.sin(angle_x), np.cos(angle_x), 0],
-            [0, 0, 0, 1]
-        ])
-        
-        rotation_y = np.array([
-            [np.cos(angle_y), 0, np.sin(angle_y), 0],
-            [0, 1, 0, 0],
-            [-np.sin(angle_y), 0, np.cos(angle_y), 0],
-            [0, 0, 0, 1]
-        ])
-
-        # Apply the rotations
-        self.rotation_matrix = np.dot(rotation_y, np.dot(rotation_x, self.rotation_matrix))
-    
-
-
-    def zoom(self, direction):
-        """Zoom the camera in/out."""
-        old_fov = self.fov
-        if direction == 'in' and self.fov > 10:
-            self.fov -= 0.50
-            logging.debug(f"Zoom in: FOV changed from {old_fov} to {self.fov}")
-        elif direction == 'out' and self.fov < 120:
-            self.fov += 0.50
-            logging.debug(f"Zoom in: FOV changed from {old_fov} to {self.fov}")
-            
-      
-    def eventCallBacks(self,event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-               # Zoom in
-            if event.button == 4:
-                self.zoom('in')
-            # Zoom out
-            elif event.button == 5:
-                self.zoom('out')
-            elif event.button == 1:  # Left mouse button
-                self.mouse_down = True
-        elif event.type == pygame.MOUSEMOTION and self.mouse_down and not(imgui.is_any_item_hovered() or imgui.is_any_item_active()):  # Only rotate when the left button is down
-            x, y = event.pos  # Use relative motion for smoother rotation
-            self.handle_mouse_move(x, y)
-        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:  # Left mouse button
-            self.mouse_down = False
-            x, y = event.pos  # Use relative motion for smoother rotation
-            self.handle_mouse_move(x, y,up=True)
-        elif event.type == pygame.VIDEORESIZE:
-            self.update_windowSize(event.w, event.h)
-       
-            
-                
-
-
-
 
 
 
@@ -232,34 +124,6 @@ class Renderable:
             
 
 
-class ActiveField(Object):
-    def __init__(self):
-        super().__init__("ActiveField")
-        self.active_vector_field_name="rotation_four_center"
-        self.pause=False
-        self.create_variable_gui("time",0.0,False, {'widget': 'input'})
-        self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
-
-    def time(self):
-        return self.getValue("time")
-
-    def eventCallBacks(self,event):        
-        time=self.getValue("time")
-        if self.pause==False and  time<2*np.pi:
-            time=time+self.getValue("animationSpeed")
-            self.setValue("time",time)
-        elif self.pause==False:
-            self.pause=True
-
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
-                time=0.0 if time>= 2*np.pi and self.pause==True else time
-                self.pause = not self.pause
-                self.setValue("time",time)
-        
-        
-
-
-
                     
                     
 
@@ -269,7 +133,9 @@ from ImageLoader import ImageLoader
 globalImageLoader=ImageLoader()
 
 
-        
+
+
+
 def drawVectorGlyph(vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0):
     """
     Draw vector glyphs representing a vector field interpolated between two time steps.
@@ -279,6 +145,8 @@ def drawVectorGlyph(vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0
     :param position: The position where to start drawing the vector field.
     :param scale: Scale factor for drawing glyphs.
     """
+    if vector_field is None:
+        return
     gl.glPushMatrix()  # Save the current matrix state
     gl.glTranslatef(*position)  # Move to the specified position
 
@@ -317,16 +185,17 @@ def drawVectorGlyph(vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0
             gl.glColor3f(1.0, 0.0, 0.0) 
             gl.glVertex2f(0, 0)
             gl.glColor3f(0.0, 1.0, 0.0) 
-            gl.glVertex2f(1, 0)  # Draw line in the direction of the vector
+            gl.glVertex2f(0.1, 0)  # Draw line in the direction of the vector
             gl.glEnd()
-       
+    
             gl.glPopMatrix()  # Restore the matrix state
     
     gl.glPopMatrix()  # Restore the original matrix state
-    
-    
+ 
+  
+
 def main():
-    pygame.init()
+    pygame  .init()
     size = (800, 600)
     pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE)
     # Configure logging to display all messages
@@ -334,9 +203,9 @@ def main():
 
 
     # Set up OpenGL context
-    glEnable(GL_DEPTH_TEST)
-    glEnable(GL_TEXTURE_2D)  # Enable texture mapping
-    glClearColor(0.1, 0.1, 0.1, 1)
+    gl.glEnable(gl.GL_DEPTH_TEST)
+    gl.glEnable(gl.GL_TEXTURE_2D)  # Enable texture mapping
+    gl.glClearColor(0.1, 0.1, 0.1, 1)
 
     # Setup ImGui context and the pygame renderer for ImGui
     imgui.create_context()
@@ -369,15 +238,22 @@ def main():
     # scene.add_object(renderParamterPage)
     # scene.add_object(camera)
     scene.restore_state_all()
+    args={}
+    # device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
+    device=torch.device("cpu")
+    args['device'] = device    
+    args["epochs"]=5
     
-    
-    vectorField2d= constant_rotation((16,16),16)
-    resUfield=train_pipeline(vectorField2d)
+    vectorField2d= rotation_four_center((16,16),16)
+    resUfield=train_pipeline(vectorField2d,args)
+    actFieldWidget.insertField("rfc",vectorField2d)
+    actFieldWidget.insertField("Result field",resUfield)
+
     clock = pygame.time.Clock()
     while eventRegister.running:
         eventRegister.handle_events()
         # Rendering
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         camera.apply_projection()
         camera.apply_view()
         
@@ -391,7 +267,7 @@ def main():
 
         impl.render(imgui.get_draw_data())
 
-        drawVectorGlyph(resUfield, actFieldWidget.time())
+        drawVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
 
         pygame.display.flip()
         pygame.time.wait(10)# Limit to 60 frames per second

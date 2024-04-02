@@ -7,6 +7,7 @@ import imgui
 from typing import Dict, Any
 from typeguard import typechecked
 
+
 def input_vecn_int_float(label, vecn):
     # Simulate a vec3 input using three separate float input fields.
     # label: The label to display for the vec3 input
@@ -68,12 +69,13 @@ valid_customizations = {
             'str': [{'widget': 'input'}],
             'ivecn': [{'widget': 'input'}],
             'vecn': [{'widget': 'input'},{'widget': 'plot_lines'}],
+            'options':[{'widget': 'combo'}]
             # Add more types as needed
         }
 
 
 
-def getTypeName(value):
+def getTypeName(value) -> Any | str:
     if isinstance(value, bool) :
         return "bool"
     elif isinstance(value, (list, tuple)) and all(isinstance(x, bool) for x in value):
@@ -90,11 +92,25 @@ def getTypeName(value):
         return "ivecn"
     elif isinstance(value, (list, tuple)) and all(isinstance(x, float) for x in value):
         return "vecn"
+    elif isinstance(value, list)  and all(isinstance(x, str) for x in value):
+        return "options"
     else:
         return type(value).__name__
         
                     
-
+def draw_combo_options(label:str, x_list:list,current_selection_i:str):
+    # Draw a combo box with the provided options and return the selected index
+    current_selection = current_selection_i if current_selection_i else x_list[0]
+    clicked=False
+    if current_selection is not None and imgui.begin_combo(label, current_selection):
+        for x in x_list:
+            clicked_this, _ = imgui.selectable(x, x == current_selection)
+            if clicked_this:
+                current_selection = x
+                clicked=True
+        imgui.end_combo()
+    
+    return clicked, current_selection
 
 class ValueGuiCustomization:
     '''ValueGuiCustomization class to store the customization parameters for draw the gui for a value;
@@ -131,7 +147,7 @@ class ValueGuiCustomization:
             return False
 
 
-def get_imgui_widget_for_type(Value_type:str, customization:ValueGuiCustomization):
+def get_imgui_widget_for_type(Value_type:str, customization:ValueGuiCustomization=None):
     """
     Selects and returns the appropriate ImGui widget based on customization type and entry.
 
@@ -176,6 +192,9 @@ def get_imgui_widget_for_type(Value_type:str, customization:ValueGuiCustomizatio
         'str': {
             'input': lambda label,value:imgui.input_text(label, value, 256),
         },
+        'options': {
+            'combo': lambda label,value_list,current_selection:draw_combo_options(label, value_list, current_selection)
+        },
         # add more
     }
 
@@ -186,7 +205,7 @@ def get_imgui_widget_for_type(Value_type:str, customization:ValueGuiCustomizatio
             first_key = next(iter(widget_map))
             callable=widget_map[first_key]
         return callable
-    print(f"Error: No ImGui widget found for type '{Value_type}' and option '{widget_option}'.")
+    print(f"Error: No ImGui widget found for  '{customization.value_type}' '{customization.name}' .")
     return   imgui.text
 
 
@@ -199,6 +218,7 @@ class Object:
         self.autoSaveFolderPath =autoSaveFolderPath
         self.customizations=[]
         self.actions = {}
+        self.optionValues = {}
         self.GuiVisible=True
         self.renderVisible=False
         
@@ -269,14 +289,14 @@ class Object:
                 file.write(jsonpickle.encode(self.persistentProperties))
                 
    
-    def create_variable_gui(self, name:str, value:any, persistent:bool=False, customizationsParamter:Dict[str,Any]=None,default_value=None):
+    def create_variable_gui(self, name:str, value:any, persistent:bool=False, customizationsParamter:Dict[str,Any]=None,default_value=None) -> None:
         self.create_variable(name, value, persistent, default_value)
         if customizationsParamter is not None:
             cust=ValueGuiCustomization(name,getTypeName(value),customizationsParamter)
             self.appendGuiCustomization(cust)
             
     @typechecked
-    def create_variable(self, name:str, value:any, persistent:bool=False, default_value=None):
+    def create_variable(self, name:str, value:any, persistent:bool=False, default_value=None) -> None:
         # Create a new variable, persistent or non-persistent
         if persistent:            
             if name not in self.persistentPropertyDefaultValues:  # Set default if not exist                
@@ -286,11 +306,21 @@ class Object:
             self.nonPersistentProperties[name] = value
     def setValue(self, name:str, value):
         self.updateValue(name, value)
+    def getOptionValue(self, name:str)->str|None:
+            return self.optionValues[name]  if name in self.optionValues else None
+
+    def updateOptionValue(self, name:str, value) -> None:
+         self.optionValues[name]=value
+
+
     def updateValue(self, name:str, value):
+  
         # Override to catch properties being set directly
         if name in self.persistentProperties:
+            assert(type(value)==type(self.persistentProperties[name]))
             self.persistentProperties[name] = value            
         elif name in self.nonPersistentProperties:
+            assert(type(value)==type(self.nonPersistentProperties[name]))
             self.nonPersistentProperties[name] = value 
         else:
             # If the attribute is not found, raise AttributeError
@@ -311,9 +341,10 @@ class Object:
 
 
 
-    def DrawPropertiesInGui(self,propertyMap:dict[str, Any],parentNamelist:list=None):        
+    def DrawPropertiesInGui(self,propertyMap:dict[str, Any],parentNamelist:list=None) -> None:        
        
         for key, value in propertyMap.items():
+            typeName=getTypeName(value)#MAP PYTHON TYPE TO IMGUI TYPE NAME(KEY to get imgui function)
             if isinstance(value, dict):
                 # flag= imgui.TREE_NODE_DEFAULT_OPEN|imgui.TREE_NODE_LEAF if noSonDictionary(value) else imgui.TREE_NODE_DEFAULT_OPEN
                 expanded = imgui.tree_node(key,imgui.TREE_NODE_DEFAULT_OPEN)   
@@ -321,8 +352,12 @@ class Object:
                     parentNamelist=[key] if parentNamelist==None  else parentNamelist+[key]
                     self.DrawPropertiesInGui(value,parentNamelist=parentNamelist)
                     imgui.tree_pop() 
+            elif  typeName=="options": 
+                    callableF= get_imgui_widget_for_type(typeName)
+                    changed, new_value = callableF(key,value,self.getOptionValue(key))
+                    if changed:
+                        self.updateOptionValue(key, new_value)
             else:
-                typeName=getTypeName(value)#MAP PYTHON TYPE TO IMGUI TYPE NAME(KEY to get imgui function)
                 cust=self.getGuiCustomization(key,typeName)
                 callableF= get_imgui_widget_for_type(typeName,cust)
                 if  cust is not None and cust.get('widget')=='plot_lines':
@@ -335,13 +370,10 @@ class Object:
                         else:
                            #parentName is a list of keys to reach the parent dictionary                           
                             valueDictToOperate=self.getValue(parentNamelist[0]) 
-                            if len(parentNamelist)==1:
-                                valueDictToOperate[key]=new_value                           
-                            else:
-                                operate_on_dict(valueDictToOperate,parentNamelist[1:]+[key],new_value,0)
+                            operate_on_dict(valueDictToOperate,parentNamelist[1:]+[key],new_value,0)
          
-    def DrawActionButtons(self):
-        """
+    def DrawActionButtons(self) -> None:
+        """        
         Draw buttons for all actions defined in the provided object.
         When a button is clicked, the corresponding action is executed.
 
