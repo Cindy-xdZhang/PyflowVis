@@ -11,7 +11,7 @@ from EventRegistrar import EventRegistrar
 from train_vector_field import *
 from flowCreator import *
 from functools import wraps
-
+from VertexArrayObject import *
 
 def draw_on_dirty(func):
     """Decorator to skip drawing if the parameters have not changed.(wip)"""
@@ -227,7 +227,7 @@ def main():
     scene.add_object(actFieldWidget)
     scene.add_object(MainUICommand("mainCommandUI"))
     scene.add_object(GuiTest())
-
+    scene.add_object(camera)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
     eventRegister.register(lambda event: camera.eventCallBacks(event))
     eventRegister.register(lambda event: actFieldWidget.eventCallBacks(event))
@@ -244,10 +244,15 @@ def main():
     args['device'] = device    
     args["epochs"]=5
     
-    vectorField2d= rotation_four_center((16,16),16)
-    resUfield=train_pipeline(vectorField2d,args)
-    actFieldWidget.insertField("rfc",vectorField2d)
-    actFieldWidget.insertField("Result field",resUfield)
+    # vectorField2d= rotation_four_center((16,16),16)
+    # resUfield=train_pipeline(vectorField2d,args)
+    # actFieldWidget.insertField("rfc",vectorField2d)
+    # actFieldWidget.insertField("Result field",resUfield)
+    plane=VertexArrayObject("plane")
+    plane.setGuiVisibility(False)
+    vertices, indices, textures= createPlane([32,32],[-2.0,-2.0,2.0,2.0])
+    plane.appendVertexGeometry(vertices, indices, textures)
+    scene.add_object(plane)
 
     clock = pygame.time.Clock()
     while eventRegister.running:
@@ -264,6 +269,7 @@ def main():
         imgui.end_frame()
         
         scene.draw_all()
+        
 
         impl.render(imgui.get_draw_data())
 

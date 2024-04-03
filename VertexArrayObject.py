@@ -1,45 +1,69 @@
 
 from OpenGL import GL as gl
 from GuiObjcts.Object import Object
-    
+import numpy as np    
 
 class VertexArrayObject(Object):
-    def __init__(self):
+    def __init__(self,name):
+        super().__init__(name)
         # Create a new VAO and bind it
         self.vao_id = gl.glGenVertexArrays(1)
-        gl.glBindVertexArray(self.vao_id)
 
         # Initialize lists to store vertex and element data
-        self.vertices = []
+        self.vertex_geometry  = []
         self.indices = []
+        self.vertex_tex_coords  = []
 
         # Create placeholders for VBO and EBO
-        self.vbo_id = gl.glGenBuffers(1)
+        self.vbo_ids = gl.glGenBuffers(2)#vertex buffer and texture buffer
         self.ebo_id = gl.glGenBuffers(1)
+        self.init()
 
-    def appendVertexGeometry(self, vertex_data, index_data):
-        # Append new vertex and index data
-        self.vertices.extend(vertex_data)
-        self.indices.extend(index_data)
-
-    def commit(self):
-        # Bind VAO
+    def init(self):
         gl.glBindVertexArray(self.vao_id)
-
-        # Bind and set VBO
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_id)
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, np.array(self.vertices, dtype=np.float32), gl.GL_STATIC_DRAW)
-
-        # Bind and set EBO
+        # Bind element buffer object
         gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo_id)
-        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, np.array(self.indices, dtype=np.uint32), gl.GL_STATIC_DRAW)
 
-        # Specify the layout of the vertex data
-        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 6 * 4, None)
+        # Bind VBO for geometry (attribute 0)
         gl.glEnableVertexAttribArray(0)
-        
-        # Unbind VAO
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_ids[0])
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 0, None)
+
+        # Bind VBO for texture coordinates (attribute 1)
+        gl.glEnableVertexAttribArray(1)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_ids[1])
+        gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, 0, None)
+
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         gl.glBindVertexArray(0)
+
+    def appendVertexGeometry(self, vertex_data, index_data,texture_date):
+        # Append new vertex and index data
+        self.appendVertexGeometryNoCommit(vertex_data, index_data,texture_date)
+        self.commit()
+
+    def appendVertexGeometryNoCommit(self, vertex_data, index_data,texture_date):
+        # Append new vertex and index data
+        self.vertex_geometry.extend(vertex_data)
+        self.indices.extend(index_data)
+        self.vertex_tex_coords .extend(texture_date)
+
+    def commit(self) -> None:
+        vertex_geometry = np.array(self.vertex_geometry, dtype=np.float32)
+        vertex_tex_coords = np.array(self.vertex_tex_coords, dtype=np.float32)
+        indices = np.array(self.indices, dtype=np.uint32)
+
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_ids[0])
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertex_geometry.nbytes, vertex_geometry, gl.GL_STATIC_DRAW)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_ids[1])
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertex_tex_coords.nbytes, vertex_tex_coords, gl.GL_STATIC_DRAW)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo_id)
+        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, gl.GL_STATIC_DRAW)
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
 
     def draw(self):
         # Bind VAO
@@ -49,31 +73,55 @@ class VertexArrayObject(Object):
         # Unbind VAO
         gl.glBindVertexArray(0)
 
-    def createPlane(self, gridSize, domainSize):
-        self.vertices.clear()  # Clear any existing vertices
-        self.indices.clear()  # Clear any existing indices
-        
-        dx = domainSize[0] / gridSize[0]  # Horizontal space between vertices
-        dy = domainSize[1] / gridSize[1]  # Vertical space between vertices
 
-        # Generate vertices
-        for y in range(gridSize[1] + 1):
-            for x in range(gridSize[0] + 1):
-                # Vertex coordinates
-                vx = x * dx - domainSize[0] / 2  # Shift so that the center of the plane is at (0,0)
-                vy = y * dy - domainSize[1] / 2
-                # Texture coordinates
-                tx = x / gridSize[0]
-                ty = y / gridSize[1]
-                self.vertices.extend([vx, vy, tx, ty])
 
-        # Generate indices for the grid cells
-        for y in range(gridSize[1]):
-            for x in range(gridSize[0]):
-                # Calculate index of the square's first vertex
-                start = y * (gridSize[0] + 1) + x
-                self.indices.extend([
-                    start, start + 1, start + gridSize[0] + 1,
-                    start + 1, start + gridSize[0] + 2, start + gridSize[0] + 1
-                ])
+def createPlane(gridSize, domainSize) -> [list, list, list]:
+    """
+    Generate a grid of vertices, indices, and texture coordinates for a plane.
+
+    Args:
+        gridSize (list): A list of integers [Xdim, Ydim] representing the number of grid cells in the x and y directions.
+        domainSize (list): A list of floats [Xmin, Ymin, Xmax, Ymax] representing the domain size.
+
+    Returns:
+        list: A list of vertex data in the format [x, y, z, u, v] where (x, y, z) are the vertex coordinates and (u, v) are the texture coordinates.
+        list: A list of indices for the triangle vertices forming the grid plane.
+        list: A list of texture coordinates in the format [u, v] for each vertex.
+    """
+    Xdim, Ydim = gridSize
+    Xmin, Ymin, Xmax, Ymax = domainSize
+
+    vertices = []
+    indices = []
+    textures = []
+
+    dx = float(Xmax - Xmin) / float(Xdim-1)  # Horizontal spacing between vertices
+    dy = float(Ymax - Ymin) / float(Xdim-1)  # Vertical spacing between vertices
+
+    # Generate vertices and texture coordinates
+    for y in range(Ydim ):
+        for x in range(Xdim ):
+            vx = Xmin + x * dx  # Vertex coordinate
+            vy = Ymin + y * dy
+            tx = x / Xdim  # Texture coordinate
+            ty = y / Ydim
+            vertices.extend([vx, vy, 0])  # Assuming z = 0 for a flat plane
+            textures.extend([tx, ty])
+
+    # Generate indices
+    for y in range(Ydim):
+        for x in range(Xdim):
+            indexLL=y * (Xdim ) + x
+            indexUL=(y+1) * (Xdim ) + x
+            indexUR=(y+1)* (Xdim ) + x+1
+            indexLR=y * (Xdim ) + x+1
+
+    
+            indices.extend([
+                indexLL, indexUL, indexUR,
+               indexUR , indexLR,  indexLL
+            ])
+
+    return vertices, indices, textures
+
 

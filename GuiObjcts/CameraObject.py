@@ -12,10 +12,13 @@ logger=getlogger()
 class Camera(Object):
     def __init__(self, fov, position, target,width, height):
         super().__init__("Camera")
-        self.fov = fov
-        # self.position = position
+        #cache value for resetting the camera
+        self.init_fov= fov
         self.init_position = position
-        self.target = target
+        self.init_target = target
+
+        self.fov = fov
+        self.target  = target
         self.width = width
         self.height = height
         self.last_mouse_pos = None
@@ -23,12 +26,16 @@ class Camera(Object):
         self.rotation_matrix = np.eye(4)  # Initialize as identity matrix for rotation
         self.create_variable("position",position,False)
         
-        
+        self.addAction("z positive", lambda object: object.look_at_z_positive() )
+        self.addAction("z negative", lambda object: object.look_at_z_negative() )
         self.addAction("reset position", lambda object: object.resetCamera() )
+
     def resetCamera(self):
-        self.position = self.init_position
+        self.fov = self.init_fov
+        self.setValue("position", self.init_position)
+        self.target = self.init_target
         self.rotation_matrix = np.eye(4)
-        self.fov = 45.0
+
     def update_windowSize(self, width, height):
         """Update the perspective projection based on new width and height."""
         self.width = width
@@ -42,20 +49,42 @@ class Camera(Object):
         aspect_ratio = width / height
         gl.glMatrixMode(gl.GL_PROJECTION)
         gl.glLoadIdentity()
-        gluPerspective(self.fov, aspect_ratio, 0.1, 200.0)
+        gluPerspective(self.fov, aspect_ratio, 0.01, 100.0)
         gl.glMatrixMode(gl.GL_MODELVIEW)
         
 
+    def look_at_z_positive(self):
+        """
+        Adjust the camera to look at Z positive direction.
+        """
+        # Assuming the initial position of the camera is (x, y, z),
+        # and you want to look towards Z positive direction.
+        # You can adjust the target to a point along the Z positive axis.
+        position=np.array(self.getValue("position")) 
+        self.target = [position[0], position[1], position[2] +1]
+
+    def look_at_z_negative(self):
+        """
+        Adjust the camera to look at Z negative direction.
+        """
+        # Similarly, adjust the target to a point along the Z negative axis.
+        position=np.array(self.getValue("position")) 
+        self.target = [position[0], position[1], position[2] - 1]
 
     def apply_view(self):
         """Apply the camera view."""
         gl.glLoadIdentity()
-        position=list(self.getValue("position")) 
-        position.append(1)
-        positionNew = np.dot( self.rotation_matrix, np.array(position) ) [:3]
+        position=np.array(self.getValue("position")) 
+        # position.append(1)
+        # positionNew = np.dot( self.rotation_matrix, np.array(position) ) [:3]
+
+        targetDirection=np.array(self.target)-position
+        targetDirection = np.append(targetDirection, 1)
+        targetDirectionNew = np.dot( self.rotation_matrix.transpose(), np.array(targetDirection) ) [:3]
+
         gluLookAt(
-            *positionNew,  # Camera position
-            *self.target,    # Look-at target
+            *position,  # Camera position
+            *targetDirectionNew,    # Look-at target
             0.0, 1.0, 0.0    # Up vector
         )
         
