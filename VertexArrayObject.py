@@ -2,6 +2,8 @@
 from OpenGL import GL as gl
 from GuiObjcts.Object import Object
 import numpy as np    
+from shaderManager import getShaderManager,ShaderProgram
+
 
 class VertexArrayObject(Object):
     def __init__(self,name):
@@ -18,6 +20,14 @@ class VertexArrayObject(Object):
         self.vbo_ids = gl.glGenBuffers(2)#vertex buffer and texture buffer
         self.ebo_id = gl.glGenBuffers(1)
         self.init()
+        self.material=None
+        self.shader_program=None
+        
+    def setMaterial(self,material):
+        self.material=material
+        sm=getShaderManager()
+        if  self.material.shader_name in sm.shaders:
+            self.shader_program = sm.get_program(self.material.shader_name)
 
     def init(self):
         gl.glBindVertexArray(self.vao_id)
@@ -46,7 +56,7 @@ class VertexArrayObject(Object):
         # Append new vertex and index data
         self.vertex_geometry.extend(vertex_data)
         self.indices.extend(index_data)
-        self.vertex_tex_coords .extend(texture_date)
+        self.vertex_tex_coords.extend(texture_date)
 
     def commit(self) -> None:
         vertex_geometry = np.array(self.vertex_geometry, dtype=np.float32)
@@ -67,11 +77,23 @@ class VertexArrayObject(Object):
 
     def draw(self):
         # Bind VAO
+        if self.shader_program is not None:
+            self.shader_program.Use()
+            # uniform mat4 projMat;
+            # uniform mat4 viewMat;
+            # uniform mat4 modelMat;
+            self.shader_program.setUniform('modelMat', [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 'mat4')
+            self.shader_program.setUniform('projMat', [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 'mat4')
+            self.shader_program.setUniform('viewMat', [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 'mat4')
+
         gl.glBindVertexArray(self.vao_id)
+    
         # Draw elements
         gl.glDrawElements(gl.GL_TRIANGLES, len(self.indices), gl.GL_UNSIGNED_INT, None)
+
         # Unbind VAO
         gl.glBindVertexArray(0)
+        gl.glUseProgram(0)
 
 
 

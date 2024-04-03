@@ -1,5 +1,5 @@
 import imgui
-from .Object import Object
+from .Object import Object,singleton
 import logging
 
 imguiStackMargin = 10
@@ -8,13 +8,8 @@ leftWindowsWidth = 305
 # lastWindowHeightUser = 200
 # rightWindowsWidth = 500
 
+@singleton
 class LoggingWidget(Object):
-    _instance = None
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super(LoggingWidget, cls).__new__(cls)
-        return cls._instance
-
     def __init__(self, name):
         super().__init__(name)
         self.loggerOptionSet =  ["wandb","logging"]

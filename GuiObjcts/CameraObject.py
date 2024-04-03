@@ -51,6 +51,14 @@ class Camera(Object):
         gl.glLoadIdentity()
         gluPerspective(self.fov, aspect_ratio, 0.01, 100.0)
         gl.glMatrixMode(gl.GL_MODELVIEW)
+
+    def get_View_projection_matrix(self):
+        """Get the view-projection matrix."""
+        # Compute the view-projection matrix
+        projection_matrix = np.eye(4)
+        modelview_matrix = np.eye(4)
+        view_projection_matrix = np.dot(projection_matrix, modelview_matrix)
+        return view_projection_matrix
         
 
     def look_at_z_positive(self):

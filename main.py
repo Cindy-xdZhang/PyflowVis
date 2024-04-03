@@ -12,6 +12,7 @@ from train_vector_field import *
 from flowCreator import *
 from functools import wraps
 from VertexArrayObject import *
+from shaderManager import *
 
 def draw_on_dirty(func):
     """Decorator to skip drawing if the parameters have not changed.(wip)"""
@@ -73,10 +74,11 @@ class GuiTest(Object):
 class Renderable:
     def __init__(self, image_data,x=0.0,y=0.0,z=0.0):
         self.width, self.height = image_data.shape[1]/10, image_data.shape[0]/10
-        self.texture_id = self.create_texture(image_data)
+        self.texture_id = create_texture(image_data)
         self.x = x
         self.y = y
         self.z = z
+        self.name="renderable"
 
    
     def check_collision(self, point):
@@ -88,16 +90,6 @@ class Renderable:
             logging.debug(f"click select success")
         else:
             self.selected = False
-
-    def create_texture(self, image_data):
-        texture_id = glGenTextures(1)
-        glBindTexture(GL_TEXTURE_2D, texture_id)
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image_data.shape[0],image_data.shape[1], 0, GL_RGB, GL_UNSIGNED_BYTE, image_data)
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-        return texture_id
 
     def draw(self):
     
@@ -172,7 +164,7 @@ def drawVectorGlyph(vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0
             vx, vy = interpolated_field[y, x,:]  # Extract the vector components
             gl.glPushMatrix()  # Save the matrix state
             posX,posY=x * vector_field.gridInterval[0]+vector_field.domainMinBoundary[0], y * vector_field.gridInterval[1]+vector_field.domainMinBoundary[1]
-            gl.glTranslatef(posX,posY, 0)  # Position the glyph
+            gl.glTranslatef(posX,posY, 0.1)  # Position the glyph
             
             # Calculate the angle of the vector
             angle = np.arctan2(vy, vx) * 180 / np.pi
@@ -189,13 +181,13 @@ def drawVectorGlyph(vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0
             gl.glEnd()
     
             gl.glPopMatrix()  # Restore the matrix state
-    
+    gl.glColor3f(1.0, 1.0, 1.0) 
     gl.glPopMatrix()  # Restore the original matrix state
  
   
 
 def main():
-    pygame  .init()
+    pygame.init()
     size = (800, 600)
     pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE)
     # Configure logging to display all messages
@@ -216,8 +208,12 @@ def main():
     lic_texture_data = np.random.rand(100, 100, 3)*128   # Use random data as an example
     lic_texture_data = lic_texture_data.astype('uint8')
     
-    # renderable_object = Renderable(lic_texture_data,2,2,-20)
+    renderable_object = Renderable(lic_texture_data,5,2,-5)
     
+    shaderManager=getShaderManager()
+    shaderManager.add_shader_program("simpleColor","shaders/simple_vertex.glsl","shaders/simple_fragment.glsl")
+    defaultMat=Material(name="simpleColorMat",shader_name="simpleColor")
+
     # all the objects in the scene
     scene=Scene("DefaultScene")
     # renderParamterPage=LicParameter("LicParameter")
@@ -235,16 +231,16 @@ def main():
             
       
    
-    # scene.add_object(renderParamterPage)
+
     # scene.add_object(camera)
     scene.restore_state_all()
     args={}
     # device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
     device=torch.device("cpu")
     args['device'] = device    
-    args["epochs"]=5
+    args["epochs"]=500
     
-    # vectorField2d= rotation_four_center((16,16),16)
+    vectorField2d= rotation_four_center((16,16),16)
     # resUfield=train_pipeline(vectorField2d,args)
     # actFieldWidget.insertField("rfc",vectorField2d)
     # actFieldWidget.insertField("Result field",resUfield)
@@ -252,6 +248,7 @@ def main():
     plane.setGuiVisibility(False)
     vertices, indices, textures= createPlane([32,32],[-2.0,-2.0,2.0,2.0])
     plane.appendVertexGeometry(vertices, indices, textures)
+    plane.setMaterial(defaultMat)
     scene.add_object(plane)
 
     clock = pygame.time.Clock()
@@ -262,6 +259,7 @@ def main():
         camera.apply_projection()
         camera.apply_view()
         
+       
 
         imgui.new_frame()
         scene.drawGui()
@@ -269,7 +267,7 @@ def main():
         imgui.end_frame()
         
         scene.draw_all()
-        
+        # renderable_object.draw()
 
         impl.render(imgui.get_draw_data())
 

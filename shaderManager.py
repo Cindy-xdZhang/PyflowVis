@@ -3,6 +3,44 @@ from OpenGL.GLU import *
 import OpenGL.GL as gl
 import pygame
 from fileMonitor import FileMonitor
+from GuiObjcts.Object import Object,singleton
+from GuiObjcts.mainCommandUI import getlogger
+
+logger=getlogger()
+
+def create_texture(image_data):
+    texture_id = glGenTextures(1)
+    glBindTexture(GL_TEXTURE_2D, texture_id)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image_data.shape[0],image_data.shape[1], 0, GL_RGB, GL_UNSIGNED_BYTE, image_data)
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+    return texture_id
+
+@singleton
+class TextureManager:
+    def __init__(self,name):
+        self.name=name
+        self.textures = {}
+        self.file_manager = FileMonitor()
+        
+    def add_texture(self, key, image_path):
+        self.textures[key] = create_texture(image_path)
+        self.file_manager.add_file(image_path)
+        
+    def get_texture(self, key):
+        return self.textures[key]
+    
+    def check_for_updates(self):
+        updated_files = self.file_manager.update_files()
+        if updated_files:
+            print(f"Texture files updated: {updated_files}")
+            for key, image_path in updated_files.items():
+                self.textures[key] = create_texture(image_path)
+
+def getTextureManager() -> TextureManager:
+    return TextureManager("TextureManager")
 
 # General Shader class for compiling GLSL shaders
 class Shader:
@@ -17,8 +55,9 @@ class Shader:
         # Check for compilation errors
         if not gl.glGetShaderiv(self.shader_id, gl.GL_COMPILE_STATUS):
             error = gl.glGetShaderInfoLog(self.shader_id).decode()
-            print(f'Error compiling {file_path}: {error}')
+            logger.error(f'Error compiling {file_path}: {error}')
             raise RuntimeError("Shader compilation error")
+        
       # Returns the shader id
     def get_id(self):
         return self.shader_id
@@ -31,15 +70,25 @@ class ShaderProgram:
         self.fragment_shader_path = fragment_shader_path
         self.file_manager = FileMonitor([vertex_shader_path, fragment_shader_path])
         self.needReload = False
-        self.compile_and_link()       
-        
-    def compile_and_link(self):
+        self.program_id = None
+        self.vertex_shader_id = None
+        self.fragment_shader_id= None
+        self._compile_and_link()       
+    
+    def _compile_and_link(self):
         # Create program object
-        self.program_id = gl.glCreateProgram()
+        self.program_id = gl.glCreateProgram() if self.program_id is None else self.program_id
+        if self.vertex_shader_id is not None:
+            gl.glDetachShader(self.program_id,self.vertex_shader_id)
+        if self.fragment_shader_id is not None:
+            gl.glDetachShader(self.program_id,self.fragment_shader_id)
+
         # Create and attach vertex shader
         vertex_shader = Shader(self.vertex_shader_path, gl.GL_VERTEX_SHADER)
+        self.vertex_shader_id = vertex_shader.get_id()
         # Create and attach fragment shader
         fragment_shader = Shader(self.fragment_shader_path, gl.GL_FRAGMENT_SHADER)
+        self.fragment_shader_id =fragment_shader.get_id()
         # Attach shaders
         gl.glAttachShader(self.program_id, vertex_shader.get_id())
         gl.glAttachShader(self.program_id, fragment_shader.get_id())
@@ -48,17 +97,25 @@ class ShaderProgram:
         # Check for linking errors
         if not gl.glGetProgramiv(self.program_id, gl.GL_LINK_STATUS):
             error = gl.glGetProgramInfoLog(self.program_id).decode()
-            print(f'Error linking program: {error}')
+            logger.error(f'Error linking program {self.program_id}-{self.key_name}: {error}')
             self.program_id = None
             raise RuntimeError("Program linking error")
         else:
             # Get and store the location of uniform variables
             self.uniform_locations = self._get_uniform_locations()
-            print(f'Shader program {self.key_name} created with ID {self.program_id}')
-        # Delete shaders as they're linked into our program now and no longer necessary
-        gl.glDeleteShader(vertex_shader.get_id())
-        gl.glDeleteShader(fragment_shader.get_id())
-        
+            logger.info(f'Shader program {self.key_name} created with ID {self.program_id}')
+            # Delete shaders as they're linked into our program now and no longer necessary
+            gl.glUseProgram(0)
+
+    def deleteProgram(self):
+            if self.program_id >0:
+                gl.glDeleteProgram(self.program_id)
+            if self.vertex_shader.get_id() >0:
+                gl.glDeleteShader(self.vertex_shader.get_id())
+            if self.fragment_shader.get_id() >0:
+                gl.glDeleteShader(self.fragment_shader.get_id())
+            
+
     def check_for_updates(self):
         updated_files = self.file_manager.update_files()
         if updated_files:
@@ -66,9 +123,8 @@ class ShaderProgram:
             self.needReload = True
             
     def _get_uniform_locations(self):
-        # Activate the program to retrieve uniforms
-        self.useShaderProgram()
-        
+
+    
         # Initialize an empty dictionary to hold uniform locations
         uniform_locations = {}
         
@@ -86,12 +142,12 @@ class ShaderProgram:
             
             # Store the location in the dictionary using the name as the key
             uniform_locations[name] = location
-        
+         
         # Return to the caller with the dictionary of uniform locations
         return uniform_locations
 
     def setUniform(self, name, value, type="float"):
-        self.useShaderProgram()        
+        self.Use()        
         if name not in self.uniform_locations:
             print(f"Warning: Uniform {name} does not exist in the shader program.")
             return
@@ -122,41 +178,47 @@ class ShaderProgram:
             gl.glUniformMatrix4fv(location, 1, GL_FALSE, value)
         else:
             print(f"Warning: Uniform type {type} is not supported.")
+
     
     def setUnforms(self, uniforms:dict):
         for name, value in uniforms.items():
             self.setUniform(name, value)  
             
-    def useShaderProgram(self):
+    def Use(self):
         self.check_for_updates()
         if self.needReload:
-            print("Reloading shaders due to file changes.")
-            self.compile_and_link()
+            logger.info("Reloading shader {self.key_name} due to file changes.")
+            self._compile_and_link()
             self.needReload = False
         gl.glUseProgram(self.program_id)
 
-# Class for managing multiple shader programs
-class ShaderManager:
-    def __init__(self):
+@singleton
+class ShaderManager(Object):
+    """Class for managing multiple shader programs
+    """
+    def __init__(self,name):
+        super().__init__(name)
         self.shaders = {}  # Stores all shader programs
-
+   
     # Adds a shader program with a given key
     def add_shader_program(self, key, vertex_shader_path, fragment_shader_path):
         self.shaders[key] = ShaderProgram(key,vertex_shader_path, fragment_shader_path)
-
+      
     # Uses the shader program specified by the given key
     def use_program(self, key:str):
         if key in self.shaders:
-            self.shaders[key].use()
+            self.shaders[key].Use()
         else:
-            print(f'Shader program {key} not found.')
+            logger.error(f'Shader program {key} not found.')
             
     def get_program(self, key:str):
         if key in self.shaders:
             return self.shaders[key]
         else:
-            print(f'Shader program {key} not found.')
+            logger.error(f'Shader program {key} not found.')
 
+def getShaderManager() -> ShaderManager:
+    return ShaderManager("ShaderManager")
 
 def setup_opengl():
     pygame.init()
@@ -171,7 +233,7 @@ def setup_opengl():
 def test_shader_manager():
     """Test the ShaderManager class."""
     setup_opengl()
-    shader_manager = ShaderManager()
+    shader_manager = ShaderManager("test_sm")
     # Add a basic shader program
     shader_manager.add_shader_program('basic', 'shaders/simple_vertex.glsl', 'shaders/simple_fragment.glsl')
     # Use the basic shader program in rendering loop
@@ -185,5 +247,41 @@ def test_shader_manager():
     shader_program.setUniform('myMat3', [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 'mat3')
     shader_program.setUniform('myMat4', [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 'mat4')
         
+class Material:
+    def __init__(self,name, shader_name,texture0=None,texture1=None):
+        """material is collection of shdader,texture,uniforms for rendering an object
+
+        Args:
+            shader_name (string): the key to retrieve the shader program from the shader manager
+            texture0 (string): texture  name to retrieve the shader program from the shader manager;
+            texture1 (string): texture name to retrieve the shader program from the shader manager;
+            (maximum 2 texture)
+        """
+        self.name=name
+        self.shader_name = shader_name
+        self.uniforms = {}
+        self.texture0 = texture0
+        self.texture1= texture1
+    
+    def append_uniform(self, name, value):
+        self.uniforms[name] = value
+
+    def apply(self):
+        sm=getShaderManager()
+      
+        if self.shader_name in sm.shaders:
+            shader_program = sm.get_program(self.shader_name)
+            shader_program.Use()
+  
+        #! TODO: use texture
+        # tm=getTextureManager()
+        #  if self.texture0 is not None:
+        #     gl.glActiveTexture(gl.GL_TEXTURE0)
+        #     gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture_id)
+        #     gl.glUniform1i(gl.glGetUniformLocation(self.shader_program, "texture1"), 0)
+    
+
+    
+
 if __name__ == '__main__':
     test_shader_manager()

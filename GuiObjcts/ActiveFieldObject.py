@@ -50,6 +50,8 @@ class ActiveField(Object):
             self.setValue("time",time)
 
     def insertField(self,fieldName:str,field):
+        if field is None or fieldName is None:
+            return
         self.activeField[fieldName]=field
         fieldNameList=self.getValue("active field")
         if fieldName not in fieldNameList:

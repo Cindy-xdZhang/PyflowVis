@@ -7,6 +7,14 @@ import imgui
 from typing import Dict, Any
 from typeguard import typechecked
 
+def singleton(cls):
+    _instance = {}
+
+    def inner(*args, **kwargs):
+        if cls not in _instance:
+            _instance[cls] = cls(*args, **kwargs)
+        return _instance[cls]
+    return inner
 
 def input_vecn_int_float(label, vecn):
     # Simulate a vec3 input using three separate float input fields.
@@ -398,10 +406,10 @@ class Object:
             imgui.end()
        
 
-
+@singleton
 class Scene(Object):
-    _instance = None
     def __init__(self, name,autoSaveFolderPath="autosave"):
+        super().__init__(name,autoSaveFolderPath)
         self.objects = {}
     def add_object(self, obj):
         self.objects[obj.name]= obj
@@ -427,13 +435,6 @@ class Scene(Object):
         self.load_state()
         for obj in self.objects.values():
             obj.load_state()
-            
-    def __new__(cls, name='Scene', autoSaveFolderPath="autosave"):
-        if cls._instance is None:
-            cls._instance = super(Scene, cls).__new__(cls)
-            # Initialize the instance once:
-            Object.__init__(cls._instance, name,autoSaveFolderPath=autoSaveFolderPath)            
-        return cls._instance
     
     def toggle_object_visibility(self,ObjectName:str):
         """toggle an onbject's visibility in gui 
@@ -456,7 +457,15 @@ class TestObject(unittest.TestCase):
         self.obj.create_variable('persist_key', 'persist_value', True, 'default0')
         self.obj.create_variable('non_persist_key', 'non_persist_value', False, 'non_persist_key_default1')
     
-        
+    def test_singleton(self):  
+        @singleton
+        class Cls(object):
+            def __init__(self):
+                pass    
+        cls1 = Cls()
+        cls2 = Cls()
+        self.assertEqual(id(cls1), id(cls2), " Singleton pattern is wrong")
+
     def test_load_save_state(self):        
         self.obj.save_state()
         #second run
