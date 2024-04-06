@@ -142,7 +142,33 @@ class Camera(Object):
         # Apply the rotations
         self.rotation_matrix = np.dot(rotation_y, np.dot(rotation_x, self.rotation_matrix))
       
+  
+    
+    def pan(self, dx:float, dy:float,dz:float):
+        """
+        Pans the camera based on horizontal (dx) and vertical (dy) input values.
+        """
+        def normalize_vector(v):
+            norm = np.linalg.norm(v)
+            if norm == 0:
+                return v
+            return v / norm
+        # Calculate the right vector as the cross product of the target direction and the up vector
+        up_vec = np.array([ self.up.x,  self.up.y,  self.up.z], dtype=np.float32)
+        right = np.cross(self.targetDirection,  up_vec )
+        right=normalize_vector(right) 
+
+        # Calculate the actual movement vectors
+        right_movement = right * dx
+        up_movement = glm.normalize(self.up) * dy
+        z_movement = normalize_vector(self.targetDirection) * dz
         
+        # Convert movement vectors from glm to numpy for calculations
+        up_movement_np = np.array([up_movement.x, up_movement.y, up_movement.z], dtype=np.float32)
+        
+        # Update the position and target direction based on the movements
+        self.updateValue("position", self.getValue("position") + right_movement + up_movement_np+z_movement)
+
 
 
     def zoom(self, direction):
@@ -175,4 +201,17 @@ class Camera(Object):
             self.handle_mouse_move(x, y,up=True)
         elif event.type == pygame.VIDEORESIZE:
             self.update_window_size(event.w, event.h)
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_LEFT or event.key == pygame.K_a:
+                self.pan(-0.1, 0,0)  # Pan left
+            elif event.key == pygame.K_RIGHT or event.key == pygame.K_d:
+                self.pan(0.1, 0,0)  # Pan right
+            elif event.key == pygame.K_UP or event.key == pygame.K_w:
+                self.pan(0, 0.1,0)  # Pan up
+            elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
+                self.pan(0, -0.1,0)  # Pan down
+            elif event.key == pygame.K_q:
+                self.pan(0, 0, 0.1)  # Pan forward (Q)
+            elif event.key == pygame.K_e:
+                self.pan(0, 0, -0.1)  # Pan backward (E)
 

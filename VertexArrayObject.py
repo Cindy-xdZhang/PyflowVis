@@ -159,9 +159,7 @@ def create_cube():
          1.0,  1.0, -1.0,
          1.0, -1.0, -1.0,
     ]
-    # Scale down the cube size
-    for i in range(len(vertices)):
-        vertices[i] *= 0.1
+  
 
     # Cube texture coordinates
     # 4 vertices per face, each texture coordinate with 2 values (u, v)
