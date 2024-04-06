@@ -131,6 +131,10 @@ globalImageLoader=ImageLoader()
 
 
 
+class VectorGlyph(VertexArrayObject):
+      def __init__(self) -> None:
+        super().__init__("VectorGlyph")
+
 
 def drawVectorGlyph(vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0):
     """
@@ -249,23 +253,25 @@ def main():
     # resUfield=train_pipeline(vectorField2d,args)
     # actFieldWidget.insertField("rfc",vectorField2d)
     # actFieldWidget.insertField("Result field",resUfield)
-    plane=VertexArrayObject("plane")
+    circle=VertexArrayObject("circle")
+    circle.appendCircleWithoutCommit(np.array([0,-1,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32), 0.5,  32)
+    circle.commit()
     # plane.setGuiVisibility(False)
     # vertices, indices, textures= createPlane([32,32],[-2,-2,2,2])
     # plane.appendVertexGeometry(vertices, indices, textures)
-    # plane.setMaterial(defaultMat)
-    # scene.add_object(plane)
+    circle.setMaterial(defaultMat)
+    scene.add_object(circle)
 
     # plane2=VertexArrayObject("plane2")
     # vertices, indices, textures= createPlane([32,32],[-2000,-2000,2000,2000])
     # plane2.appendVertexGeometry(vertices, indices, textures)
     # plane2.setMaterial(defaultMat)
     # scene.add_object(plane2)
-    v,t,i=create_cube()
-    cube=VertexArrayObject("cube")
-    cube.appendVertexGeometry(v, i,t)
-    cube.setMaterial(defaultMat)
-    scene.add_object(cube)
+    # v,t,i=create_cube()
+    # cube=VertexArrayObject("cube")
+    # cube.appendVertexGeometry(v, i,t)
+    # cube.setMaterial(defaultMat)
+    # scene.add_object(cube)
 
     clock = pygame.time.Clock()
     while eventRegister.running:

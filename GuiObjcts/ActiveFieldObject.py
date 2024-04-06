@@ -68,5 +68,3 @@ class ActiveField(Object):
     
     def getField(self,fieldName:str):
         return self.activeField[fieldName]
-
-

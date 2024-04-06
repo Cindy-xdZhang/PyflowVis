@@ -92,6 +92,50 @@ class VertexArrayObject(Object):
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)
 
+    def appendCircleWithoutCommit(self,centerPos:np.array, normal:np.array, radius, segments):
+        # Calculate orthogonal vectors to the normal for circle's plane
+        orth0 = np.cross(normal, [0, 0, 1])
+        if np.linalg.norm(orth0) < 0.001:
+            orth0 = np.cross(normal, [0, 1, 0])
+        orth0 = orth0 / np.linalg.norm(orth0)
+        orth1 = np.cross(normal, orth0)
+        orth1 = orth1 / np.linalg.norm(orth1)
+        orth2 = np.cross(normal, orth1)
+        orth2 = orth2 / np.linalg.norm(orth2)
+
+        # Initialize lists for vertices, textures, and indices
+        firstPos=centerPos+orth2*radius
+        geometryVerts = [centerPos[0] ,centerPos[1] ,centerPos[2],firstPos[0],firstPos[1],firstPos[2]]      
+        textureCoords = [0.0,0.0,0.0,1.0]
+        elements=[]
+        # Generate vertices around the circle
+        for i in range(1, segments ):
+            angle = i * 2 * np.pi / segments
+            s=np.sin(angle)
+            c=np.cos(angle)
+
+            v = s * orth1 + c* orth2
+            vCirc = centerPos + v * radius
+            geometryVerts.extend(vCirc.tolist())
+    
+            textureCoords.extend([(s+ 1.0) * 0.5, (c + 1.0) * 0.5])
+            elements.extend([0, i, i + 1])
+   
+        # Connect the last segment to the first
+        elements.extend([0,segments, 1])
+        self.appendVertexGeometryNoCommit(geometryVerts, elements, textureCoords)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def createPlane(gridSize, domainSize) -> [list, list, list]:
