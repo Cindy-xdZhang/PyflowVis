@@ -10,25 +10,11 @@ from GuiObjcts  import *
 from EventRegistrar import EventRegistrar
 from train_vector_field import *
 from flowCreator import *
-from functools import wraps
+
 from VertexArrayObject import *
 from shaderManager import *
 
-def draw_on_dirty(func):
-    """Decorator to skip drawing if the parameters have not changed.(wip)"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not hasattr(wrapper, "last_call_signature"):
-            wrapper.last_call_signature = None
 
-        current_call_signature = (args, tuple(sorted(kwargs.items())))
-        
-        if current_call_signature == wrapper.last_call_signature:
-            print("Skipping drawing, parameters have not changed.")
-            return
-        else:
-            wrapper.last_call_signature = current_call_signature
-            return f
         
 def screen_to_world(x, y, width, height, modelview, projection, viewport):    
     y = height - y  # OpenGL's y axis  is reversed of pygame's y axis
@@ -136,61 +122,7 @@ class VectorGlyph(VertexArrayObject):
         super().__init__("VectorGlyph")
 
 
-def drawVectorGlyph(vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0):
-    """
-    Draw vector glyphs representing a vector field interpolated between two time steps.
 
-    :param vector_field: A VectorField2D object representing the vector field.
-    :param time: The specific time to interpolate the vector field at.
-    :param position: The position where to start drawing the vector field.
-    :param scale: Scale factor for drawing glyphs.
-    """
-    if vector_field is None:
-        return
-    gl.glPushMatrix()  # Save the current matrix state
-    gl.glTranslatef(*position)  # Move to the specified position
-
-    # Calculate the interpolation index
-    time_idx = (time - vector_field.domainMinBoundary[2]) / vector_field.timeInterval
-    lower_idx = int(np.floor(time_idx))
-    upper_idx = int(np.ceil(time_idx))
-    alpha = time_idx - lower_idx
-
-    # Ensure indices are within the bounds of the vector field time steps
-    lower_idx = max(0, min(vector_field.time_steps - 1, lower_idx))
-    upper_idx = max(0, min(vector_field.time_steps - 1, upper_idx))
-
-    # Get the two time slices of the vector field
-    lower_field = vector_field.field[lower_idx].detach().numpy()
-    upper_field = vector_field.field[upper_idx].detach().numpy()
-
-    # Interpolate between the two time slices
-    interpolated_field = (1 - alpha) * lower_field + alpha * upper_field
-
-    for y in range(interpolated_field.shape[0]):
-        for x in range(interpolated_field.shape[1]):
-            vx, vy = interpolated_field[y, x,:]  # Extract the vector components
-            gl.glPushMatrix()  # Save the matrix state
-            posX,posY=x * vector_field.gridInterval[0]+vector_field.domainMinBoundary[0], y * vector_field.gridInterval[1]+vector_field.domainMinBoundary[1]
-            gl.glTranslatef(posX,posY, 0.1)  # Position the glyph
-            
-            # Calculate the angle of the vector
-            angle = np.arctan2(vy, vx) * 180 / np.pi
-            
-            gl.glRotatef(angle, 0, 0, 1)  # Rotate the glyph to match the vector direction
-            gl.glScalef(scale, scale, 1)  # Scale the glyph
-            
-            # Draw the glyph as a simple line for now
-            gl.glBegin(gl.GL_LINES)
-            gl.glColor3f(1.0, 0.0, 0.0) 
-            gl.glVertex2f(0, 0)
-            gl.glColor3f(0.0, 1.0, 0.0) 
-            gl.glVertex2f(0.1, 0)  # Draw line in the direction of the vector
-            gl.glEnd()
-    
-            gl.glPopMatrix()  # Restore the matrix state
-    gl.glColor3f(1.0, 1.0, 1.0) 
-    gl.glPopMatrix()  # Restore the original matrix state
  
   
 
@@ -251,16 +183,16 @@ def main():
     
     vectorField2d= rotation_four_center((16,16),16)
     # resUfield=train_pipeline(vectorField2d,args)
-    # actFieldWidget.insertField("rfc",vectorField2d)
+    actFieldWidget.insertField("rfc",vectorField2d)
     # actFieldWidget.insertField("Result field",resUfield)
-    circle=VertexArrayObject("circle")
-    circle.appendCircleWithoutCommit(np.array([0,-1,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32), 0.5,  32)
-    circle.commit()
+    # circle=VertexArrayObject("Cone")
+    # circle.appendConeWithoutCommit(np.array([0,-1,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32), 0.5, 2, 32)
+    # circle.commit()
     # plane.setGuiVisibility(False)
     # vertices, indices, textures= createPlane([32,32],[-2,-2,2,2])
     # plane.appendVertexGeometry(vertices, indices, textures)
-    circle.setMaterial(defaultMat)
-    scene.add_object(circle)
+    # circle.setMaterial(defaultMat)
+    # scene.add_object(circle)
 
     # plane2=VertexArrayObject("plane2")
     # vertices, indices, textures= createPlane([32,32],[-2000,-2000,2000,2000])
@@ -272,7 +204,9 @@ def main():
     # cube.appendVertexGeometry(v, i,t)
     # cube.setMaterial(defaultMat)
     # scene.add_object(cube)
-
+    VectorGlyph=VertexArrayVectorGlyph("vectorGlyph")
+    VectorGlyph.setMaterial(defaultMat)
+    scene.add_object(VectorGlyph)
     clock = pygame.time.Clock()
     while eventRegister.running:
         eventRegister.handle_events()
@@ -286,11 +220,14 @@ def main():
         imgui.render()
         imgui.end_frame()
         
-        scene.draw_all()
         # renderable_object.draw()
 
         impl.render(imgui.get_draw_data())
+        VectorGlyph.updateVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
+        VectorGlyph.commit()
 
+        scene.draw_all()
+ 
         # drawVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
 
         pygame.display.flip()

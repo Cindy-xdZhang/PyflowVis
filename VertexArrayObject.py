@@ -3,7 +3,7 @@ from OpenGL import GL as gl
 from GuiObjcts.Object import Object
 import numpy as np    
 from shaderManager import getShaderManager,ShaderProgram
-
+from functools import wraps
 
 class VertexArrayObject(Object):
     def __init__(self,name):
@@ -13,6 +13,7 @@ class VertexArrayObject(Object):
 
         # Initialize lists to store vertex and element data
         self.vertex_geometry  = []
+        self.vetex_count=0
         self.indices = []
         self.vertex_tex_coords  = []
 
@@ -53,11 +54,33 @@ class VertexArrayObject(Object):
         self.appendVertexGeometryNoCommit(vertex_data, index_data,texture_date)
         self.commit()
 
+    def erase(self):
+        self.vertex_geometry  = []
+        self.vetex_count=0
+        self.indices = []
+        self.vertex_tex_coords  = []
+        self.commit()
     def appendVertexGeometryNoCommit(self, vertex_data, index_data,texture_date):
         # Append new vertex and index data
         self.vertex_geometry.extend(vertex_data)
         self.indices.extend(index_data)
         self.vertex_tex_coords.extend(texture_date)
+        self.vetex_count+=len(vertex_data)//3
+
+    def appendTriangleWithoutCommit(self,pos0, pos1, pos2):
+        # Assuming pos0, pos1, pos2 are numpy arrays or can be converted into numpy arrays
+        geometryVerts =[pos0[0], pos0[1], pos0[2], pos1[0], pos1[1], pos1[2], pos2[0], pos2[1], pos2[2]]
+
+        previoussize=self.vetex_count
+        # Assuming a simple triangle, elements (indices) would be straightforward
+        elements = [previoussize, previoussize+1,previoussize+ 2]
+        
+        # Define texture coordinates for the triangle
+        texCoords = [0.0, 0.0,1.0, 0.0,1.0, 1.0]
+        
+        # Here you should append these to your geometry system
+        # For example purposes, this might look like:
+        self.appendVertexGeometryNoCommit(geometryVerts, elements, texCoords)
 
     def commit(self) -> None:
         vertex_geometry = np.array(self.vertex_geometry, dtype=np.float32)
@@ -94,9 +117,9 @@ class VertexArrayObject(Object):
 
     def appendCircleWithoutCommit(self,centerPos:np.array, normal:np.array, radius, segments):
         # Calculate orthogonal vectors to the normal for circle's plane
-        orth0 = np.cross(normal, [0, 0, 1])
-        if np.linalg.norm(orth0) < 0.001:
-            orth0 = np.cross(normal, [0, 1, 0])
+        orth0 = np.array([normal[1],-normal[0],normal[2]])
+        if orth0[0]*orth0[0]+orth0[1]*orth0[1]< 0.001:
+            orth0 = np.array([normal[2],normal[1],normal[0]])
         orth0 = orth0 / np.linalg.norm(orth0)
         orth1 = np.cross(normal, orth0)
         orth1 = orth1 / np.linalg.norm(orth1)
@@ -125,13 +148,121 @@ class VertexArrayObject(Object):
         elements.extend([0,segments, 1])
         self.appendVertexGeometryNoCommit(geometryVerts, elements, textureCoords)
 
+    def appendConeWithoutCommit(self,centerPos:np.array, direction:np.array, radius, height, segments):
+        direction=direction / np.linalg.norm(direction)
+        startPos = centerPos - direction * height * 0.5
+
+        # Generating orthogonal vectors
+        orth0 = np.array([direction[1],-direction[0],direction[2]])
+        if orth0[0]*orth0[0]+orth0[1]*orth0[1]< 0.001:
+            orth0 = np.array([direction[2],direction[1],direction[0]])
+        orth0 = orth0 / np.linalg.norm(orth0)
+
+        orth1 = np.cross(direction, orth0)
+        orth1 = orth1 / np.linalg.norm(orth1)
+        orth2 = np.cross(direction, orth1)
+        orth2 = orth2 / np.linalg.norm(orth2)
+
+
+        # Append cone vertices
+        vTop = startPos + direction * height
+        lastV = orth2
+
+        for i in range(1,segments):
+            angle = i * 2 * np.pi / segments
+            s=np.sin(angle)
+            c=np.cos(angle)
+            v = s * orth1 + c * orth2
+            vBottom = startPos + v * radius
+            lastVBottom = startPos + lastV * radius
+          
+            lastV = v
+            self.appendTriangleWithoutCommit(lastVBottom, vBottom, vTop)
+            
+            # textureCoords.extend([0.0, 0.0,1.0, 0.0, 1.0, 1.0])
+
+        v=orth2
+        vBottom = startPos + v * radius
+        lastVBottom = startPos + lastV * radius
+        self.appendTriangleWithoutCommit(lastVBottom, vBottom, vTop)
+         #    put caps to the cylinder
+        self.appendCircleWithoutCommit(startPos, direction, radius, segments)
 
 
 
 
+def call_on_dirty(func):
+    """
+    Decorator to skip calling the function if the parameters have not changed.
+    """
+    func._call_signature = None
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Create a tuple representing the current call signature
+        current_call_signature = (args, tuple(kwargs.items()))
+
+        # Check if the call signature has changed since the last call
+        if current_call_signature != func._call_signature:
+            # Update the call signature
+            func._call_signature = current_call_signature
+            
+            # Call the original function
+            return func(*args, **kwargs)
+        else:
+            # Skip calling the function
+            pass
+    return wrapper
 
 
+class VertexArrayVectorGlyph(VertexArrayObject):
+    def __init__(self, name):
+        super().__init__(name)
 
+    @call_on_dirty
+    def updateVectorGlyph(self,vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0):
+        """
+        Draw vector glyphs representing a vector field interpolated between two time steps.
+
+        :param vector_field: A VectorField2D object representing the vector field.
+        :param time: The specific time to interpolate the vector field at.
+        :param position: The position where to start drawing the vector field.
+        :param scale: Scale factor for drawing glyphs.
+        """
+        if vector_field is None:
+            return
+    
+        # Calculate the interpolation index
+        time_idx = (time - vector_field.domainMinBoundary[2]) / vector_field.timeInterval
+        lower_idx = int(np.floor(time_idx))
+        upper_idx = int(np.ceil(time_idx))
+        alpha = time_idx - lower_idx
+
+        # Ensure indices are within the bounds of the vector field time steps
+        lower_idx = max(0, min(vector_field.time_steps - 1, lower_idx))
+        upper_idx = max(0, min(vector_field.time_steps - 1, upper_idx))
+
+        # Get the two time slices of the vector field
+        lower_field = vector_field.field[lower_idx].detach().numpy()
+        upper_field = vector_field.field[upper_idx].detach().numpy()
+
+        # Interpolate between the two time slices
+        interpolated_field = (1 - alpha) * lower_field + alpha * upper_field
+        radius=0.01
+        hight=0.1
+        segments=8
+        self.erase()
+        for y in range(interpolated_field.shape[0]):
+            for x in range(interpolated_field.shape[1]):
+                vx, vy = interpolated_field[y, x,:]  # Extract the vector components
+                posX,posY=x * vector_field.gridInterval[0]+vector_field.domainMinBoundary[0], y * vector_field.gridInterval[1]+vector_field.domainMinBoundary[1]
+                direction = np.array([vx, vy, 0.0])  # Create a vector from the components
+                # Draw the vector glyph            
+                self.appendConeWithoutCommit(np.array([posX,posY,0.0]),direction, radius, hight, segments)
+          
+        
+
+    
 
 
 
