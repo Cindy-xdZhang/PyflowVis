@@ -5,26 +5,48 @@ import numpy as np
 import pygame
 from .mainCommandUI import getlogger
 import imgui
+import glm
 
 logger=getlogger()
 
+def screen_to_arcball(x, y, width, height):
+    px = 1.0 - (x * 2.0) / width
+    py = (y * 2.0) / height - 1.0
+    distance = px * px + py * py
+    if distance <= 1.0:
+        return glm.vec3(px, py, glm.sqrt(1.0 - distance))
+    else:
+        return glm.normalize(glm.vec3(px, py, 0))
+    
+def glm_mat4_to_np_array(glm_mat):
+    return np.array([
+        [glm_mat[0][0], glm_mat[1][0], glm_mat[2][0], glm_mat[3][0]],
+        [glm_mat[0][1], glm_mat[1][1], glm_mat[2][1], glm_mat[3][1]],
+        [glm_mat[0][2], glm_mat[1][2], glm_mat[2][2], glm_mat[3][2]],
+        [glm_mat[0][3], glm_mat[1][3], glm_mat[2][3], glm_mat[3][3]]
+    ], dtype=np.float32)
 
 class Camera(Object):
-    def __init__(self, fov, position, target,width, height):
+    def __init__(self, fov, position, center,up,width, height):
         super().__init__("Camera")
         #cache value for resetting the camera
         self.init_fov= fov
-        self.init_position = position
-        self.init_target = target
+        self.init_position = np.array(position,dtype=np.float32)
+        self.init_targetDirection =  np.array(center,dtype=np.float32)-  self.init_position
+        self.init_up = glm.vec3(up)
+        
 
+        self.create_variable("position", np.array(position,dtype=np.float32),False)
         self.fov = fov
-        self.target  = target
+        self.targetDirection   =self.init_targetDirection
+        self.up = glm.vec3(up)
         self.width = width
         self.height = height
+        self.aspect_ratio = width / height
         self.last_mouse_pos = None
         self.mouse_down = False
-        self.rotation_matrix = np.eye(4)  # Initialize as identity matrix for rotation
-        self.create_variable("position",position,False)
+        self.rotation_matrix = np.eye(4, dtype=np.float32) # Initialize as identity matrix for rotation
+     
         
         self.addAction("z positive", lambda object: object.look_at_z_positive() )
         self.addAction("z negative", lambda object: object.look_at_z_negative() )
@@ -32,70 +54,59 @@ class Camera(Object):
 
     def resetCamera(self):
         self.fov = self.init_fov
+        self.target = self.init_targetDirection
+        self.up = self.init_up
         self.setValue("position", self.init_position)
-        self.target = self.init_target
-        self.rotation_matrix = np.eye(4)
-
-    def update_windowSize(self, width, height):
-        """Update the perspective projection based on new width and height."""
-        self.width = width
-        self.height = height
-    
-
-    def apply_projection(self):
-        """Apply the perspective projection."""
-        width= self.width 
-        height= self.height
-        aspect_ratio = width / height
-        gl.glMatrixMode(gl.GL_PROJECTION)
-        gl.glLoadIdentity()
-        gluPerspective(self.fov, aspect_ratio, 0.01, 100.0)
-        gl.glMatrixMode(gl.GL_MODELVIEW)
-
-    def get_View_projection_matrix(self):
-        """Get the view-projection matrix."""
-        # Compute the view-projection matrix
-        projection_matrix = np.eye(4)
-        modelview_matrix = np.eye(4)
-        view_projection_matrix = np.dot(projection_matrix, modelview_matrix)
-        return view_projection_matrix
+        self.rotation_matrix = np.eye(4, dtype=np.float32)
         
+    def getScope(self ):
+        """overide the getScope method to return view and projection matrix"""
+        AllVariables=  {}
+        viewMat= self.get_view_matrix()
+        projMat=self.get_projection_matrix()
+        AllVariables["viewMat"]=viewMat 
+        AllVariables["projMat"]=projMat
+        return AllVariables
 
-    def look_at_z_positive(self):
-        """
-        Adjust the camera to look at Z positive direction.
-        """
-        # Assuming the initial position of the camera is (x, y, z),
-        # and you want to look towards Z positive direction.
-        # You can adjust the target to a point along the Z positive axis.
-        position=np.array(self.getValue("position")) 
-        self.target = [position[0], position[1], position[2] +1]
-
-    def look_at_z_negative(self):
-        """
-        Adjust the camera to look at Z negative direction.
-        """
-        # Similarly, adjust the target to a point along the Z negative axis.
-        position=np.array(self.getValue("position")) 
-        self.target = [position[0], position[1], position[2] - 1]
-
-    def apply_view(self):
-        """Apply the camera view."""
-        gl.glLoadIdentity()
-        position=np.array(self.getValue("position")) 
-        # position.append(1)
-        # positionNew = np.dot( self.rotation_matrix, np.array(position) ) [:3]
-
-        targetDirection=np.array(self.target)-position
+    def get_view_matrix(self):
+        """Get the view matrix."""
+        pos= self.getValue("position")
+        targetDirection=self.targetDirection
         targetDirection = np.append(targetDirection, 1)
         targetDirectionNew = np.dot( self.rotation_matrix.transpose(), np.array(targetDirection) ) [:3]
+        targetNew = pos + targetDirectionNew
+        targetNew = glm.vec3(targetNew)
+        return glm.lookAt(pos, targetNew, self.up)
 
-        gluLookAt(
-            *position,  # Camera position
-            *targetDirectionNew,    # Look-at target
-            0.0, 1.0, 0.0    # Up vector
-        )
-        
+    def get_projection_matrix(self):
+        return glm.perspective( glm.radians(self.fov), self.aspect_ratio, 0.1, 100.0)
+
+   
+
+    def update_window_size(self, width, height):
+        """Update the window size and recalculate the projection matrix."""
+        self.width = width
+        self.height = height
+        self.aspect_ratio = width / height
+        # self.projection_matrix = self.get_projection_matrix()
+
+    def look_at_z_positive(self):
+        """Adjust the camera to look at the Z positive direction."""
+        # pos= self.getValue("position")
+        self.targetDirection = np.array([0, 0, 1])
+
+    def look_at_z_negative(self):
+        """Adjust the camera to look at the Z negative direction."""
+        # pos= self.getValue("position")
+        self.targetDirection  =  np.array([0, 0, -1])
+
+    def resetCamera(self):
+        """Reset the camera to the initial state."""
+        self.fov = self.init_fov
+        self.updateValue("position", self.init_position)
+        self.targetDirection = self.init_targetDirection
+        self.rotation_matrix = np.eye(4, dtype=np.float32)
+
     def handle_mouse_move(self, x, y,up=False):
         """Handle the mouse movement to rotate the camera around the target."""
         if up==True:
@@ -130,20 +141,21 @@ class Camera(Object):
 
         # Apply the rotations
         self.rotation_matrix = np.dot(rotation_y, np.dot(rotation_x, self.rotation_matrix))
-    
+      
+        
 
 
     def zoom(self, direction):
         """Zoom the camera in/out."""
         old_fov = self.fov
         if direction == 'in' and self.fov > 10:
-            self.fov -= 0.50
-            logger.debug(f"Zoom in: FOV changed from {old_fov} to {self.fov}")
+            self.fov -= 1.0
         elif direction == 'out' and self.fov < 120:
-            self.fov += 0.50
-            logger.debug(f"Zoom in: FOV changed from {old_fov} to {self.fov}")
-            
-      
+            self.fov += 1.0
+        # self.projection_matrix = self.get_projection_matrix()
+        logger.debug(f"Zoom in: FOV changed from {old_fov} to {self.fov}")
+
+
     def eventCallBacks(self,event):
         if event.type == pygame.MOUSEBUTTONDOWN:
                # Zoom in
@@ -162,10 +174,5 @@ class Camera(Object):
             x, y = event.pos  # Use relative motion for smoother rotation
             self.handle_mouse_move(x, y,up=True)
         elif event.type == pygame.VIDEORESIZE:
-            self.update_windowSize(event.w, event.h)
-       
-            
-                
-
-
+            self.update_window_size(event.w, event.h)
 

@@ -23,7 +23,7 @@ class LICRender(Object):
 class ActiveField(Object):
     def __init__(self):
         super().__init__("ActiveField")
-        self.pause=False
+        self.pause=True
         self.create_variable_gui("time",0.0,False, {'widget': 'input'})
         self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
         #list of str is treated specially  as option in my gui implementation, don't need to specify customization, it always render as combo box

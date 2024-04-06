@@ -2,6 +2,7 @@ torch
 numpy
 imgui
 pyopengl
+PyGLM
 pygame
 numexpr
 typeguard

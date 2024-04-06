@@ -22,6 +22,7 @@ class VertexArrayObject(Object):
         self.init()
         self.material=None
         self.shader_program=None
+        self.create_variable("modelMat",np.eye(4,dtype=np.float32),False)
         
     def setMaterial(self,material):
         self.material=material
@@ -75,19 +76,15 @@ class VertexArrayObject(Object):
         gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, gl.GL_STATIC_DRAW)
         gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
 
+
+
     def draw(self):
         # Bind VAO
         if self.shader_program is not None:
+            cameraObject=self.parentScene.getObject("Camera")
+            self.shader_program.setUniformScope([cameraObject,self])
             self.shader_program.Use()
-            # uniform mat4 projMat;
-            # uniform mat4 viewMat;
-            # uniform mat4 modelMat;
-            self.shader_program.setUniform('modelMat', [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 'mat4')
-            self.shader_program.setUniform('projMat', [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 'mat4')
-            self.shader_program.setUniform('viewMat', [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 'mat4')
-
-        gl.glBindVertexArray(self.vao_id)
-    
+        gl.glBindVertexArray(self.vao_id)  
         # Draw elements
         gl.glDrawElements(gl.GL_TRIANGLES, len(self.indices), gl.GL_UNSIGNED_INT, None)
 
@@ -147,3 +144,55 @@ def createPlane(gridSize, domainSize) -> [list, list, list]:
     return vertices, indices, textures
 
 
+def create_cube():
+    # Cube vertex positions
+    # 8 vertices, each vertex with 3 coordinates (x, y, z)
+    vertices = [
+        # Front face
+        -1.0, -1.0,  1.0,
+         1.0, -1.0,  1.0,
+         1.0,  1.0,  1.0,
+        -1.0,  1.0,  1.0,
+        # Back face
+        -1.0, -1.0, -1.0,
+        -1.0,  1.0, -1.0,
+         1.0,  1.0, -1.0,
+         1.0, -1.0, -1.0,
+    ]
+    # Scale down the cube size
+    for i in range(len(vertices)):
+        vertices[i] *= 0.1
+
+    # Cube texture coordinates
+    # 4 vertices per face, each texture coordinate with 2 values (u, v)
+    tex_coords = [
+        # Front face
+        0.0, 0.0,
+        1.0, 0.0,
+        1.0, 1.0,
+        0.0, 1.0,
+        # Back face (Same as above, adjust according to actual texture)
+        0.0, 0.0,
+        0.0, 1.0,
+        1.0, 1.0,
+        1.0, 0.0,
+    ]
+
+    # Cube indices (two triangles form one face)
+    # 6 faces, each face with 2 triangles, each triangle with 3 indices
+    indices = [
+        # Front face
+        0, 1, 2, 2, 3, 0,
+        # Right face
+        1, 7, 6, 6, 2, 1,
+        # Back face
+        7, 4, 5, 5, 6, 7,
+        # Left face
+        4, 0, 3, 3, 5, 4,
+        # Bottom face
+        4, 7, 1, 1, 0, 4,
+        # Top face
+        3, 2, 6, 6, 5, 3,
+    ]
+
+    return vertices, tex_coords, indices

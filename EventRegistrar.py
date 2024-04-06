@@ -1,4 +1,5 @@
 import pygame
+from OpenGL.GL import glViewport
 
 class EventRegistrar:
     def __init__(self,imgui_impl):
@@ -26,7 +27,8 @@ class EventRegistrar:
                 self.running = False
             elif event.type == pygame.VIDEORESIZE:
                 # Update the window size
-                screen = pygame.display.set_mode((event.w, event.h), pygame.DOUBLEBUF | pygame.OPENGL | pygame.RESIZABLE)
+                screen = pygame.display.set_mode((event.w, event.h),  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE|pygame.HWSURFACE)
+                glViewport(0, 0, event.w, event.h)
             
             self.handle_register_event(event)
             # Pass the pygame events to the ImGui Pygame renderer if we need imgui react(map pygame key to ImGui key etc.)

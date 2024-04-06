@@ -48,23 +48,27 @@ class GuiTest(Object):
         self.create_variable_gui("slider_float",0.5,False, {'widget': 'input'})
         self.create_variable_gui("default_float",0.5,False) 
         self.create_variable_gui("color_vec3", (255.0, 0.0, 0.0), False,{'widget': 'color_picker'})
-        self.create_variable_gui("input_ivec3", (255, 0, 0), False,{'widget': 'input'})
+   
+        self.create_variable_gui("drag_ivec3", (255, 0, 0), False,{'widget': 'drag'})
         self.create_variable_gui("default_ivec3", (255, 0, 0), False)
         self.create_variable_gui("color_vec4",[1.0,1.0,1.0,1.0],False)
         self.appendGuiCustomization(ValueGuiCustomization("color_vec4","vec4",{'widget': 'color_picker'}) )
         
         self.create_variable("input_vec4", [1, 1, 1, 1])        
         self.create_variable_gui("default_vec4", (255, 0, 0,0))
-        
-        self.create_variable_gui("ivecn", (255, 0, 0,0,0,0))
+
+        self.create_variable_gui("input_ivec3", (255, 0, 0), False,{'widget': 'input'})
+        self.create_variable_gui("ivecn", (0, 0, 1,1,0,2))
         self.create_variable_gui("vecn", (255, 0, 0,0,0,0))
+
         self.create_variable_gui("float_array_var_plot", [0.1, 0.2, 0.3, 0.4,0.2], False,{'widget': 'plot_lines'})         
         self.create_variable_gui("string_var", "Hello ImGui", False,{'widget': 'input'})
         self.create_variable_gui("string_var2", "Hello ImGui", False)
         
-        self.addAction("reload NoiseImage", lambda object: globalImageLoader.load_image(object.getValue("NoiseImage")) )
-        testDictionary = {"a": 1, "b": 2, "StepSize2": 3.0,"sonDictionary":{"son_a": 11, "gradSondict": {"gradSon_b":22 }}}
-        self.create_variable("testDictionary",testDictionary,True)
+        self.addAction("reload NoiseImage", lambda object: print("reload image")) 
+        
+        testDictionary = { "a": 1, "array0": [0.1, 0.2, 0.3, 0.4,0.2], "StepSize2": 3.0,"sonDictionary":{"son_a": 11, "array1": [0.3, 0.2, 0.3],"gradSondict": {"gradSon_b":22 ,"gradVec":[1,2,3]}}}
+        self.create_variable("testDictionary",testDictionary,False)
    
    
         
@@ -189,7 +193,7 @@ def drawVectorGlyph(vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0
 def main():
     pygame.init()
     size = (800, 600)
-    pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE)
+    pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE|pygame.HWSURFACE)
     # Configure logging to display all messages
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')    
 
@@ -198,6 +202,7 @@ def main():
     gl.glEnable(gl.GL_DEPTH_TEST)
     gl.glEnable(gl.GL_TEXTURE_2D)  # Enable texture mapping
     gl.glClearColor(0.1, 0.1, 0.1, 1)
+    gl.glViewport(0, 0, size[0], size[1])
 
     # Setup ImGui context and the pygame renderer for ImGui
     imgui.create_context()
@@ -217,12 +222,12 @@ def main():
     # all the objects in the scene
     scene=Scene("DefaultScene")
     # renderParamterPage=LicParameter("LicParameter")
-    camera = Camera(45.0, (0, 0, 5), (0, 0, 0),size[0],size[1])
+    camera = Camera(60.0, (0, 0, 5), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
     eventRegister=EventRegistrar(impl)
     actFieldWidget=ActiveField()
     scene.add_object(actFieldWidget)
     scene.add_object(MainUICommand("mainCommandUI"))
-    scene.add_object(GuiTest())
+    # scene.add_object(GuiTest())
     scene.add_object(camera)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
     eventRegister.register(lambda event: camera.eventCallBacks(event))
@@ -244,23 +249,32 @@ def main():
     # resUfield=train_pipeline(vectorField2d,args)
     # actFieldWidget.insertField("rfc",vectorField2d)
     # actFieldWidget.insertField("Result field",resUfield)
-    plane=VertexArrayObject("plane")
-    plane.setGuiVisibility(False)
-    vertices, indices, textures= createPlane([32,32],[-2.0,-2.0,2.0,2.0])
-    plane.appendVertexGeometry(vertices, indices, textures)
-    plane.setMaterial(defaultMat)
-    scene.add_object(plane)
+    # plane=VertexArrayObject("plane")
+    # # plane.setGuiVisibility(False)
+    # vertices, indices, textures= createPlane([32,32],[-2,-2,2,2])
+    # plane.appendVertexGeometry(vertices, indices, textures)
+    # plane.setMaterial(defaultMat)
+    # scene.add_object(plane)
+
+    # plane2=VertexArrayObject("plane2")
+    # vertices, indices, textures= createPlane([32,32],[-2000,-2000,2000,2000])
+    # plane2.appendVertexGeometry(vertices, indices, textures)
+    # plane2.setMaterial(defaultMat)
+    # scene.add_object(plane2)
+    v,t,i=create_cube()
+    cube=VertexArrayObject("cube")
+    cube.appendVertexGeometry(v, i,t)
+    cube.setMaterial(defaultMat)
+    scene.add_object(cube)
 
     clock = pygame.time.Clock()
     while eventRegister.running:
         eventRegister.handle_events()
         # Rendering
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-        camera.apply_projection()
-        camera.apply_view()
+
         
        
-
         imgui.new_frame()
         scene.drawGui()
         imgui.render()
@@ -271,7 +285,7 @@ def main():
 
         impl.render(imgui.get_draw_data())
 
-        drawVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
+        # drawVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
 
         pygame.display.flip()
         pygame.time.wait(10)# Limit to 60 frames per second

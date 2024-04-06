@@ -5,7 +5,7 @@ import pygame
 from fileMonitor import FileMonitor
 from GuiObjcts.Object import Object,singleton
 from GuiObjcts.mainCommandUI import getlogger
-
+import glm
 logger=getlogger()
 
 def create_texture(image_data):
@@ -122,64 +122,77 @@ class ShaderProgram:
             print(f"Shader files updated: {updated_files}")
             self.needReload = True
             
-    def _get_uniform_locations(self):
-
-    
+    def _get_uniform_locations(self) -> dict:
         # Initialize an empty dictionary to hold uniform locations
         uniform_locations = {}
-        
+
         # Get the number of active uniforms and the max name length
         num_uniforms = gl.glGetProgramiv(self.program_id, gl.GL_ACTIVE_UNIFORMS)
         max_name_length = gl.glGetProgramiv(self.program_id, gl.GL_ACTIVE_UNIFORM_MAX_LENGTH)
-        
+
         # Iterate through all the active uniforms
         for i in range(num_uniforms):
-            # Retrieve the name of the i-th uniform
+            # Retrieve the name, size, and type of the i-th uniform
             name, size, uniform_type = gl.glGetActiveUniform(self.program_id, i)
-            
+            name = str(name.decode("utf-8"))
+
             # Retrieve the location (address) of the uniform
             location = gl.glGetUniformLocation(self.program_id, name)
-            
-            # Store the location in the dictionary using the name as the key
-            uniform_locations[name] = location
-         
-        # Return to the caller with the dictionary of uniform locations
+
+            # Store the location, size, and type in the dictionary using the name as the key
+            uniform_locations[name] = (location, size, uniform_type,False)
+
         return uniform_locations
 
-    def setUniform(self, name, value, type="float"):
-        self.Use()        
-        if name not in self.uniform_locations:
-            print(f"Warning: Uniform {name} does not exist in the shader program.")
+    def setUniform(self, name, value):
+        if name not in self.uniform_locations.keys():
+            logger.warning(f" Uniform {name} does not exist in the shader program.")
             return
-        location = self.uniform_locations[name]
-        # Float
-        if type == "float":
+        location, size, uniform_type,hasBeenSet = self.uniform_locations[name]
+        # Set the uniform based on the type
+        if uniform_type == gl.GL_FLOAT:
             gl.glUniform1f(location, value)
-        # Integer
-        elif type == "int":
+        elif uniform_type == gl.GL_INT:
             gl.glUniform1i(location, value)
-        # Vector2
-        elif type == "vec2":
+        elif uniform_type == gl.GL_FLOAT_VEC2:
             gl.glUniform2fv(location, 1, value)
-        # Vector3
-        elif type == "vec3":
+        elif uniform_type == gl.GL_FLOAT_VEC3:
             gl.glUniform3fv(location, 1, value)
-        # Vector4
-        elif type == "vec4":
+        elif uniform_type == gl.GL_FLOAT_VEC4:
             gl.glUniform4fv(location, 1, value)
-        # 2x2 Matrix
-        elif type == "mat2":
-            gl.glUniformMatrix2fv(location, 1, GL_FALSE, value)
-        # 3x3 Matrix
-        elif type == "mat3":
-            gl.glUniformMatrix3fv(location, 1, GL_FALSE, value)
-        # 4x4 Matrix
-        elif type == "mat4":
-            gl.glUniformMatrix4fv(location, 1, GL_FALSE, value)
-        else:
-            print(f"Warning: Uniform type {type} is not supported.")
+        elif uniform_type == gl.GL_FLOAT_MAT2:
+            matrix_data = glm.value_ptr(value) if value.__class__==glm.mat2 else value
+            gl.glUniformMatrix2fv(location, 1, gl.GL_FALSE, matrix_data)
+        elif uniform_type == gl.GL_FLOAT_MAT3:
+            matrix_data = glm.value_ptr(value) if value.__class__==glm.mat3 else value
+            gl.glUniformMatrix3fv(location, 1, gl.GL_FALSE, matrix_data)
+        elif uniform_type == gl.GL_FLOAT_MAT4:
+            #only support glm.mat4
+            matrix_data = glm.value_ptr(value) if value.__class__==glm.mat4 else value
+            gl.glUniformMatrix4fv(location, 1, gl.GL_FALSE,  matrix_data)
 
-    
+        else:
+            print(f"Warning: Uniform type {uniform_type} is not supported.")
+        self.uniform_locations[name]=(location, size, uniform_type,True)
+
+    def setUniformScope(self, uniformsScopeObjects ):
+        self.Use()
+        if uniformsScopeObjects is None:
+            return
+        dict0={}
+        for obj in uniformsScopeObjects:
+            uniforms=obj.getScope()
+            dict0.update(uniforms)
+        self.setUnforms(dict0)
+        self.checkUniforms()
+
+    def checkUniforms(self):
+        #check all active uniforms has been set
+        for name, value in self.uniform_locations.items():
+            if not value[3]:
+                logger.warning(f"Shader program {self.key_name} 's Uniform {name} has not been set.")
+
+        
     def setUnforms(self, uniforms:dict):
         for name, value in uniforms.items():
             self.setUniform(name, value)  
@@ -239,13 +252,7 @@ def test_shader_manager():
     # Use the basic shader program in rendering loop
     shader_program=shader_manager.get_program('basic')
     shader_program.setUniform('myFloat', 0.5)
-    shader_program.setUniform('myInt', 20, 'int')
-    shader_program.setUniform('myVec2', [0.5, 0.5], 'vec2')
-    shader_program.setUniform('myVec3', [0.5, 0.5, 0.5], 'vec3')
-    shader_program.setUniform('myVec4', [0.5, 0.5, 0.5, 1.0], 'vec4')
-    shader_program.setUniform('myMat2', [1.0, 0.0, 0.0, 1.0], 'mat2')
-    shader_program.setUniform('myMat3', [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 'mat3')
-    shader_program.setUniform('myMat4', [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 'mat4')
+   
         
 class Material:
     def __init__(self,name, shader_name,texture0=None,texture1=None):
