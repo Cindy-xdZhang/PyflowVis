@@ -408,6 +408,7 @@ class Object:
         self.autoSaveFolderPath =autoSaveFolderPath
         self.customizations=[]
         self.actions = {}
+        self.callbacks={}
         self.optionValues = {}
         self.GuiVisible=True
         self.renderVisible=False
@@ -449,6 +450,9 @@ class Object:
     def addAction(self, action_name:str, function: callable):
         # Add a new action to the actions dictionary
         self.actions[action_name] = function
+
+    def addCallback(self,valueName:str, callback:callable):
+        self.callbacks[valueName] = callback
 
     def runAction(self, action_name:str, *args, **kwargs):
         # Execute an action by its name
@@ -505,6 +509,9 @@ class Object:
             self.persistentProperties[name] = value            
         else:            
             self.nonPersistentProperties[name] = value
+    def create_variable_callback(self, name:str, value:any, callback:callable,persistent:bool=False, default_value=None) -> None:
+        self.create_variable(name, value, persistent, default_value)
+        self.addCallback(name,callback)
 
     def setValue(self, name:str, value):
         self.updateValue(name, value)
@@ -516,7 +523,6 @@ class Object:
 
 
     def updateValue(self, name:str, value):
-
         # Override to catch properties being set directly
         if name in self.persistentProperties:
             assert(type(value)==type(self.persistentProperties[name]))
@@ -527,6 +533,11 @@ class Object:
         else:
             # If the attribute is not found, raise AttributeError
             raise AttributeError(f"'{self.name}' object has no attribute '{name}'")
+        #if has update callback
+        callback=self.callbacks.get(name)
+        if callback is not None:
+            callback(self)
+
     @typechecked
     def getValue(self, name:str):
         # Override to handle custom property retrieval

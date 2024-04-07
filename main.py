@@ -201,6 +201,7 @@ def main():
     # scene.add_object(plane2)
     # v,t,i=create_cube()
     # cube=VertexArrayObject("cube")
+    
     # cube.appendVertexGeometry(v, i,t)
     # cube.setMaterial(defaultMat)
     # scene.add_object(cube)
@@ -231,7 +232,7 @@ def main():
         # drawVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
 
         pygame.display.flip()
-        pygame.time.wait(10)# Limit to 60 frames per second
+        # pygame.time.wait(10)# Limit to 60 frames per second
      
      
     # scene.save_state_all()

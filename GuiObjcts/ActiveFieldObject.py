@@ -28,6 +28,12 @@ class ActiveField(Object):
         self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
         #list of str is treated specially  as option in my gui implementation, don't need to specify customization, it always render as combo box
         self.create_variable_gui("active field",[""],False)
+        def dirtyCallBack(obj) -> None:
+            vectorGlyph=obj.parentScene.getObject("vectorGlyph")
+            if vectorGlyph is not None:
+                vectorGlyph.dirty=True
+        self.addCallback("time",dirtyCallBack)
+        self.addCallback("active field",dirtyCallBack)
         self.activeField= {}
 
 

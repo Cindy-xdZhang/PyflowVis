@@ -146,7 +146,7 @@ class ShaderProgram:
 
     def setUniform(self, name, value):
         if name not in self.uniform_locations.keys():
-            logger.warning(f" Uniform {name} does not exist in the shader program.")
+            # logger.warning(f" Uniform {name} does not exist in the shader program.")
             return
         location, size, uniform_type,hasBeenSet = self.uniform_locations[name]
         # Set the uniform based on the type
