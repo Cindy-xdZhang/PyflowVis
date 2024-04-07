@@ -519,7 +519,11 @@ class Object:
             return self.optionValues[name]  if name in self.optionValues else None
 
     def updateOptionValue(self, name:str, value) -> None:
-         self.optionValues[name]=value
+        self.optionValues[name]=value
+        #if has update callback
+        callback=self.callbacks.get(name)
+        if callback is not None:
+            callback(self)
 
 
     def updateValue(self, name:str, value):

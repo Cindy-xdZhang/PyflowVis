@@ -229,7 +229,7 @@ def call_on_dirty(func):
 
 
 class VertexArrayVectorGlyph(VertexArrayObject):
-    def __init__(self, name):
+    def __init__(self, name="vectorGlyph"):
         super().__init__(name)
         def dirtyCallBack(obj) -> None:
             obj.dirty=True
@@ -239,9 +239,14 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         self.create_variable_callback("height",0.1,dirtyCallBack,False,0.1)
         self.dirty = True
 
+    def draw(self):
+        if self.dirty==True:
+            actFieldWidget=self.parentScene.getObject("ActiveField")
+            self.updateVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
+        super().draw()
+        return 
 
-
-    def updateVectorGlyph(self,vector_field, time: float=0.0, position=(0, 0, 0), scale=1.0):
+    def updateVectorGlyph(self,vector_field, time: float=0.0):
         """
         Draw vector glyphs representing a vector field interpolated between two time steps.
 
@@ -280,6 +285,7 @@ class VertexArrayVectorGlyph(VertexArrayObject):
                 direction = np.array([vx, vy, 0.0],dtype=np.float32)  # Create a vector from the components
                 # Draw the vector glyph            
                 self.appendConeWithoutCommit(np.array([posX,posY,0.0],dtype=np.float32),direction, radius, hight, segments)
+        self.commit()
         self.dirty=False
           
         

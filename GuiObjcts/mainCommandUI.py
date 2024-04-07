@@ -88,8 +88,9 @@ class MainUICommand(Object):
         imgui.set_next_window_size(leftWindowsWidth, 0.)
         self.posX,self.posY= imgui.get_item_rect_min()
         if imgui.button("Reset View"):
-            print("buton Reset View pressed, no callback  yet  ")
-            
+            camera = self.parentScene.getObject("Camera")
+            if camera is not None:
+                camera.resetCamera()
         imgui.same_line()
         
         imgui.push_style_var(imgui.STYLE_ITEM_SPACING, (1.0, 0.0))
@@ -144,6 +145,11 @@ class MainUICommand(Object):
             self.loggingWidget.DrawPropertiesInGui(self.loggingWidget.persistentProperties)
             self.loggingWidget.DrawPropertiesInGui(self.loggingWidget.nonPersistentProperties)
             imgui.tree_pop()
+
+
+        self.DrawPropertiesInGui(self.persistentProperties)
+        self.DrawPropertiesInGui(self.nonPersistentProperties)
+        self.DrawActionButtons()
 
         #   fps
         io = imgui.get_io()

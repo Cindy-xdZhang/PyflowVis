@@ -1,19 +1,10 @@
-import pygame
-import OpenGL.GL as gl
-from OpenGL.GL import *
-from OpenGL.GLU import *
-import imgui
-from imgui.integrations.pygame import PygameRenderer
-import numpy as np
-import logging
-from GuiObjcts  import *
-from EventRegistrar import EventRegistrar
+from VisualizationEngine import *
 from train_vector_field import *
 from flowCreator import *
-
+from config.config import load_config
 from VertexArrayObject import *
 from shaderManager import *
-
+from VectorField2d import *
 
         
 def screen_to_world(x, y, width, height, modelview, projection, viewport):    
@@ -106,7 +97,9 @@ class Renderable:
             
 
 
-                    
+        
+        
+
                     
 
 
@@ -117,74 +110,54 @@ globalImageLoader=ImageLoader()
 
 
 
-class VectorGlyph(VertexArrayObject):
-      def __init__(self) -> None:
-        super().__init__("VectorGlyph")
-
-
-
  
   
 
 def main():
-    pygame.init()
-    size = (800, 600)
-    pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE|pygame.HWSURFACE)
-    # Configure logging to display all messages
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')    
-
-
-    # Set up OpenGL context
-    gl.glEnable(gl.GL_DEPTH_TEST)
-    gl.glEnable(gl.GL_TEXTURE_2D)  # Enable texture mapping
-    gl.glClearColor(0.1, 0.1, 0.1, 1)
-    gl.glViewport(0, 0, size[0], size[1])
-
-    # Setup ImGui context and the pygame renderer for ImGui
-    imgui.create_context()
-    imgui.get_io().display_size = size
-    imgui.get_io().fonts.get_tex_data_as_rgba32()
-    impl=PygameRenderer()
-     # Assuming you have your LIC texture data ready
+    config=load_config("config/config.yaml")
+    Engine=VisualizationEngine(config=config['rendering'])
+    size=config['rendering']["window_size"]
+   
+    
+    # Assuming you have your LIC texture data ready
     lic_texture_data = np.random.rand(100, 100, 3)*128   # Use random data as an example
     lic_texture_data = lic_texture_data.astype('uint8')
-    
     renderable_object = Renderable(lic_texture_data,5,2,-5)
-    
     shaderManager=getShaderManager()
     shaderManager.add_shader_program("simpleColor","shaders/simple_vertex.glsl","shaders/simple_fragment.glsl")
     defaultMat=Material(name="simpleColorMat",shader_name="simpleColor")
-
-    # all the objects in the scene
-    scene=Scene("DefaultScene")
     # renderParamterPage=LicParameter("LicParameter")
     camera = Camera(60.0, (0, 0, 5), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
-    eventRegister=EventRegistrar(impl)
     actFieldWidget=ActiveField()
-    scene.add_object(actFieldWidget)
-    scene.add_object(MainUICommand("mainCommandUI"))
-    # scene.add_object(GuiTest())
-    scene.add_object(camera)
-    # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
-    eventRegister.register(lambda event: camera.eventCallBacks(event))
-    eventRegister.register(lambda event: actFieldWidget.eventCallBacks(event))
-    eventRegister.register(lambda event: scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
-            
-      
-   
+    VectorGlyph=VertexArrayVectorGlyph()
+    VectorGlyph.setMaterial(defaultMat)
 
-    # scene.add_object(camera)
-    scene.restore_state_all()
-    args={}
+    commandBar=MainUICommand("mainCommandUI")
+
+   #! todo: implement the following actions to the command bar
+    
+    # commandBar.addAction("optc training", lambda obj: load_vector_field(Engine.scene,"autosave") )
+    # commandBar.addAction("save vector field", lambda obj: save_vector_field(Engine.scene,".autosave/"+actFieldWidget.getActiveFieldName()+".json") )
+    # commandBar.addAction("load vector field", lambda obj: load_vector_field(Engine.scene,"autosave") )
+
+    Engine.setUpSceneObjects([actFieldWidget,commandBar,camera,VectorGlyph]   )
+    Engine.eventRegister.register(lambda event: camera.eventCallBacks(event))
+    Engine.eventRegister.register(lambda event: actFieldWidget.eventCallBacks(event))
+    Engine.eventRegister.register(lambda event: Engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
+    # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
+
+
+
+    args=config['training']
     # device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
     device=torch.device("cpu")
     args['device'] = device    
-    args["epochs"]=500
+    args["epochs"]=50
     
     vectorField2d= rotation_four_center((16,16),16)
-    # resUfield=train_pipeline(vectorField2d,args)
+    resUfield=train_pipeline(vectorField2d,args)
     actFieldWidget.insertField("rfc",vectorField2d)
-    # actFieldWidget.insertField("Result field",resUfield)
+    actFieldWidget.insertField("Result field",resUfield)
     # circle=VertexArrayObject("Cone")
     # circle.appendConeWithoutCommit(np.array([0,-1,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32), 0.5, 2, 32)
     # circle.commit()
@@ -201,43 +174,12 @@ def main():
     # scene.add_object(plane2)
     # v,t,i=create_cube()
     # cube=VertexArrayObject("cube")
-    
     # cube.appendVertexGeometry(v, i,t)
     # cube.setMaterial(defaultMat)
     # scene.add_object(cube)
-    VectorGlyph=VertexArrayVectorGlyph("vectorGlyph")
-    VectorGlyph.setMaterial(defaultMat)
-    scene.add_object(VectorGlyph)
-    clock = pygame.time.Clock()
-    while eventRegister.running:
-        eventRegister.handle_events()
-        # Rendering
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
 
-        
-       
-        imgui.new_frame()
-        scene.drawGui()
-        imgui.render()
-        imgui.end_frame()
-        
-        # renderable_object.draw()
-
-        impl.render(imgui.get_draw_data())
-        VectorGlyph.updateVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
-        VectorGlyph.commit()
-
-        scene.draw_all()
- 
-        # drawVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
-
-        pygame.display.flip()
-        # pygame.time.wait(10)# Limit to 60 frames per second
-     
-     
-    # scene.save_state_all()
-    impl.shutdown()
-    pygame.quit()
+    Engine.MainLoop()
+    
 
 if __name__ == "__main__":
     main()

@@ -13,11 +13,11 @@ def load_config(path):
     device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
     args['device'] = device
      # ==> Logger
-    set_logger(result_dir)
-    logging.info(args)
-    if  args['wandb']==True:
+    # set_logger(result_dir)
+    # logging.info(args)
+    # if  args['wandb']==True:
         # wandb init
-        pass
+        # pass
     return args
     
 

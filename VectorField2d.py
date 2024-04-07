@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import cereal
+import os
+
 class VectorFieldLinearOperation():
     """ the VectorFieldLinearOperation class implements linear operations on vector fields.
     """ 
@@ -101,4 +104,36 @@ class VectorField2D(nn.Module):
         diff, magnitudeR=VectorFieldLinearOperation.difference(inputFieldV,self.field)
         killingEnergy=VectorFieldLinearOperation.compute_killing_energy(self)
         return killingEnergy+magnitudeR
+    
+    # Cereal serialization and deserialization functions
+    def serialize(self, archive):
+        archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
+
+    def deserialize(self, archive):
+        archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
         
+
+
+# def save_vector_field(scene, file_path):
+#     actWidget=scene.getObject("ActiveField")    if scene is not None else None
+#     vec2d=actWidget.getActiveField() if actWidget is not None else None
+#     if vec2d is not None:
+#         directory = os.path.dirname(file_path)
+#         if not os.path.exists(directory):
+#             os.makedirs(directory)
+#         # Check if the file exists, and create it if not
+#         if not os.path.exists(file_path):
+#             with open(file_path, 'wb') as f:
+#                 self.serialize
+#         else:
+#             with open(file_path, 'wb') as f:
+#                 cereal.serialize_state(vec2d, f)   
+
+# def load_vector_field(scene,file_path):
+#     actWidget=scene.getObject("ActiveField")    if scene is not None else None
+#     if actWidget is not None:
+#         vec2d=VectorField2D(-1,-1,-1)
+#         with open(file_path, 'rb') as f:
+#             cereal.deserialize_state(vec2d, f) 
+#             actWidget.insertField("loaded field"+file_path,vec2d)
+     
