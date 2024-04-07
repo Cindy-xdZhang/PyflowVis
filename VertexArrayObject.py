@@ -200,6 +200,61 @@ class VertexArrayObject(Object):
         # self.appendTriangleWithoutCommit(lastVBottom, vBottom, vTop)
          #    put caps to the cylinder
         self.appendCircleWithoutCommit(startPos, direction, radius, segments)
+    def appendCylinderWithoutCommit(self, centerPos, direction, radius, height, segments):
+        # Normalize the direction vector
+        direction = direction / np.linalg.norm(direction)
+
+        # Calculate orthogonal vectors to create the circular base
+        orthoVector1 = np.array([-direction[1], direction[0], 0])
+        if np.dot(orthoVector1, orthoVector1) < 1e-6:  # Handle the case where direction is parallel to z-axis
+            orthoVector1 = np.array([0, -direction[2], direction[1]])
+        orthoVector1 /= np.linalg.norm(orthoVector1)
+        orthoVector2 = np.cross(direction, orthoVector1)
+        orthoVector2 /= np.linalg.norm(orthoVector2)
+
+        # Calculate vertices for the top and bottom circles
+        circleVertices = []
+        for i in range(segments):
+            angle = 2 * np.pi * i / segments
+            dx = np.cos(angle)
+            dy = np.sin(angle)
+            vertexBase = centerPos - 0.5 * height * direction + radius * (dx * orthoVector1 + dy * orthoVector2)
+            vertexTop = centerPos + 0.5 * height * direction + radius * (dx * orthoVector1 + dy * orthoVector2)
+            circleVertices.extend(vertexBase.tolist())
+            circleVertices.extend(vertexTop.tolist())
+
+        # Calculate indices for the side surfaces
+        indices = []
+        for i in range(segments):
+            baseIndex = 2 * i
+            topIndex = baseIndex + 1
+            nextBaseIndex = (2 * ((i + 1) % segments))
+            nextTopIndex = nextBaseIndex + 1
+            
+            # Each quad on the side of the cylinder is made of two triangles
+            indices.extend([baseIndex, nextBaseIndex, nextTopIndex, nextTopIndex, topIndex, baseIndex])
+
+        # Texture coordinates (Optional)
+        # For simplicity, we can map the texture linearly around the circumference and along the height
+        texCoords = []
+        for i in range(segments):
+            texCoords.extend([i / segments, 0])  # Bottom vertex
+            texCoords.extend([i / segments, 1])  # Top vertex
+
+        # Append to the class attributes
+        self.appendVertexGeometryNoCommit(circleVertices, indices, texCoords)
+
+    def appendArrowWithoutCommit(self, shaftBasePos:np.ndarray[np.float32,3], direction:np.ndarray[np.float32,3], shaftRadius:float, shaftHeight:float, coneHeight:float, coneRadius:float, segments:int):
+        direction = direction / np.linalg.norm(direction)
+        cylinderCenterPos=shaftBasePos+direction * shaftHeight * 0.5
+        # Append the cylinder (shaft of the arrow)
+        self.appendCylinderWithoutCommit(cylinderCenterPos, direction, shaftRadius, shaftHeight, segments)
+        
+        # Calculate the position for the base of the cone (tip of the arrow)
+        coneBasePos = shaftBasePos + direction * (shaftHeight)
+        coneCenterPos=coneBasePos+direction * coneHeight * 0.5
+        # Append the cone (tip of the arrow)
+        self.appendConeWithoutCommit(coneCenterPos, direction, coneRadius, coneHeight, segments)
 
 
 
@@ -289,8 +344,16 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         self.dirty=False
           
         
-
+class CoordinateSystem(VertexArrayObject):
+                       
+    def __init__(self, name="CoordinateSystem"):
+        super().__init__(name)
+        self.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([1,0,0],dtype=np.float32),0.05,1.0, 0.2, 0.1, 8)
+        self.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32),0.05,1.0, 0.2, 0.1, 8)
+        self.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([0,0,1],dtype=np.float32),0.05,1.0, 0.2, 0.1, 8)
+        self.commit()
     
+        
 
 
 
