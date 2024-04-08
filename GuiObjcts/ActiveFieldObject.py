@@ -1,4 +1,5 @@
 from   .Object import *
+from  VectorField2d import *
 import pygame
 
 class LICRender(Object):
@@ -28,12 +29,20 @@ class ActiveField(Object):
         self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
         #list of str is treated specially  as option in my gui implementation, don't need to specify customization, it always render as combo box
         self.create_variable_gui("active field",[""],False)
-        def dirtyCallBack(obj) -> None:
+        def dirtyCallBack(obj:ActiveField) -> None:
             vectorGlyph=obj.parentScene.getObject("vectorGlyph")
             if vectorGlyph is not None:
                 vectorGlyph.dirty=True
         self.addCallback("time",dirtyCallBack)
-        self.addCallback("active field",dirtyCallBack)
+
+        def updateActivefieldcb(obj:ActiveField) -> None:
+            dirtyCallBack(obj)
+            activeField=obj.getActiveField()
+            if activeField is not None:
+                animationSpeed=0.5*activeField.timeInterval
+                obj.updateValue("animationSpeed",animationSpeed)
+        self.addCallback("active field",updateActivefieldcb)
+
         self.activeField= {}
 
 

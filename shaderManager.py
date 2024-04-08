@@ -4,9 +4,9 @@ import OpenGL.GL as gl
 import pygame
 from fileMonitor import FileMonitor
 from GuiObjcts.Object import Object,singleton
-from GuiObjcts.mainCommandUI import getlogger
 import glm
-logger=getlogger()
+import logging
+logger=logging.getLogger()
 
 def create_texture(image_data):
     texture_id = glGenTextures(1)
@@ -176,12 +176,17 @@ class ShaderProgram:
         self.uniform_locations[name]=(location, size, uniform_type,True)
 
     def setUniformScope(self, uniformsScopeObjects ):
+        """set the uniforms for the shader program from the scope of the objects
+
+        Args:
+            uniformsScopeObjects (list of [Object or dict]): the later object overwrite the former object's uniforms
+        """
         self.Use()
         if uniformsScopeObjects is None:
             return
         dict0={}
         for obj in uniformsScopeObjects:
-            uniforms=obj.getScope()
+            uniforms=obj.getScope() 
             dict0.update(uniforms)
         self.setUnforms(dict0)
         self.checkUniforms()
@@ -205,57 +210,10 @@ class ShaderProgram:
             self.needReload = False
         gl.glUseProgram(self.program_id)
 
-@singleton
-class ShaderManager(Object):
-    """Class for managing multiple shader programs
-    """
-    def __init__(self,name):
-        super().__init__(name)
-        self.shaders = {}  # Stores all shader programs
-   
-    # Adds a shader program with a given key
-    def add_shader_program(self, key, vertex_shader_path, fragment_shader_path):
-        self.shaders[key] = ShaderProgram(key,vertex_shader_path, fragment_shader_path)
-      
-    # Uses the shader program specified by the given key
-    def use_program(self, key:str):
-        if key in self.shaders:
-            self.shaders[key].Use()
-        else:
-            logger.error(f'Shader program {key} not found.')
-            
-    def get_program(self, key:str):
-        if key in self.shaders:
-            return self.shaders[key]
-        else:
-            logger.error(f'Shader program {key} not found.')
 
-def getShaderManager() -> ShaderManager:
-    return ShaderManager("ShaderManager")
-
-def setup_opengl():
-    pygame.init()
-    size = (800, 600)
-    pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE)
-    print("OpenGL initialized: Version", glGetString(GL_VERSION).decode())
-    # Now it's safe to call OpenGL functions; create shaders, buffers, etc.
-    #program_id = glCreateProgram()
-    
-    
-    
-def test_shader_manager():
-    """Test the ShaderManager class."""
-    setup_opengl()
-    shader_manager = ShaderManager("test_sm")
-    # Add a basic shader program
-    shader_manager.add_shader_program('basic', 'shaders/simple_vertex.glsl', 'shaders/simple_fragment.glsl')
-    # Use the basic shader program in rendering loop
-    shader_program=shader_manager.get_program('basic')
-    shader_program.setUniform('myFloat', 0.5)
-   
         
 class Material:
-    def __init__(self,name, shader_name,texture0=None,texture1=None):
+    def __init__(self,name:str, shader_name:str,texture0=None,texture1=None):
         """material is collection of shdader,texture,uniforms for rendering an object
 
         Args:
@@ -287,6 +245,59 @@ class Material:
         #     gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture_id)
         #     gl.glUniform1i(gl.glGetUniformLocation(self.shader_program, "texture1"), 0)
     
+
+
+@singleton
+class ShaderManager(Object):
+    """Class for managing multiple shader programs
+    """
+    def __init__(self,name):
+        super().__init__(name)
+        self.shaders = {}  # Stores all shader programs
+   
+    # Adds a shader program with a given key
+    def add_shader_program(self, key, vertex_shader_path, fragment_shader_path):
+        self.shaders[key] = ShaderProgram(key,vertex_shader_path, fragment_shader_path)
+      
+    # Uses the shader program specified by the given key
+    def use_program(self, key:str):
+        if key in self.shaders:
+            self.shaders[key].Use()
+        else:
+            logger.error(f'Shader program {key} not found.')
+            
+    def get_program(self, key:str):
+        if key in self.shaders:
+            return self.shaders[key]
+        else:
+            logger.error(f'Shader program {key} not found.')
+    def getDefautlMaterial(self):
+        return Material("defaultMaterial","simpleColor")
+
+def getShaderManager() -> ShaderManager:
+    return ShaderManager("ShaderManager")
+
+
+def setup_opengl():
+    pygame.init()
+    size = (800, 600)
+    pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE)
+    print("OpenGL initialized: Version", glGetString(GL_VERSION).decode())
+    # Now it's safe to call OpenGL functions; create shaders, buffers, etc.
+    #program_id = glCreateProgram()
+    
+    
+    
+def test_shader_manager():
+    """Test the ShaderManager class."""
+    setup_opengl()
+    shader_manager = ShaderManager("test_sm")
+    # Add a basic shader program
+    shader_manager.add_shader_program('basic', 'shaders/simple_vertex.glsl', 'shaders/simple_fragment.glsl')
+    # Use the basic shader program in rendering loop
+    shader_program=shader_manager.get_program('basic')
+    shader_program.setUniform('myFloat', 0.5)
+   
 
     
 

@@ -1,11 +1,11 @@
 import jsonpickle
-import OpenGL.GL as gl
 import numpy as np
 import unittest
 import os
 import imgui
 from typing import Dict, Any
 from typeguard import typechecked
+import logging
 
 def singleton(cls):
     _instance = {}
@@ -14,6 +14,7 @@ def singleton(cls):
         if cls not in _instance:
             _instance[cls] = cls(*args, **kwargs)
         return _instance[cls]
+    inner._original_class = cls  # Expose the original class
     return inner
 
 def input_vecn_int_float(label, vecn_input):
@@ -206,7 +207,6 @@ def draw_numpy_array(key, array):
         imgui.text(f"Row {row_idx}: {row_str}")  
     return False, None
                     
-
 def draw_editable_mat4(label, mat):
  
     changed = False
@@ -225,11 +225,6 @@ def draw_editable_mat4(label, mat):
                 imgui.same_line()
     imgui.pop_item_width()
     return changed, mat
-
-
-
-
-
 
 
 
@@ -451,8 +446,15 @@ class Object:
         # Add a new action to the actions dictionary
         self.actions[action_name] = function
 
+    @typechecked
     def addCallback(self,valueName:str, callback:callable):
-        self.callbacks[valueName] = callback
+        assert(valueName in self.persistentProperties or valueName in self.nonPersistentProperties )
+        if valueName in self.callbacks.keys():
+            self.callbacks[valueName] = self.callbacks[valueName]+callback
+        else:
+            self.callbacks[valueName] = [callback] 
+
+
 
     def runAction(self, action_name:str, *args, **kwargs):
         # Execute an action by its name
@@ -522,11 +524,13 @@ class Object:
         self.optionValues[name]=value
         #if has update callback
         callback=self.callbacks.get(name)
-        if callback is not None:
-            callback(self)
+        if isinstance(callback, list):
+            for cb in callback:
+                cb(self)
+            
 
 
-    def updateValue(self, name:str, value):
+    def updateValue(self, name:str, value:Any)->None:
         # Override to catch properties being set directly
         if name in self.persistentProperties:
             assert(type(value)==type(self.persistentProperties[name]))
@@ -539,8 +543,9 @@ class Object:
             raise AttributeError(f"'{self.name}' object has no attribute '{name}'")
         #if has update callback
         callback=self.callbacks.get(name)
-        if callback is not None:
-            callback(self)
+        if isinstance(callback, list):
+            for cb in callback:
+                cb(self)
 
     @typechecked
     def getValue(self, name:str):
@@ -559,7 +564,6 @@ class Object:
 
 
     def DrawPropertiesInGui(self,propertyMap:dict[str, Any],parentNamelist:list=None) -> None:        
-       
         for key, value in propertyMap.items():
             typeName=getTypeName(value)#MAP PYTHON TYPE TO IMGUI TYPE NAME(KEY to get imgui function)
             if isinstance(value, dict):
@@ -604,13 +608,47 @@ class Object:
         """Overwrite this function to change the content get rendered  in the ImGui window.
         """
         if self.GuiVisible:
-            imgui.begin(self.name)
+            _,self.GuiVisible=imgui.begin(self.name,self.GuiVisible)
             # Draw persistent properties with appropriate ImGui controls
             self.DrawPropertiesInGui(self.persistentProperties)
             self.DrawPropertiesInGui(self.nonPersistentProperties)
             self.DrawActionButtons()
             imgui.end()
-       
+
+   
+@singleton
+class LoggingWidget(Object):
+    def __init__(self, name):
+        super().__init__(name)
+        self.loggerOptionSet =  ["wandb","logging"]
+        self.loggingLevelSet=  ["DEBUG","INFO","WARNING","ERROR","CRITICAL"]
+        self.create_variable_gui("logger", self.loggerOptionSet, False)
+        self.create_variable_gui("loggingLevel",    self.loggingLevelSet, False)
+        self.updateOptionValue("logger", "logging")
+        self.updateOptionValue("loggingLevel", "DEBUG")
+        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d- %(message)s')      
+
+  
+   
+        # Configure logging to display all messages
+
+    def updateOptionValue(self,key,value):
+        super().updateOptionValue(key,value)
+        if key=="loggingLevel":            
+            if value=="DEBUG":
+                logging.getLogger().setLevel(level=logging.DEBUG)
+            elif value=="INFO":
+                logging.getLogger().setLevel(level=logging.INFO)
+            elif value=="WARNING":
+                logging.getLogger().setLevel(level=logging.WARNING)
+            elif value=="ERROR":
+                logging.getLogger().setLevel(level=logging.ERROR)
+            elif value=="CRITICAL":
+                logging.getLogger().setLevel(level=logging.CRITICAL)
+
+         
+def getLoggingWidget() -> LoggingWidget:
+    return LoggingWidget("Logger")
 
 @singleton
 class Scene(Object):
@@ -618,17 +656,18 @@ class Scene(Object):
         super().__init__(name,autoSaveFolderPath)
         self.objects = {}
     def add_object(self, obj):
+        assert isinstance(obj,Object)
+        if self.hasObject(obj.name):
+            getlogger().warning(f" Object '{obj.name}' already exists in scene '{self.name}'.")
+            return  
         self.objects[obj.name]= obj
         obj.parentScene=self
     def hasObject(self, name):
         return name in self.objects.keys()
     def getObject(self, name): 
         return self.objects.get(name, None)    
-    def drawGui(self):
-        super().drawGui()
-        for obj in self.objects.values():
-            obj.drawGui()
-            
+    
+  
     def draw_all(self):
         for obj in self.objects.values():
             obj.draw()
@@ -645,12 +684,37 @@ class Scene(Object):
     
     def toggle_object_visibility(self,ObjectName:str):
         """toggle an onbject's visibility in gui 
-
         Returns:
-            _type_: _description_
+            None: 
         """        
         obj=self.getObject(ObjectName)  
         obj.setGuiVisibility(not obj.drawGui) if obj else None     
+
+    def drawGui(self):
+        #draw the scene as an object(draw its properties, if any) 
+        if imgui.begin(self.name):
+            self.DrawPropertiesInGui(self.persistentProperties)
+            self.DrawPropertiesInGui(self.nonPersistentProperties)
+            self.DrawActionButtons()
+            expanded, visible =imgui.collapsing_header("Objects List", flags=imgui.TREE_NODE_DEFAULT_OPEN)
+            if expanded:
+                for obj_name in self.objects:
+                    # This variable tracks the visibility; you might need to store visibility state elsewhere
+                    # For demonstration, using a local variable. Consider adapting it to your object's properties
+                    obj=self.getObject(obj_name)
+                    if isinstance(obj,Object) is False:
+                        continue
+                    visible = obj.GuiVisible
+                    imgui.text(obj_name)
+                    imgui.same_line()
+                    changed, new_visible = imgui.checkbox(f"##{obj_name}", visible)
+                    if changed:
+                        obj.setGuiVisibility(new_visible) 
+            imgui.end()
+        #draw all the objects in the scene
+        for obj in self.objects.values():
+            obj.drawGui()
+            
         
 
     

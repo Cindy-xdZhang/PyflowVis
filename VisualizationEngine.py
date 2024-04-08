@@ -8,14 +8,21 @@ import numpy as np
 import logging
 from GuiObjcts  import *
 from EventRegistrar import EventRegistrar
+from GuiObjcts.Object import Scene, singleton
 
+def getEngine():
+    return VisualizationEngine({})
+
+@singleton
 class VisualizationEngine:
     def __init__(self,config) -> None:
         size=config["window_size"]
         pygame.init()
-        pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE|pygame.HWSURFACE)
-        # Configure logging to display all messages
-        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+        # pygame.font.init()
+        # font_size = 50
+        # self.font = pygame.font.SysFont("Arial", font_size)
+        self.screen=pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE|pygame.HWSURFACE)
+    
          # Set up OpenGL context
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glEnable(gl.GL_TEXTURE_2D)  # Enable texture mapping
@@ -28,6 +35,34 @@ class VisualizationEngine:
         imgui.get_io().fonts.get_tex_data_as_rgba32()
         self.impl=PygameRenderer()
         self.eventRegister=EventRegistrar(self.impl)
+        self.initLoggingSetting()
+        
+    def initLoggingSetting(self):
+        class CustomFormatter(logging.Formatter):
+            grey = "\x1b[38;21m"
+            yellow = "\x1b[33;21m"
+            red = "\x1b[31;21m"
+            bold_red = "\x1b[31;1m"
+            reset = "\x1b[0m"
+            format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
+
+            FORMATS = {
+                logging.DEBUG: grey + format + reset,
+                logging.INFO: grey + format + reset,
+                logging.WARNING: yellow + format + reset,
+                logging.ERROR: red + format + reset,
+                logging.CRITICAL: bold_red + format + reset
+            }
+            def format(self, record):
+                log_fmt = self.FORMATS.get(record.levelno)
+                formatter = logging.Formatter(log_fmt)
+                return formatter.format(record)
+
+        ch = logging.StreamHandler()
+        ch.setFormatter(CustomFormatter())
+        logger = logging.getLogger()
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(ch)
 
     def setUpSceneObjects(self,ObjectList=None):
         # all the objects in the scene
@@ -35,7 +70,7 @@ class VisualizationEngine:
             self.scene.add_object(obj)
         self.scene.restore_state_all()
 
-    def getScene(self):
+    def getScene(self) -> Scene:
         return self.scene
     
 
@@ -45,17 +80,16 @@ class VisualizationEngine:
             self.eventRegister.handle_events()
             # Rendering
             gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-
         
+            self.scene.draw_all()
+
             imgui.new_frame()
             self.scene.drawGui()
             imgui.render()
             imgui.end_frame()
             self.impl.render(imgui.get_draw_data())
-            self.scene.draw_all()
-    
+
             pygame.display.flip()
-            # pygame.time.wait(10)# Limit to 60 frames per second
         
         # scene.save_state_all()
         self.impl.shutdown()

@@ -3,11 +3,10 @@ from OpenGL.GLU  import *
 from .Object import Object
 import numpy as np
 import pygame
-from .mainCommandUI import getlogger
 import imgui
 import glm
-
-logger=getlogger()
+import logging
+logger=logging.getLogger()
 
 def screen_to_arcball(x, y, width, height):
     px = 1.0 - (x * 2.0) / width

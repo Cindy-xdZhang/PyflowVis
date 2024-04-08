@@ -1,21 +1,20 @@
 
 from OpenGL import GL as gl
-from GuiObjcts.Object import Object
+from GuiObjcts.Object import Object,Scene
 import numpy as np    
 from shaderManager import getShaderManager,ShaderProgram
 from functools import wraps
+
 
 class VertexArrayObject(Object):
     def __init__(self,name):
         super().__init__(name)
         # Create a new VAO and bind it
         self.vao_id = gl.glGenVertexArrays(1)
-
-        # Initialize lists to store vertex and element data
-        self.vertex_geometry  = []
+        self.vertex_geometry:list=[] 
+        self.vertex_tex_coords:list=[]
+        self.indices=[]
         self.vetex_count=0
-        self.indices = []
-        self.vertex_tex_coords  = []
 
         # Create placeholders for VBO and EBO
         self.vbo_ids = gl.glGenBuffers(2)#vertex buffer and texture buffer
@@ -56,14 +55,16 @@ class VertexArrayObject(Object):
 
     def erase(self):
         self.vertex_geometry  = []
-        self.vetex_count=0
-        self.indices = []
         self.vertex_tex_coords  = []
+        self.indices = []
+        self.vetex_count=0
         self.commit()
+        
     def appendVertexGeometryNoCommit(self, vertex_data, index_data,texture_date):
         # Append new vertex and index data
         self.vertex_geometry.extend(vertex_data)
-        self.indices.extend(index_data)
+        index_data_flattern=[index+self.vetex_count for index in index_data]
+        self.indices.extend(index_data_flattern)
         self.vertex_tex_coords.extend(texture_date)
         self.vetex_count+=len(vertex_data)//3
 
@@ -71,9 +72,9 @@ class VertexArrayObject(Object):
         # Assuming pos0, pos1, pos2 are numpy arrays or can be converted into numpy arrays
         geometryVerts =[pos0[0], pos0[1], pos0[2], pos1[0], pos1[1], pos1[2], pos2[0], pos2[1], pos2[2]]
 
-        previoussize=self.vetex_count
+   
         # Assuming a simple triangle, elements (indices) would be straightforward
-        elements = [previoussize, previoussize+1,previoussize+ 2]
+        elements = [0, 1, 2]
         
         # Define texture coordinates for the triangle
         texCoords = [0.0, 0.0,1.0, 0.0,1.0, 1.0]
@@ -82,8 +83,25 @@ class VertexArrayObject(Object):
         # For example purposes, this might look like:
         self.appendVertexGeometryNoCommit(geometryVerts, elements, texCoords)
 
+
+
+    # def flattern(self)->None:
+    #     self.vertex_geometry = []
+    #     self.vertex_tex_coords = []
+    #     self.indices = []
+    #     indiceOffset=0
+    #     for submesh in self.submeshes:
+    #         self.vertex_geometry.extend(submesh.vertex_geometry)
+    #         self.vertex_tex_coords.extend(submesh.vertex_tex_coords)
+    #         indices_offset=[idx+indiceOffset for idx in submesh.indices]
+    #         self.indices.extend(indices_offset)
+    #         indiceOffset+=len(submesh.vertex_geometry)//3
+
+        
+
     def commit(self) -> None:
-        #! TODO: add multiple vertex,tex,index list,and a flattern function to support add multiple objects in multi-threads
+  
+        # self.flattern()
         vertex_geometry = np.array(self.vertex_geometry, dtype=np.float32)
         vertex_tex_coords = np.array(self.vertex_tex_coords, dtype=np.float32)
         indices = np.array(self.indices, dtype=np.uint32)
@@ -193,13 +211,14 @@ class VertexArrayObject(Object):
         lastVBottom = startPos + lastV * radius
         temporayVertex=temporayVertex[0:9*segments]
         temporayVertex[-9:] =[lastVBottom[0], lastVBottom[1], lastVBottom[2], vBottom[0], vBottom[1], vBottom[2], vTop[0], vTop[1], vTop[2]]
-        temporayIndex=list(range(self.vetex_count,self.vetex_count+ 3*segments))#3*segments
+        temporayIndex=list(range(0,3*segments))#3*segments
 
 
         self.appendVertexGeometryNoCommit(temporayVertex, temporayIndex, textureCoords)
         # self.appendTriangleWithoutCommit(lastVBottom, vBottom, vTop)
          #    put caps to the cylinder
         self.appendCircleWithoutCommit(startPos, direction, radius, segments)
+
     def appendCylinderWithoutCommit(self, centerPos, direction, radius, height, segments):
         # Normalize the direction vector
         direction = direction / np.linalg.norm(direction)
@@ -292,6 +311,8 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         self.create_variable_callback("segments",10,dirtyCallBack,False,10)
         self.create_variable_callback("radius",0.01,dirtyCallBack,False,0.01)
         self.create_variable_callback("height",0.1,dirtyCallBack,False,0.1)
+
+        self.create_variable_gui("color",(0.2,-.2,0.2),False,{'widget': 'color_picker'})
         self.dirty = True
 
     def draw(self):
@@ -344,14 +365,36 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         self.dirty=False
           
         
-class CoordinateSystem(VertexArrayObject):
+class CoordinateSystem(Object):
                        
-    def __init__(self, name="CoordinateSystem"):
-        super().__init__(name)
-        self.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([1,0,0],dtype=np.float32),0.05,1.0, 0.2, 0.1, 8)
-        self.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32),0.05,1.0, 0.2, 0.1, 8)
-        self.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([0,0,1],dtype=np.float32),0.05,1.0, 0.2, 0.1, 8)
-        self.commit()
+    def __init__(self, sceneArg:Scene):
+        assert isinstance(sceneArg, Scene._original_class)
+        super().__init__("CoordinateSystem")
+        self.setGuiVisibility(False)
+        Xaxis=VertexArrayObject("Xaxis")
+        Yaxis=VertexArrayObject("Yaxis")
+        Zaxis=VertexArrayObject("Zaxis")
+        Xaxis.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([1,0,0],dtype=np.float32),0.025,2.0, 0.2, 0.05, 16)
+        Yaxis.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32),0.025,2.0, 0.2, 0.05, 16)
+        Zaxis.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([0,0,1],dtype=np.float32),0.025,2.0, 0.2, 0.05, 16)
+        self.Vaos=[Xaxis,Yaxis,Zaxis] 
+        defaultMat =getShaderManager().getDefautlMaterial()
+        self.parentScene=sceneArg
+        self.color=[ [1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]]
+        for  i,axis in enumerate(self.Vaos):
+            axis.create_variable("color",self.color[i])
+            axis.parentScene=self.parentScene
+            axis.setMaterial(defaultMat)
+            axis.commit()
+       
+   
+    def drawGui(self):
+        pass
+    def draw(self):
+       for axis in self.Vaos:
+            axis.draw()
+   
+        
     
         
 

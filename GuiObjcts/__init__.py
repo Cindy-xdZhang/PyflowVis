@@ -1,4 +1,4 @@
-from .Object import Object,Scene,valid_customizations,ValueGuiCustomization
+from .Object import Object,Scene,valid_customizations,ValueGuiCustomization,getLoggingWidget
 from .ActiveFieldObject import ActiveField
-from .mainCommandUI import MainUICommand,getlogger
+from .mainCommandUI import MainUICommand
 from .CameraObject import Camera
