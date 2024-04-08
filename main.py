@@ -5,7 +5,7 @@ from config.config import load_config
 from VertexArrayObject import *
 from shaderManager import *
 from VectorField2d import *
-
+from NLPCommand import *
         
 def screen_to_world(x, y, width, height, modelview, projection, viewport):    
     y = height - y  # OpenGL's y axis  is reversed of pygame's y axis
@@ -131,7 +131,7 @@ def main():
     actFieldWidget=ActiveField()
     VectorGlyph=VertexArrayVectorGlyph()
     VectorGlyph.setMaterial(defaultMat)
-
+    nlpc=  NLPCommandObject()
     commandBar=MainUICommand("mainCommandUI")
 
    #! todo: implement the following actions to the command bar
@@ -169,7 +169,7 @@ def main():
     plane.setMaterial(defaultMat)
     plane.create_variable("color",(0.5,0.6,0.5))
     Engine.scene.add_object(plane)
-
+    Engine.scene.add_object(nlpc)
     # plane.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([1,0,0],dtype=np.float32),0.05,1.0, 0.2, 0.1, 8)
     # plane.commit()
     # plane.setGuiVisibility(False)

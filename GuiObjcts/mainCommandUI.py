@@ -1,7 +1,8 @@
 import imgui
 from .Object import Object,singleton,getLoggingWidget
+from openai import OpenAI
+import openai
 import logging
-
 imguiStackMargin = 10
 leftWindowsWidth = 305
 # lastWindowHeightPolyscope = 200
@@ -115,3 +116,6 @@ class MainUICommand(Object):
                 ms_per_frame = 1000.0 / fps if fps != 0 else 0.0
                 imgui.text(f"{ms_per_frame:.1f} ms/frame ({fps:.1f} FPS)")
             imgui.end()
+
+
+

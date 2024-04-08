@@ -200,19 +200,20 @@ class Camera(Object):
             self.handle_mouse_move(x, y,up=True)
         elif event.type == pygame.VIDEORESIZE:
             self.update_window_size(event.w, event.h)
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.pan(-0.1, 0, 0)  # Pan left
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.pan(0.1, 0, 0)  # Pan right
-        if keys[pygame.K_UP] or keys[pygame.K_w]:
-            self.pan(0, 0.1, 0)  # Pan up
-        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-            self.pan(0, -0.1, 0)  # Pan down
-        if keys[pygame.K_q]:
-            self.pan(0, 0, 0.1)  # Pan forward
-        if keys[pygame.K_e]:
-            self.pan(0, 0, -0.1)  # Pan backward
+        if not(imgui.is_any_item_hovered() or imgui.is_any_item_active()):
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+                self.pan(-0.1, 0, 0)  # Pan left
+            if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+                self.pan(0.1, 0, 0)  # Pan right
+            if keys[pygame.K_UP] or keys[pygame.K_w]:
+                self.pan(0, 0.1, 0)  # Pan up
+            if keys[pygame.K_DOWN] or keys[pygame.K_s]:
+                self.pan(0, -0.1, 0)  # Pan down
+            if keys[pygame.K_q]:
+                self.pan(0, 0, 0.1)  # Pan forward
+            if keys[pygame.K_e]:
+                self.pan(0, 0, -0.1)  # Pan backward
 
 
 
