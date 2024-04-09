@@ -20,17 +20,14 @@ class VertexArrayObject(Object):
         self.vbo_ids = gl.glGenBuffers(2)#vertex buffer and texture buffer
         self.ebo_id = gl.glGenBuffers(1)
         self.init()
-        self.material=None
-        self.shader_program=None
-        self.create_variable("modelMat",np.eye(4,dtype=np.float32),False)
         
-    def setMaterial(self,material):
+        self.material=None
+        self.create_variable("modelMat",np.eye(4,dtype=np.float32),False)
+  
+    def setMaterial(self,material) -> None:
         self.material=material
-        sm=getShaderManager()
-        if  self.material.shader_name in sm.shaders:
-            self.shader_program = sm.get_program(self.material.shader_name)
 
-    def init(self):
+    def init(self) -> None:
         gl.glBindVertexArray(self.vao_id)
         # Bind element buffer object
         gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo_id)
@@ -53,14 +50,14 @@ class VertexArrayObject(Object):
         self.appendVertexGeometryNoCommit(vertex_data, index_data,texture_date)
         self.commit()
 
-    def erase(self):
+    def erase(self) -> None:
         self.vertex_geometry  = []
         self.vertex_tex_coords  = []
         self.indices = []
         self.vetex_count=0
         self.commit()
         
-    def appendVertexGeometryNoCommit(self, vertex_data, index_data,texture_date):
+    def appendVertexGeometryNoCommit(self, vertex_data, index_data,texture_date) -> None:
         # Append new vertex and index data
         self.vertex_geometry.extend(vertex_data)
         index_data_flattern=[index+self.vetex_count for index in index_data]
@@ -122,10 +119,10 @@ class VertexArrayObject(Object):
 
     def draw(self):
         # Bind VAO
-        if self.shader_program is not None:
-            cameraObject=self.parentScene.getObject("Camera")
-            self.shader_program.setUniformScope([cameraObject,self])
-            self.shader_program.Use()
+        if self.material is not None:
+            self.material.shader_program.setUniformScope([self.parentScene, self.cameraObject,self])
+            self.material.apply()
+
         gl.glBindVertexArray(self.vao_id)  
         # Draw elements
         gl.glDrawElements(gl.GL_TRIANGLES, len(self.indices), gl.GL_UNSIGNED_INT, None)
@@ -392,6 +389,7 @@ class CoordinateSystem(Object):
         pass
     def draw(self):
        for axis in self.Vaos:
+            axis.cameraObject=self.cameraObject
             axis.draw()
    
         

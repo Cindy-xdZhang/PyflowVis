@@ -9,6 +9,7 @@ import logging
 from GuiObjcts  import *
 from EventRegistrar import EventRegistrar
 from GuiObjcts.Object import Scene, singleton
+from shaderManager import *
 
 def getEngine():
     return VisualizationEngine({})
@@ -16,13 +17,10 @@ def getEngine():
 @singleton
 class VisualizationEngine:
     def __init__(self,config) -> None:
+        self.config=config
         size=config["window_size"]
         pygame.init()
-        # pygame.font.init()
-        # font_size = 50
-        # self.font = pygame.font.SysFont("Arial", font_size)
         self.screen=pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE|pygame.HWSURFACE)
-    
          # Set up OpenGL context
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glEnable(gl.GL_TEXTURE_2D)  # Enable texture mapping
@@ -35,8 +33,23 @@ class VisualizationEngine:
         imgui.get_io().fonts.get_tex_data_as_rgba32()
         self.impl=PygameRenderer()
         self.eventRegister=EventRegistrar(self.impl)
+        self.camera=None
         self.initLoggingSetting()
-        
+        self.initTextures()
+
+    def initTextures(self):
+        textureIDarray, self.textuireimageNames= init_color_maps_texture_array()
+        self.scene.create_variable("colorMaps1Darray",textureIDarray)
+
+    def getTextureNames(self):
+        return self.textuireimageNames  if  hasattr(self,"textuireimageNames") else None
+    
+    def initFront(self):
+        pass
+        # pygame.font.init()
+        # font_size = 50
+        # self.font = pygame.font.SysFont("Arial", font_size)
+
     def initLoggingSetting(self):
         class CustomFormatter(logging.Formatter):
             grey = "\x1b[38;21m"
@@ -64,17 +77,39 @@ class VisualizationEngine:
         logger.setLevel(logging.DEBUG)
         logger.addHandler(ch)
 
-    def setUpSceneObjects(self,ObjectList=None):
+    def addObjects2Scene(self,ObjectList=None):
         # all the objects in the scene
         for obj in ObjectList:
             self.scene.add_object(obj)
-        self.scene.restore_state_all()
+  
 
     def getScene(self) -> Scene:
         return self.scene
     
+    def finalizeSettleUp(self):
+        """
+        Call this function after all the objects are added to the scene and before engine main loop.
+        This function will restore objects, fixed down camera, and assign the camera to the objects.
+        """
+        if self.config['restore']:
+            self.scene.restore_state_all()
+        #find camera object
+        for name,obj in self.scene.objects.items():
+            if isinstance(obj,Camera):
+                self.camera=obj
+                break
+        if self.camera is None:
+            logging.getLogger().critical("No camera object found in the scene")
+            raise ValueError("No camera object found in the scene")
+        else:
+            self.scene.setUpCamera(self.camera)
+        
+    
+
+
 
     def MainLoop(self):
+        self.finalizeSettleUp()
         # clock = pygame.time.Clock()
         while self.eventRegister.running:
             self.eventRegister.handle_events()

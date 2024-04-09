@@ -1,5 +1,6 @@
+
 rendering:
-  # image_path: 'path/to/your/image.png'
+  restore: False
   window_size: [1600, 1200]
 
 network:

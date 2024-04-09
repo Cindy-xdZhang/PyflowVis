@@ -47,7 +47,7 @@ class MainUICommand(Object):
                 imgui.set_next_window_size(leftWindowsWidth, 0.)
                 self.posX,self.posY= imgui.get_item_rect_min()
                 if imgui.button("Reset View"):
-                    camera = self.parentScene.getObject("Camera")
+                    camera = self.cameraObject
                     if camera is not None:
                         camera.resetCamera()
                 imgui.same_line()

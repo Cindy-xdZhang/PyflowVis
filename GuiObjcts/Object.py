@@ -54,117 +54,6 @@ def operate_on_dict(dict_to_operate, key_list, new_value, index=0):
  
         
 
-class ValueGuiCustomization:
-    '''ValueGuiCustomization class to store the customization parameters for draw the gui for a value;
-    The usage is to create a ValueGuiCustomization object with "name" "type" and append it to the an Object .
-    The Object's propertie with that name and type will be drawn in the gui with the customization parameters.
-    Mismatch in name or type will make the valueguicustomization get ignored.
-    '''
-    def __init__(self,name,value_type,customizationsParamter:Dict[str,Any]):
-        self.name = name
-        self.value_type = value_type
-        if  self.check_customization_parameters(customizationsParamter):
-            self.customizationsParamter = customizationsParamter
-        else: 
-            self.customizationsParamter = None
-        
-    def valid(self):
-        return self.customizationsParamter is not None
-    
-    def get_customization(self)->Dict[str,Any]:
-        return  self.customizationsParamter 
-    def get(self,key:str)->Any:
-        return self.customizationsParamter[key]
-    
-    def check_customization_parameters(self,customDict:Dict[str,Any]):
-        valid_params = valid_customizations.get(self.value_type, [])        
-        # Check if any of valid customization options match the provided customization parameters
-        for option in valid_params:
-            keys1 = set(option.keys())
-            keys2 = set(customDict.keys())
-            if keys1 == keys2:
-                return True
-        else:
-            print(f"Error: Customization parameters for {self.name} of type {self.value_type} are invalid.")
-            return False
-
-
-
-def get_imgui_widget_for_type(Value_type:str, customization:ValueGuiCustomization=None):
-    """
-    Selects and returns the appropriate ImGui widget based on customization type and entry.
-
-    :param customization_type: The type of the customization (e.g., 'float', 'int', 'vec3').
-    :param customization_entry: A dictionary representing a customization entry for the type.
-    :return: A callable representing the corresponding imgui widget for the type.
-    """
-    widget_map_by_type = {
-        'bool': {         
-            'checkbox':lambda  label,value: draw_bool_checkbox(  label, value),
-         },
-        'float': {
-            'input':lambda   label, value: draw_float_input( label, value),
-            'slider_float': lambda   label, value: draw_float_slider( label, value,customization),
-        },
-        'int': {
-            'input': lambda  label, value: draw_int_input( label, value),
-            'checkbox': lambda  label, value: draw_int_checkbox( label, value),
-        },
-         'ivec3': {
-            'drag': lambda  label, value: draw_ivec3_drag( label, value),
-            'input':lambda  label, value: draw_vecn_input( label, value) , 
-        },
-        'ivec4': {
-            'drag': lambda  label, value: draw_ivec4_drag( label, value),
-            'input': lambda  label, value: draw_vecn_input( label, value) , 
-        },
-        'vec3': {  
-            'input': lambda  label, value: draw_vecn_input( label, value) , 
-            'color_picker': lambda label, value: draw_color_edit3( label, value),
-        },
-        'vec4': {
-            'input': lambda  label, value: draw_vec4_input( label, value),
-            'color_picker':lambda  label, value: draw_color_edit4( label, value),
-        },
-        'np.vec4': {
-             'input': lambda  label, value: draw_numpy_array4_input( label, value),
-        },
-        'np.vec3': {
-             'input': lambda  label, value: draw_numpy_array3_input( label, value),
-        },
-         'ndarray': {
-             'input': lambda  label, value: draw_numpy_array(label, value),
-        },
-         'np.mat4': {
-             'input': lambda  label, value: draw_editable_mat4( label, value),
-        },
-         'vecn': {  
-            'input': lambda  label, value: draw_vecn_input( label, value) , 
-            'plot_lines': lambda label, value: draw_vecn_plot_lines(label,value) , 
-        },
-        'ivecn': {  
-            'input': lambda  label, value: draw_vecn_input( label, value) , 
-        },
-        'str': {
-            'input': lambda  label, value: draw_str_input( label, value),
-        },
-        'options': {
-            'combo': lambda  label,value_list,current_selection:draw_options_combo(label, value_list, current_selection)
-        },
-        # add more
-    }
-
-    widget_map = widget_map_by_type.get(Value_type)
-    if widget_map:
-        callable=widget_map.get(customization.get('widget'), None) if customization else None
-        if callable is None:
-            first_key = next(iter(widget_map))
-            callable=widget_map[first_key]
-        return callable
-    print(f"Error: No ImGui widget found for  '{Value_type}' .")
-    return None
-      
- 
 
 
     
@@ -182,12 +71,29 @@ class Object:
         self.GuiVisible=True
         self.renderVisible=False
         self.parentScene=None
+        self.cameraObject=None
 
     def getParentScene(self):
         return self.parentScene
+    
+    def setCamera(self,camera):
+        self.cameraObject=camera 
+
+    def setUpScene(self,SceneInscane):
+        self.parentScene=SceneInscane if isinstance(SceneInscane, Scene._original_class) else None
+
     def getScope(self ):
-        AllVAriaables=  {**self.persistentProperties, **self.nonPersistentProperties}
-        return AllVAriaables
+        AllVAriables=  {**self.persistentProperties, **self.nonPersistentProperties,**self.optionValues}
+        
+        #!todo for optionValues we can save current Selection as uint instead of "str"
+        for optionName,optionValueStr in self.optionValues.items():
+            OptionList=self.getValue(optionName)
+            #count the index of optionValueStr in OptionList
+            if OptionList is not None:
+                index=OptionList.index(optionValueStr)
+                AllVAriables[optionName]=int(index)
+        
+        return AllVAriables
 
     @typechecked
     def setGuiVisibility(self,drawGui:bool):
@@ -209,8 +115,7 @@ class Object:
         # If no matching customization is found, return None
         return None
     
-    def render(self):
-        pass
+ 
     
     def draw(self):
         if self.renderVisible:
@@ -278,6 +183,8 @@ class Object:
         if isinstance(value, tuple):
             value = list(value)
             default_value = list(default_value) if default_value is not None else None
+        elif getTypeName(value)=="options":
+            self.optionValues[name]=value[0]
         # Create a new variable, persistent or non-persistent        
         if persistent:            
             if name not in self.persistentPropertyDefaultValues:  # Set default if not exist                
@@ -285,16 +192,20 @@ class Object:
             self.persistentProperties[name] = value            
         else:            
             self.nonPersistentProperties[name] = value
+
     def create_variable_callback(self, name:str, value:any, callback:callable,persistent:bool=False, default_value=None) -> None:
         self.create_variable(name, value, persistent, default_value)
         self.addCallback(name,callback)
 
     def setValue(self, name:str, value):
         self.updateValue(name, value)
+
+    @typechecked        
     def getOptionValue(self, name:str)->str|None:
             return self.optionValues[name]  if name in self.optionValues else None
 
-    def updateOptionValue(self, name:str, value) -> None:
+    @typechecked
+    def updateOptionValue(self, name:str, value:str) -> None:
         self.optionValues[name]=value
         #if has update callback
         callback=self.callbacks.get(name)
@@ -429,15 +340,25 @@ class Scene(Object):
     def __init__(self, name,autoSaveFolderPath="autosave"):
         super().__init__(name,autoSaveFolderPath)
         self.objects = {}
+
+
     def add_object(self, obj):
+        """connect an object with current scene
+        """
         assert isinstance(obj,Object)
         if self.hasObject(obj.name):
             logging.getLogger().warning(f" Object '{obj.name}' already exists in scene '{self.name}'.")
             return  
         self.objects[obj.name]= obj
-        obj.parentScene=self
+        obj.setUpScene(self)
+
+    def setUpCamera(self, camera):
+        for obj in self.objects.values():
+                obj.setCamera(camera)
+    
     def hasObject(self, name):
         return name in self.objects.keys()
+    
     def getObject(self, name): 
         return self.objects.get(name, None)    
     

@@ -6,7 +6,8 @@ from VertexArrayObject import *
 from shaderManager import *
 from VectorField2d import *
 from NLPCommand import *
-        
+from  PlanarManifold import *
+
 def screen_to_world(x, y, width, height, modelview, projection, viewport):    
     y = height - y  # OpenGL's y axis  is reversed of pygame's y axis
     z = gl.glReadPixels(x, y, 1, 1, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT)
@@ -104,20 +105,23 @@ class Renderable:
 
 
 
-from ImageLoader import ImageLoader
-globalImageLoader=ImageLoader()
 
 
-
+#! todo: lic
+#! todo: pathline
+#! todo: reference frame transforamtion of lic and pathlines
 
  
   
 
 def main():
-    config=load_config("config/config.yaml")
-    Engine=VisualizationEngine(config=config['rendering'])
-    size=config['rendering']["window_size"]
    
+    config=load_config("config/config.yaml")
+    engine=VisualizationEngine(config=config['rendering'])
+    
+    size=config['rendering']["window_size"]
+
+ 
     
     # Assuming you have your LIC texture data ready
     lic_texture_data = np.random.rand(100, 100, 3)*128   # Use random data as an example
@@ -125,9 +129,13 @@ def main():
     renderable_object = Renderable(lic_texture_data,5,2,-5)
     shaderManager=getShaderManager()
     shaderManager.add_shader_program("simpleColor","shaders/simple_vertex.glsl","shaders/simple_fragment.glsl")
+    shaderManager.add_shader_program("colormapMat","shaders/simple_vertex.glsl","shaders/colorMap_fragment.glsl")
     defaultMat=shaderManager.getDefautlMaterial()
+   
     # renderParamterPage=LicParameter("LicParameter")
     camera = Camera(60.0, (0, 0, 5), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
+    coord=CoordinateSystem(engine.scene)
+    planarManifold=PlanarManifold(32,32)
     actFieldWidget=ActiveField()
     VectorGlyph=VertexArrayVectorGlyph()
     VectorGlyph.setMaterial(defaultMat)
@@ -140,10 +148,10 @@ def main():
     # commandBar.addAction("save vector field", lambda obj: save_vector_field(Engine.scene,".autosave/"+actFieldWidget.getActiveFieldName()+".json") )
     # commandBar.addAction("load vector field", lambda obj: load_vector_field(Engine.scene,"autosave") )
 
-    Engine.setUpSceneObjects([actFieldWidget,commandBar,camera,VectorGlyph]   )
-    Engine.eventRegister.register(lambda event: camera.eventCallBacks(event))
-    Engine.eventRegister.register(lambda event: actFieldWidget.eventCallBacks(event))
-    Engine.eventRegister.register(lambda event: Engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
+    engine.addObjects2Scene([coord,planarManifold, actFieldWidget,commandBar,camera,VectorGlyph]   )
+    engine.eventRegister.register(lambda event: camera.eventCallBacks(event))
+    engine.eventRegister.register(lambda event: actFieldWidget.eventCallBacks(event))
+    engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
 
 
@@ -161,15 +169,11 @@ def main():
     # circle=VertexArrayObject("Cone")
     # circle.appendConeWithoutCommit(np.array([0,-1,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32), 0.5, 2, 32)
     # circle.commit()
-    coord=CoordinateSystem(Engine.scene)
-    Engine.scene.add_object(coord)
-    plane=VertexArrayObject("plane")
-    vertices, indices, textures= createPlane([32,32],[-2,-2,2,2])
-    plane.appendVertexGeometry(vertices, indices, textures)
-    plane.setMaterial(defaultMat)
-    plane.create_variable("color",(0.5,0.6,0.5))
-    Engine.scene.add_object(plane)
-    Engine.scene.add_object(nlpc)
+    
+
+
+    
+    engine.scene.add_object(nlpc)
     # plane.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([1,0,0],dtype=np.float32),0.05,1.0, 0.2, 0.1, 8)
     # plane.commit()
     # plane.setGuiVisibility(False)
@@ -189,7 +193,7 @@ def main():
     # cube.setMaterial(defaultMat)
     # scene.add_object(cube)
 
-    Engine.MainLoop()
+    engine.MainLoop()
     
 
 if __name__ == "__main__":
