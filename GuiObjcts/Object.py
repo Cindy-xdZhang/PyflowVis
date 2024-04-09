@@ -6,6 +6,8 @@ from typing import Dict, Any
 from typeguard import typechecked
 import logging
 from .ObjectGUIReflection import *
+from functools import lru_cache
+import hashlib
 
 def singleton(cls):
     _instance = {}
@@ -82,9 +84,22 @@ class Object:
     def setUpScene(self,SceneInscane):
         self.parentScene=SceneInscane if isinstance(SceneInscane, Scene._original_class) else None
 
+    def _get_hash_key(self):
+        """this function hash the object properties;
+        which is usd like to accerlate a slow function if it is called with the same properties
+        # @lru_cache(maxsize=128, typed=True)
+        def getScope(self ):
+         .....
+
+        """
+        hash_str = (str(self.persistentProperties) +
+                    str(self.nonPersistentProperties) +
+                    str(self.optionValues))
+        return hashlib.sha256(hash_str.encode()).hexdigest()
+    
+    # @lru_cache(maxsize=128, typed=True)
     def getScope(self ):
-        AllVAriables=  {**self.persistentProperties, **self.nonPersistentProperties,**self.optionValues}
-        
+        AllVAriables=  {**self.persistentProperties, **self.nonPersistentProperties}
         #!todo for optionValues we can save current Selection as uint instead of "str"
         for optionName,optionValueStr in self.optionValues.items():
             OptionList=self.getValue(optionName)
