@@ -1,7 +1,9 @@
 import numpy as np
 import numexpr as ne
 from VectorField2d import VectorField2D
-
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
 
 class AnalyticalFlowCreator:
     def __init__(self, expression_x, expression_y, grid_size, time_steps=10,domainBoundaryMin=(-2.0,-2.0,0.0),domainBoundaryMax=(2.0,2.0,2*np.pi), parameters=None):
@@ -105,7 +107,124 @@ def test_analytical_flow_creator():
     vectorField2d= rotation_four_center((32,32),32)
 
 
+def bilinear_interpolate(vector_field, x, y):
+    """
+    Perform bilinear interpolation for a 2D vector field.
+
+    Parameters:
+    - vector_field: np.ndarray of shape (Ydim, Xdim, 2), the 2D vector field.
+    - x, y: float, the fractional coordinates at which to interpolate the vector.
+
+    Returns:
+    - interpolated_vector: The interpolated vector at position (x, y).
+    """
+    
+    # Ensure x, y are within the bounds of the vector field
+    x = np.clip(x, 0, vector_field.shape[1] - 1)
+    y = np.clip(y, 0, vector_field.shape[0] - 1)
+
+    # Get the integer parts of x, y
+    x0 = int(x)
+    y0 = int(y)
+
+    # Ensure that we don't go out of bounds in the interpolation
+    x1 = min(x0 + 1, vector_field.shape[1] - 1)
+    y1 = min(y0 + 1, vector_field.shape[0] - 1)
+
+    # Calculate the fractional parts of x, y
+    tx = x - x0
+    ty = y - y0
+
+    # Get the vectors at the corner points
+    v00 = vector_field[y0, x0,:]
+    v01 = vector_field[y0, x1,:]
+    v10 = vector_field[y1, x0,:]
+    v11 = vector_field[y1, x1,:]
+
+    # Perform bilinear interpolation
+    a = v00 * (1 - tx) + v01 * tx
+    b = v10 * (1 - tx) + v11 * tx
+    interpolated_vector = a * (1 - ty) + b * ty
+
+    return interpolated_vector
+
+
+def LICAlgorithm(texture, vecfield: VectorField2D,timeSlice, stepSize, MaxIntegrationSteps):
+    """
+    A simplified LIC algorithm to visualize the flow of a 2D vector field.
+    """
+    with torch.no_grad():
+        vecfieldData=vecfield.field.detach().cpu().numpy()[timeSlice,:,:,:]
+        
+        Ydim, Xdim,_ = texture.shape
+        output_texture = np.zeros_like(texture)
+
+
+
+        for y in range(Ydim):
+            for x in range(Xdim):
+                accum_value = 0.0
+                accum_count = 0
+                
+                # Trace forward
+                #pos (x,y)
+                pos = np.array([x* vecfield.gridInterval[0]+vecfield.domainMinBoundary[0], y * vecfield.gridInterval[1]+vecfield.domainMinBoundary[1]], dtype=np.float32)
+
+                for _ in range(MaxIntegrationSteps):
+                    if not (0 <= pos[0] < Ydim and 0 <= pos[1] < Xdim):
+                        break  # Stop if we move outside the texture bounds
+                    accum_value += bilinear_interpolate(texture, pos[0], pos[1])
+                    accum_count += 1
+                    vec =bilinear_interpolate(vecfieldData, pos[0], pos[1])
+                    pos += vec * stepSize
+                    
+                # Trace backward
+                pos = np.array([y, x], dtype=np.float32)
+                for _ in range(MaxIntegrationSteps):
+                    if not (0 <= pos[0] < Ydim and 0 <= pos[1] < Xdim):
+                        break
+                    accum_value += bilinear_interpolate(texture, pos[0], pos[1])
+                    accum_count += 1
+                    vec =bilinear_interpolate(vecfieldData, pos[0], pos[1])
+                    pos -= vec * stepSize
+                
+                # Compute the average value along the path
+                if accum_count > 0:
+                    output_texture[y, x] = accum_value / accum_count
+        
+        return output_texture
+
+
+
+
+def LICImage_OFFLINE_RENDERING(vecfield: VectorField2D, timeSlice=0,stepSize=0.01, MaxIntegrationSteps=128):
+    """
+    Render a steady 2D vector field as an LIC image and save to a PNG file.
+    """
+    # Step 1: Initialize a texture for the LIC process, often random noise
+    texture = np.random.rand(vecfield.Ydim, vecfield.Xdim,1)
+    # Detach the tensor, move it to CPU, and convert to NumPy
+
+    # Step 2: Prepare your LIC implementation here. This is a placeholder for
+    # the process of integrating along the vector field to modify the texture.
+    # You'll need to replace this with your actual LIC algorithm.
+    lic_result = LICAlgorithm(texture, vecfield, 0,stepSize, MaxIntegrationSteps)
+    
+    # Step 3: Normalize the LIC result for visualization
+    lic_normalized = (lic_result - np.min(lic_result)) / (np.max(lic_result) - np.min(lic_result))
+    
+    # Step 4: Convert to an image and save
+    plt.imshow(lic_normalized, cmap='gray')
+    plt.axis('off')  # Optional: Remove axis for a cleaner image
+    plt.savefig("vector_field_lic.png", bbox_inches='tight', pad_inches=0)
+
+def myTest():
+    vecfield=rotation_four_center((512,512),2)
+    LICImage_OFFLINE_RENDERING(vecfield, 0,0.1, 128)
+
+
+
 if __name__ == '__main__':
-    test_analytical_flow_creator()
+    myTest()
 
     
