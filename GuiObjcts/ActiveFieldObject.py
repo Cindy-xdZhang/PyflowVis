@@ -35,6 +35,8 @@ class ActiveField(Object):
                 vectorGlyph.dirty=True
         self.addCallback("time",dirtyCallBack)
 
+        self.create_variable_gui("active scalar field",[""],False)
+
         def updateActivefieldcb(obj:ActiveField) -> None:
             dirtyCallBack(obj)
             activeField=obj.getActiveField()

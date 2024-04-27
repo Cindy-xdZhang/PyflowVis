@@ -3,3 +3,8 @@ imgui.ini
 config/config.yaml
 autosave/
 profile/profile.txt
+
+CppModules/__pycache__/
+CppModules/Pyds/__pycache__/
+CppModules/Pyds/*.pyd
+CppModules/build/
