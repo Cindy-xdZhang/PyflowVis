@@ -2,6 +2,7 @@ import os
 import sys
 import importlib
 import re
+
 def renamingPydFiles(pyds_path):
     for file in os.listdir(pyds_path):
         if file.endswith('.pyd'):
@@ -21,21 +22,25 @@ def renamingPydFiles(pyds_path):
                 print(f"Renamed '{file}' to '{new_name}'")
 
 #! try to make the   build, import of pybind module automatic.
-def init_PYBindLibs():
+def initPyBindLibs(ExcludingList=[]):
     # Add the pyds folder to the module search path
     pyds_path =os.path.dirname(__file__)
+    os.system('cls')
     renamingPydFiles(pyds_path)
     sys.path.append(pyds_path)
     # Create a dictionary to store the imported modules
     modules = {}
+    print()
     # Iterate over all .pyd files in the pyds folder
     for file in os.listdir(pyds_path):
         if file.endswith('.pyd'):
             # Get the module name (without the extension)
             module_name = os.path.splitext(file)[0]
-            
+            if module_name in ExcludingList:
+                continue
             # Dynamically import the module
             module = importlib.import_module(module_name)
+            print(f"Loaded module '{module_name}' --version {module.__version__}")
             
             # Store the module in the dictionary with the module name as the key
             modules[module_name] = module
@@ -43,5 +48,5 @@ def init_PYBindLibs():
 
 
 if __name__ == '__main__':
-    init_PYBindLibs()
+    initPyBindLibs()
  

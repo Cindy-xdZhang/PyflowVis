@@ -1,3 +1,6 @@
+:: check CMake success or not
+echo Building CppModules using the CMakeLists.txt...
+
 @echo off
 
 if not exist "build" (

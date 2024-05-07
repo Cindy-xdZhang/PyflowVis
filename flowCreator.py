@@ -1,12 +1,13 @@
 import numpy as np
 import numexpr as ne
+from numpy import pi
 from VectorField2d import VectorField2D
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
 class AnalyticalFlowCreator:
-    def __init__(self, expression_x, expression_y, grid_size, time_steps=10,domainBoundaryMin=(-2.0,-2.0,0.0),domainBoundaryMax=(2.0,2.0,2*np.pi), parameters=None):
+    def __init__(self, grid_size, time_steps=10,domainBoundaryMin=(-2.0,-2.0,0.0),domainBoundaryMax=(2.0,2.0,2*np.pi), parameters=None):
         """
         Initialize the analytical flow creator.
 
@@ -16,8 +17,8 @@ class AnalyticalFlowCreator:
         :param time_steps: Int, the number of time steps for the flow field.
         :param parameters: Dictionary, additional parameters to be used in the expression.
         """
-        self.expression_x = expression_x
-        self.expression_y = expression_y
+        # self.expression_x = expression_x
+        # self.expression_y = expression_y
         self.Xdim=grid_size[0]
         self.Ydim=grid_size[0]
         self.time_steps = time_steps
@@ -29,7 +30,10 @@ class AnalyticalFlowCreator:
         # Generating grid for x and y dimensions
         self.x, self.y = np.meshgrid(np.linspace(domainBoundaryMin[0], domainBoundaryMax[0], grid_size[0]), np.linspace(domainBoundaryMin[1], domainBoundaryMax[1], grid_size[1]))
         
-        
+    def setExperssioin(self,expression_x,expression_y):
+        self.expression_x = expression_x
+        self.expression_y = expression_y
+
     def create_flow_field(self):
         """
         Create the flow field based on the mathematical expressions.
@@ -67,7 +71,8 @@ def constant_rotation(grid_size,timestep,domainBoundaryMin=(-2.0,-2.0,0.0),domai
     :param scale: Float, the scale of the rotation.
     :return: Two numpy arrays representing the x and y components of the flow field.
     """
-    flow_creator = AnalyticalFlowCreator('-y', 'x', grid_size=grid_size,time_steps=timestep,domainBoundaryMin=domainBoundaryMin,domainBoundaryMax=domainBoundaryMax)
+    flow_creator = AnalyticalFlowCreator( grid_size=grid_size,time_steps=timestep,domainBoundaryMin=domainBoundaryMin,domainBoundaryMax=domainBoundaryMax)
+    flow_creator.setExperssioin('-y', 'x')
     vectorField2d= flow_creator.create_flow_field()
     if scale!=1.0:
         vectorField2d.field*=scale
@@ -84,7 +89,8 @@ def rotation_four_center(grid_size,timestep,domainBoundaryMin=(-2.0,-2.0,0.0),do
     expression_u="exp(-y * y - x * x) * (al_t * y * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * y * y * y + (12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * y * y + (6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x + 6.0 * scale * cos(al_t * t) * sin(al_t * t)) * y + (3.0 * scale - 6.0 * scale * (cos(al_t * t) * cos(al_t * t))) * x)"
     expression_v="-exp(-y * y - x * x) * (al_t * x * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * y * y + ((12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * x - 6.0 * scale * (cos(al_t * t) * cos(al_t * t)) + 3.0 * scale) * y + 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x * x - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x)"
 
-    flow_creator = AnalyticalFlowCreator(expression_u,expression_v,grid_size=grid_size,time_steps=timestep,domainBoundaryMin=domainBoundaryMin,domainBoundaryMax=domainBoundaryMax, parameters={'al_t': 1.0, 'scale': 1.0})
+    flow_creator = AnalyticalFlowCreator(grid_size=grid_size,time_steps=timestep,domainBoundaryMin=domainBoundaryMin,domainBoundaryMax=domainBoundaryMax, parameters={'al_t': 1.0, 'scale': 1.0})
+    flow_creator.setExperssioin(expression_u, expression_v)
     vectorField2d= flow_creator.create_flow_field()
     if scale!=1.0:
         vectorField2d.field*=scale
@@ -92,18 +98,16 @@ def rotation_four_center(grid_size,timestep,domainBoundaryMin=(-2.0,-2.0,0.0),do
 
 
 def test_analytical_flow_creator():
-    flow_creator = AnalyticalFlowCreator('cos(y)', '-cos(x)', grid_size=(200, 200))
+    flow_creator = AnalyticalFlowCreator( grid_size=(200, 200))    
+    flow_creator.setExperssioin('cos(y)', '-cos(x)')
     vectorField2d= flow_creator.create_flow_field()
     parameters = {'a': 0.5, 'b': 1.5}
-    flow_creator = AnalyticalFlowCreator('a*sin(x)*cos(y)', '-b*cos(x)*sin(y)', grid_size=(200, 200), parameters=parameters)
+    flow_creator = AnalyticalFlowCreator( grid_size=(200, 200), parameters=parameters)
+    flow_creator.setExperssioin('a*sin(x)*cos(y)', '-b*cos(x)*sin(y)')
     vectorField2d = flow_creator.create_flow_field()
-
     new_parameters = {'a': 1.0, 'b': 2.0}
     flow_creator.update_parameters(new_parameters)
     vectorField2d= flow_creator.create_flow_field()
-
-    flow_creator = AnalyticalFlowCreator('x / (x**2 + y**2)', 'y / (x**2 + y**2)', grid_size=(200, 200))
-    vectorField2d = flow_creator.create_flow_field()
     vectorField2d= rotation_four_center((32,32),32)
 
 
@@ -218,9 +222,99 @@ def LICImage_OFFLINE_RENDERING(vecfield: VectorField2D, timeSlice=0,stepSize=0.0
     plt.axis('off')  # Optional: Remove axis for a cleaner image
     plt.savefig("vector_field_lic.png", bbox_inches='tight', pad_inches=0)
 
-def myTest():
+def LICAlgorithmTest():
     vecfield=rotation_four_center((512,512),2)
     LICImage_OFFLINE_RENDERING(vecfield, 0,0.1, 128)
+
+
+class ObserverReferenceTransformation:
+    def __init__(self, timeStep=1) -> None:
+        self.timeStep=timeStep
+        #Q(t)*x+c(t)
+        self.Q_t=[np.identity(2) ]*timeStep
+        self.c_t=[0]*timeStep
+
+    def GetPushForward(self, timeStep) -> np.ndarray:
+        return self.Q_t[timeStep]
+
+    def GetTransformation(self, timeStep) :
+        return [self.Q_t[timeStep],self.c_t[timeStep]] 
+    
+    
+
+
+
+class VastistasMeasuredVelocityProfile(AnalyticalFlowCreator) :
+    def __init__(self, grid_size, time_steps=10, domainBoundaryMin=(-2, -2, 0), domainBoundaryMax=(2, 2, 2 * np.pi), parameters=None):
+        super().__init__(grid_size, time_steps, domainBoundaryMin, domainBoundaryMax, parameters)
+        self.observer=None
+
+   
+    def setObserver(self,observer: ObserverReferenceTransformation):
+        """ use the trivial defintion of observer reference transforamtion
+        """
+        self.observer=observer
+
+    def VastistasVo(r, Si, rc, n):
+        """
+        Calculate velocity v(x) at point x according to equation (1).
+        
+        Parameters:
+        x (numpy.ndarray): Point (x, y) at which to calculate velocity.
+        Si (numpy.ndarray): Matrix defining the base shape.
+        rc (float): Radius with maximum velocity.
+        n (float): Parameter controlling the shape of the velocity profile.
+        
+        Returns:
+        float: Velocity at point x.
+        """
+        v0_r = r / (2*np.pi*(rc**2) * ((r/rc)**(2*n) + 1)**(1/n))
+        return  v0_r
+    
+
+    def Vastistas(x, Si, rc, n):
+        """
+        Calculate velocity v(x) at point x according to equation (1).
+        
+        Parameters:
+        x (numpy.ndarray): Point (x, y) at which to calculate velocity.
+        Si (numpy.ndarray): Matrix defining the base shape.
+        rc (float): Radius with maximum velocity.
+        n (float): Parameter controlling the shape of the velocity profile.
+        
+        Returns:
+        float: Velocity at point x.
+        """
+        r = np.linalg.norm(x)
+        v0_r = r / (2*np.pi*(rc**2) * ((r/rc)**(2*n) + 1)**(1/n))
+        return np.dot(Si, x) * v0_r
+
+
+    def create_flow_field_slice(self) -> np.ndarray:
+        
+        # Initializing empty arrays for vx and vy with an additional time dimension
+        data=np.zeros((self.Ydim, self.Xdim,2))
+
+        
+        for i, t in enumerate(self.t):
+            
+
+            data[i,:,:,0]=vx_time_slice_i
+            data[i,:,:,1]=vy_time_slice_i
+
+        
+        return data
+    
+    # def generate(self)   -> VectorField2D:
+    #     return self.create_flow_field()
+
+
+
+def myTest():
+    profile=VastistasMeasuredVelocityProfile((32, 32), 10)
+
+
+
 
 
 
