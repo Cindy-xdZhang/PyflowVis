@@ -1,9 +1,9 @@
 import numpy as np
 import numexpr as ne
+import tqdm
 from numpy import pi
-from VectorField2d import VectorField2D
+from VectorField2d import VectorField2D,SteadyVectorField2D
 import numpy as np
-import torch
 import matplotlib.pyplot as plt
 
 class AnalyticalFlowCreator:
@@ -153,50 +153,52 @@ def bilinear_interpolate(vector_field, x, y):
     return interpolated_vector
 
 
-def LICAlgorithm(texture, vecfield: VectorField2D,timeSlice, stepSize, MaxIntegrationSteps):
+def LICAlgorithm(texture:np.ndarray, vecfield: SteadyVectorField2D, stepSize:float, MaxIntegrationSteps:int):
     """
-    A simplified LIC algorithm to visualize the flow of a 2D vector field.
+    A simplified LIC algorithm to visualize the flow of a 2D vector field slice. 
     """
-    with torch.no_grad():
-        vecfieldData=vecfield.field.detach().cpu().numpy()[timeSlice,:,:,:]
-        
-        Ydim, Xdim,_ = texture.shape
-        output_texture = np.zeros_like(texture)
+    Ydim, Xdim,_ = texture.shape
+    output_texture = np.zeros_like(texture)
+    vecfieldData=vecfield.field
+    for y in range(Ydim):
+        for x in range(Xdim):
+            accum_value = 0.0
+            accum_count = 0
+            
+            # Trace forward
+            #pos (x,y)
+            pos = np.array([x* vecfield.gridInterval[0]+vecfield.domainMinBoundary[0], y * vecfield.gridInterval[1]+vecfield.domainMinBoundary[1]], dtype=np.float32)
 
+            for _ in range(MaxIntegrationSteps):
+                floatIndexX=(pos[0]-vecfield.domainMinBoundary[0])/vecfield.gridInterval[0]
+                floatIndexY=(pos[1]-vecfield.domainMinBoundary[1])/vecfield.gridInterval[1]
+                if not (0 <= floatIndexX < Xdim and 0 <= floatIndexY < Ydim):
+                    break  # Stop if we move outside the texture bounds
 
-
-        for y in range(Ydim):
-            for x in range(Xdim):
-                accum_value = 0.0
-                accum_count = 0
+                accum_value += bilinear_interpolate(texture, floatIndexX, floatIndexY)
+                accum_count += 1
+                vec =bilinear_interpolate(vecfieldData,  floatIndexX, floatIndexY)
+                pos += vec * stepSize
                 
-                # Trace forward
-                #pos (x,y)
-                pos = np.array([x* vecfield.gridInterval[0]+vecfield.domainMinBoundary[0], y * vecfield.gridInterval[1]+vecfield.domainMinBoundary[1]], dtype=np.float32)
+            # Trace backward
+            pos = np.array([y, x], dtype=np.float32)
+            for _ in range(MaxIntegrationSteps):
+                floatIndexX=(pos[0]-vecfield.domainMinBoundary[0])/vecfield.gridInterval[0]
+                floatIndexY=(pos[1]-vecfield.domainMinBoundary[1])/vecfield.gridInterval[1]
+                if not (0 <= floatIndexX < Xdim and 0 <= floatIndexY < Ydim):
+                    break  # Stop if we move outside the texture bounds
 
-                for _ in range(MaxIntegrationSteps):
-                    if not (0 <= pos[0] < Ydim and 0 <= pos[1] < Xdim):
-                        break  # Stop if we move outside the texture bounds
-                    accum_value += bilinear_interpolate(texture, pos[0], pos[1])
-                    accum_count += 1
-                    vec =bilinear_interpolate(vecfieldData, pos[0], pos[1])
-                    pos += vec * stepSize
-                    
-                # Trace backward
-                pos = np.array([y, x], dtype=np.float32)
-                for _ in range(MaxIntegrationSteps):
-                    if not (0 <= pos[0] < Ydim and 0 <= pos[1] < Xdim):
-                        break
-                    accum_value += bilinear_interpolate(texture, pos[0], pos[1])
-                    accum_count += 1
-                    vec =bilinear_interpolate(vecfieldData, pos[0], pos[1])
-                    pos -= vec * stepSize
-                
-                # Compute the average value along the path
-                if accum_count > 0:
-                    output_texture[y, x] = accum_value / accum_count
-        
-        return output_texture
+                accum_value += bilinear_interpolate(texture, floatIndexX, floatIndexY)
+                accum_count += 1
+                vec =bilinear_interpolate(vecfieldData,  floatIndexX, floatIndexY)
+
+                pos -= vec * stepSize
+            
+            # Compute the average value along the path
+            if accum_count > 0:
+                output_texture[y, x] = accum_value / accum_count
+    
+    return output_texture
 
 
 
@@ -208,11 +210,11 @@ def LICImage_OFFLINE_RENDERING(vecfield: VectorField2D, timeSlice=0,stepSize=0.0
     # Step 1: Initialize a texture for the LIC process, often random noise
     texture = np.random.rand(vecfield.Ydim, vecfield.Xdim,1)
     # Detach the tensor, move it to CPU, and convert to NumPy
-
+    VecFieldSlice=vecfield.getSlice(timeSlice)
     # Step 2: Prepare your LIC implementation here. This is a placeholder for
     # the process of integrating along the vector field to modify the texture.
     # You'll need to replace this with your actual LIC algorithm.
-    lic_result = LICAlgorithm(texture, vecfield, 0,stepSize, MaxIntegrationSteps)
+    lic_result = LICAlgorithm(texture, VecFieldSlice, stepSize, MaxIntegrationSteps)
     
     # Step 3: Normalize the LIC result for visualization
     lic_normalized = (lic_result - np.min(lic_result)) / (np.max(lic_result) - np.min(lic_result))
@@ -223,8 +225,8 @@ def LICImage_OFFLINE_RENDERING(vecfield: VectorField2D, timeSlice=0,stepSize=0.0
     plt.savefig("vector_field_lic.png", bbox_inches='tight', pad_inches=0)
 
 def LICAlgorithmTest():
-    vecfield=rotation_four_center((512,512),2)
-    LICImage_OFFLINE_RENDERING(vecfield, 0,0.1, 128)
+    vecfield=rotation_four_center((128,128),2)
+    LICImage_OFFLINE_RENDERING(vecfield, 0,0.002, 128)
 
 
 class ObserverReferenceTransformation:
@@ -240,27 +242,24 @@ class ObserverReferenceTransformation:
     def GetTransformation(self, timeStep) :
         return [self.Q_t[timeStep],self.c_t[timeStep]] 
     
-    
 
-
-
-class VastistasMeasuredVelocityProfile(AnalyticalFlowCreator) :
-    def __init__(self, grid_size, time_steps=10, domainBoundaryMin=(-2, -2, 0), domainBoundaryMax=(2, 2, 2 * np.pi), parameters=None):
-        super().__init__(grid_size, time_steps, domainBoundaryMin, domainBoundaryMax, parameters)
-        self.observer=None
-
-   
-    def setObserver(self,observer: ObserverReferenceTransformation):
-        """ use the trivial defintion of observer reference transforamtion
-        """
-        self.observer=observer
-
+class SteadyVastistasVelocityGenerator() :
+    def __init__(self, grid_size, time_steps=10,domainBoundaryMin=(-2.0,-2.0,0.0),domainBoundaryMax=(2.0,2.0,2*np.pi), parameters=None):
+        self.Xdim=grid_size[0]
+        self.Ydim=grid_size[0]
+        self.domainBoundaryMin=domainBoundaryMin
+        self.domainBoundaryMax=domainBoundaryMax
+        self.parameters = parameters if parameters is not None else {}
+        # Adding a time dimension
+        # self.time_steps = time_steps
+        # self.t = np.linspace(0, 2*np.pi, time_steps)
+        
     def VastistasVo(r, Si, rc, n):
         """
         Calculate velocity v(x) at point x according to equation (1).
         
         Parameters:
-        x (numpy.ndarray): Point (x, y) at which to calculate velocity.
+        r (float): distance from the origin.
         Si (numpy.ndarray): Matrix defining the base shape.
         rc (float): Radius with maximum velocity.
         n (float): Parameter controlling the shape of the velocity profile.
@@ -270,8 +269,6 @@ class VastistasMeasuredVelocityProfile(AnalyticalFlowCreator) :
         """
         v0_r = r / (2*np.pi*(rc**2) * ((r/rc)**(2*n) + 1)**(1/n))
         return  v0_r
-    
-
     def Vastistas(x, Si, rc, n):
         """
         Calculate velocity v(x) at point x according to equation (1).
@@ -291,19 +288,13 @@ class VastistasMeasuredVelocityProfile(AnalyticalFlowCreator) :
 
 
     def create_flow_field_slice(self) -> np.ndarray:
-        
-        # Initializing empty arrays for vx and vy with an additional time dimension
-        data=np.zeros((self.Ydim, self.Xdim,2))
-
-        
-        for i, t in enumerate(self.t):
-            
-
-            data[i,:,:,0]=vx_time_slice_i
-            data[i,:,:,1]=vy_time_slice_i
-
-        
-        return data
+        pass
+        # # Initializing empty arrays for vx and vy with an additional time dimension
+        # data=np.zeros((self.Ydim, self.Xdim,2))
+        # for i, t in enumerate(self.t):
+        #     data[i,:,:,0]=vx_time_slice_i
+        #     data[i,:,:,1]=vy_time_slice_i
+        # return data
     
     # def generate(self)   -> VectorField2D:
     #     return self.create_flow_field()
@@ -311,7 +302,7 @@ class VastistasMeasuredVelocityProfile(AnalyticalFlowCreator) :
 
 
 def myTest():
-    profile=VastistasMeasuredVelocityProfile((32, 32), 10)
+    pass
 
 
 
@@ -319,6 +310,6 @@ def myTest():
 
 
 if __name__ == '__main__':
-    myTest()
+    LICAlgorithmTest()
 
     

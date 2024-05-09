@@ -8,3 +8,8 @@ CppModules/__pycache__/
 CppModules/Pyds/__pycache__/
 CppModules/Pyds/*.pyd
 CppModules/build/
+
+
+
+CppProjects/build/
+CppProjects/data/

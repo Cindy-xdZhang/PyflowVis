@@ -147,12 +147,13 @@ def curl(ux, uy):
 def velocity_field(ux, uy):
     return ux, uy
 
-def matplotVisualize(simulator):
+
+def matplotScalarFieldVisualize(simulator, scalarFieldFunc):
 	import time, matplotlib.pyplot, matplotlib.animation
 	# Here comes the graphics and animation...
 	theFig = matplotlib.pyplot.figure(figsize=(8,3))
 	# ax = theFig.add_subplot(111)
-	fluidImage = matplotlib.pyplot.imshow(curl(simulator.ux, simulator.uy), origin='lower', norm=matplotlib.pyplot.Normalize(-.1,.1), 
+	fluidImage = matplotlib.pyplot.imshow(scalarFieldFunc(simulator.ux, simulator.uy), origin='lower', norm=matplotlib.pyplot.Normalize(-.1,.1), 
 										cmap=matplotlib.pyplot.get_cmap('jet'), interpolation='none')
 
 	# x, y = numpy.meshgrid(numpy.arange(width), numpy.arange(height))
@@ -180,7 +181,7 @@ def matplotVisualize(simulator):
 			simulator.stream()
 			simulator.collide()
 		# u, v = velocity_field(ux, uy)
-		fluidImage.set_array(curl(simulator.ux, simulator.uy))
+		fluidImage.set_array(scalarFieldFunc(simulator.ux, simulator.uy))
 		return (fluidImage, barrierImage)		# return the figure elements to redraw
 		# quiverImage.set_UVC(u, v)
 		# return (quiverImage, barrierImage)
@@ -189,7 +190,46 @@ def matplotVisualize(simulator):
 	animate = matplotlib.animation.FuncAnimation(theFig, nextFrame, interval=1, blit=True)
 	matplotlib.pyplot.show()
 
+def matplotVectorFieldVisualize(simulator, vectorFieldFunc):
+	import time, matplotlib.pyplot, matplotlib.animation
+	# Here comes the graphics and animation...
+	theFig = matplotlib.pyplot.figure(figsize=(8,3))
+	ax = theFig.add_subplot(111)
+	
+	x, y = numpy.meshgrid(numpy.arange(width), numpy.arange(height))
+	quiverImage = ax.quiver(x, y,simulator.ux, simulator.uy, angles='xy', scale_units='xy', scale=0.1, color='black')
+
+
+			
+	bImageArray = numpy.zeros((height, width, 4), numpy.uint8)	# an RGBA image
+	bImageArray[barrier,3] = 255								# set alpha=255 only at barrier sites
+	barrierImage = matplotlib.pyplot.imshow(bImageArray, origin='lower', interpolation='none')
+
+	# Function called for each successive animation frame:
+	start_time = time.perf_counter()
+	#frameList = open('frameList.txt','w')		# file containing list of images (to make movie)
+	def nextFrame(arg):							# (arg is the frame number, which we don't need)
+		global startTime
+		if performanceData and (arg%100 == 0) and (arg > 0):
+			end_time = time.perf_counter()
+			print(f"Elapsed time: {end_time - start_time} seconds")
+			startTime = end_time
+		#frameName = "frame%04d.png" % arg
+		#matplotlib.pyplot.savefig(frameName)
+		#frameList.write(frameName + '\n')
+		for step in range(20):					# adjust number of steps for smooth animation
+			simulator.stream()
+			simulator.collide()
+		u, v = vectorFieldFunc(simulator.ux, simulator.uy)
+		quiverImage.set_UVC(u, v)
+		return (quiverImage, barrierImage)
+	
+
+	animate = matplotlib.animation.FuncAnimation(theFig, nextFrame, interval=1, blit=True)
+	matplotlib.pyplot.show()
 
 if __name__ == '__main__':
 	sim=LBMSimulator() 
-	matplotVisualize(sim)
+
+	matplotScalarFieldVisualize(sim,curl)
+	# matplotVectorFieldVisualize(sim, velocity_field)
