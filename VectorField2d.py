@@ -82,11 +82,39 @@ class VectorFieldLinearOperation():
         # lie_derivative = dxL * v[..., 1] - dyL * v[..., 0]
         # return lie_derivative.unsqueeze(-1)
 
+class SteadyVectorField2D():
+    def __init__(self, Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0]):
+        """_summary_
 
+        Args:
+            Xdim (_type_): _description_
+            Ydim (_type_): _description_
+            time_steps (_type_): _description_
+            domainMinBoundary (list, optional): [xmin, ymin]. Defaults to [-2.0,-2.0,].
+            domainMaxBoundary (list, optional): [xmax, ymax]. Defaults to [2.0,2.0].
+        """
+
+        self.Xdim= Xdim
+        self.Ydim = Ydim
+        # Initialize the vector field parameters with random values, considering the time dimension
+        self.field = np.zeros( (Ydim,Xdim,2),np.float32)
+        self.domainMinBoundary=domainMinBoundary
+        self.domainMaxBoundary=domainMaxBoundary
+        self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
 
     
+
 class VectorField2D(nn.Module):
-    def __init__(self, Xdim, Ydim, time_steps,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2*np.pi]):
+    def __init__(self, Xdim:int, Ydim:int, time_steps,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2*np.pi]):
+        """_summary_
+
+        Args:
+            Xdim (_type_): _description_
+            Ydim (_type_): _description_
+            time_steps (_type_): _description_
+            domainMinBoundary (list, optional): [xmin, ymin,tmin]. Defaults to [-2.0,-2.0,0.0].
+            domainMaxBoundary (list, optional): [xmax, ymax,tmax]. Defaults to [2.0,2.0,2*np.pi].
+        """
         super(VectorField2D, self).__init__()
         self.Xdim= Xdim
         self.Ydim = Ydim
@@ -97,7 +125,12 @@ class VectorField2D(nn.Module):
         self.domainMaxBoundary=domainMaxBoundary
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
         self.timeInterval = (domainMaxBoundary[2]-domainMinBoundary[2])/(time_steps-1)
-     
+
+    def getSlice(self, timeSlice) -> SteadyVectorField2D:
+        steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary[0:2],self.domainMaxBoundary[0:2])
+        steadyVectorField2D.field=self.field.detach().cpu().numpy()[timeSlice,:,:,:]
+        return steadyVectorField2D
+
     def setInitialVectorField(self, vector_field):
         self.field = nn.Parameter(torch.tensor(vector_field))
     
@@ -114,6 +147,7 @@ class VectorField2D(nn.Module):
         archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
         
 
+
 class ClassWithName():
     def __init__(self, name=""):
         self.__name = name
@@ -122,8 +156,19 @@ class ClassWithName():
     def setName(self, name):
         self.__name=name
     
+
+
+
 class ScalarField2D(ClassWithName):
     def __init__(self, Xdim, Ydim, time_steps, dtype=np.float32,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2*np.pi]):
+        """_summary_
+        Args:
+            Xdim (_type_): _description_
+            Ydim (_type_): _description_
+            time_steps (_type_): _description_
+            domainMinBoundary (list, optional): [xmin, ymin,tmin]. Defaults to [-2.0,-2.0,0.0].
+            domainMaxBoundary (list, optional): [xmax, ymax,tmin]. Defaults to [2.0,2.0,2*np.pi].
+        """
         super(ScalarField2D, self).__init__()
         self.Xdim= Xdim
         self.Ydim = Ydim
@@ -134,7 +179,7 @@ class ScalarField2D(ClassWithName):
         self.domainMaxBoundary=domainMaxBoundary
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
         self.timeInterval = (domainMaxBoundary[2]-domainMinBoundary[2])/(time_steps-1)
-        assert dtype in [np.float32, np.float64,np.int8,np.int16,np.int32,np.int64,np.uint8,np.uint16,np.uint32,np.uint64,np.float32,np.float64,np.complex64,np.complex128]
+        assert dtype in [np.float32, np.float64,np.int8,np.int16,np.int32,np.int64,np.uint8,np.uint16,np.uint32,np.uint64,np.float32,np.float64]
         self.dtype=dtype
         
     def initData(self):
@@ -155,88 +200,3 @@ class ScalarField2D(ClassWithName):
     def deserialize(self, archive):
         archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
 
-# def save_vector_field(scene, file_path):
-#     actWidget=scene.getObject("ActiveField")    if scene is not None else None
-#     vec2d=actWidget.getActiveField() if actWidget is not None else None
-#     if vec2d is not None:
-#         directory = os.path.dirname(file_path)
-#         if not os.path.exists(directory):
-#             os.makedirs(directory)
-#         # Check if the file exists, and create it if not
-#         if not os.path.exists(file_path):
-#             with open(file_path, 'wb') as f:
-#                 self.serialize
-#         else:
-#             with open(file_path, 'wb') as f:
-#                 cereal.serialize_state(vec2d, f)   
-
-# def load_vector_field(scene,file_path):
-#     actWidget=scene.getObject("ActiveField")    if scene is not None else None
-#     if actWidget is not None:
-#         vec2d=VectorField2D(-1,-1,-1)
-#         with open(file_path, 'rb') as f:
-#             cereal.deserialize_state(vec2d, f) 
-#             actWidget.insertField("loaded field"+file_path,vec2d)
-     
-
-# import numpy as np
-# import vtk
-
-# def render_vector_field(vector_field, domain_min, domain_max, grid_interval, time_interval):
-    # """
-    # Renders a 2D or 3D vector field using VTK.
-    
-    # Args:
-    #     vector_field (numpy.ndarray): A 3D numpy array representing the vector field. The first dimension corresponds to time, and the last two dimensions correspond to the spatial dimensions.
-    #     domain_min (list): A list of length 2 or 3 representing the minimum bounds of the domain.
-    #     domain_max (list): A list of length 2 or 3 representing the maximum bounds of the domain.
-    #     grid_interval (list): A list of length 2 or 3 representing the grid interval in each dimension.
-    #     time_interval (float): The time interval between each time step.
-    # """
-    # Create a structured grid to represent the vector field
-    # nx, ny, nz = vector_field.shape[-2], vector_field.shape[-1], vector_field.shape[0]
-    # sgrid = vtk.vtkStructuredGrid()
-    # sgrid.SetDimensions(nx, ny, nz)
-
-    # # Create the points for the structured grid
-    # points = vtk.vtkPoints()
-    # for t in range(nz):
-    #     for y in range(ny):
-    #         for x in range(nx):
-    #             points.InsertNextPoint(domain_min[0] + x * grid_interval[0],
-    #                                   domain_min[1] + y * grid_interval[1],
-    #                                   domain_min[2] + t * time_interval)
-    # sgrid.SetPoints(points)
-
-    # # Create the vector data
-    # vectors = vtk.vtkDoubleArray()
-    # vectors.SetNumberOfComponents(3)
-    # for t in range(nz):
-    #     for y in range(ny):
-    #         for x in range(nx):
-    #             vectors.InsertNextTuple(vector_field[t, y, x])
-    # sgrid.GetPointData().SetVectors(vectors)
-
-    # # Create the render pipeline
-    # mapper = vtk.vtkStreamTracer()
-    # mapper.SetInputData(sgrid)
-    # mapper.SetIntegrationStepLength(grid_interval[0])
-    # mapper.SetMaximumPropagation(1.0)
-    # mapper.SetInitialStepLength(grid_interval[0])
-    # mapper.SetTerminalSpeed(0.01)
-    
-    # actor = vtk.vtkActor()
-    # actor.SetMapper(mapper)
-
-    # ren = vtk.vtkRenderer()
-    # ren.AddActor(actor)
-    # ren.SetBackground(0.5, 0.5, 0.5)
-
-    # renWin = vtk.vtkRenderWindow()
-    # renWin.AddRenderer(ren)
-    # renWin.SetSize(800, 600)
-
-    # iren = vtk.vtkRenderWindowInteractor()
-    # iren.SetRenderWindow(renWin)
-    # iren.Initialize()
-    # iren.Start()    

@@ -1,5 +1,12 @@
 ![alt text](assets/misc/image-1.png)
 
+
+# Cpp 
+1.Write cpp functions in 'Cppmodules ' folder to export cpp functions to python(using pybind)
+2.For pure cpp program using visual studio etc., write it in  'CppProjects' folder.
+
+
+
 # TODO list General
 0. optc optimize di term +ci term(most important thing!)
 1. serialize (load/save)  vector field from pyflowVis to optc cpp framework

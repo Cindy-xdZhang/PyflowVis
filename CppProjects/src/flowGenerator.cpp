@@ -66,15 +66,15 @@ std::vector<std::vector<float>> randomNoiseTexture(int width, int height)
 // Function to flatten a 2D vector to a 1D vector
 std::vector<float> flatten2D(const std::vector<std::vector<vec2d<float>>>& x2D)
 {
-    const int ydim = x2D.size();
+    const size_t ydim = x2D.size();
     assert(ydim > 0);
-    const int xdim = x2D[0].size();
+    const size_t xdim = x2D[0].size();
     std::vector<float> result;
     result.resize(xdim * ydim * 2);
     for (size_t i = 0; i < ydim; i++)
         for (size_t j = 0; j < xdim; j++) {
-            result[i * xdim + j] = x2D[i][j].x;
-            result[i * xdim + j + 1] = x2D[i][j].y;
+            result[2 * (i * xdim + j)] = x2D[i][j].x;
+            result[2 * (i * xdim + j) + 1] = x2D[i][j].y;
         }
 
     return result;
@@ -107,33 +107,47 @@ T bilinear_interpolate(const std::vector<std::vector<T>>& vector_field, float x,
 struct VectorField2D {
     std::vector<std::vector<vec2d<float>>> field;
     vec2d<float> domainMinBoundary;
+    vec2d<float> domainMaxBoundary;
     vec2d<float> gridInterval;
 };
 
+// The result image size is the same as the input texture.
 std::vector<std::vector<float>> LICAlgorithm(
     const std::vector<std::vector<float>>& texture,
     const VectorField2D& vecfield,
+    const int licImageSizeX,
+    const int licImageSizeY,
     float stepSize,
     int MaxIntegrationSteps)
 {
-    int Ydim = texture.size();
-    int Xdim = texture[0].size();
-    std::vector<std::vector<float>> output_texture(Ydim, std::vector<float>(Xdim, 0.0f));
+    const int YTexdim = texture.size();
+    const int XTexdim = texture[0].size();
+    const int Ydim = vecfield.field.size();
+    const int Xdim = vecfield.field[0].size();
+    assert(YTexdim == Ydim && Xdim == XTexdim);
+    std::vector<std::vector<float>> output_texture(licImageSizeY, std::vector<float>(licImageSizeX, 0.0f));
 
     const auto& vecfieldData = vecfield.field;
-
-    for (int y = 0; y < Ydim; ++y) {
-        for (int x = 0; x < Xdim; ++x) {
+    const vec2d<float> domainRange = vecfield.domainMaxBoundary - vecfield.domainMinBoundary;
+    const float inverse_grid_interval_x = 1.0f / (float)vecfield.gridInterval.x;
+    const float inverse_grid_interval_y = 1.0f / (float)vecfield.gridInterval.y;
+    for (int y = 0; y < licImageSizeY; ++y) {
+        for (int x = 0; x < licImageSizeX; ++x) {
             float accum_value = 0.0f;
             int accum_count = 0;
 
+            // map position from texture image grid coordinate to vector field
+            float ratio_x = (float)((float)x / (float)licImageSizeX);
+            float ratio_y = (float)((float)y / (float)licImageSizeY);
+
             // Trace forward
-            vec2d<float> pos = { x * vecfield.gridInterval.x + vecfield.domainMinBoundary.x,
-                y * vecfield.gridInterval.y + vecfield.domainMinBoundary.y };
+            // physicalPositionInVectorfield
+            vec2d<float> pos = { ratio_x * domainRange.x + vecfield.domainMinBoundary.x,
+                ratio_y * domainRange.y + vecfield.domainMinBoundary.y };
 
             for (int i = 0; i < MaxIntegrationSteps; ++i) {
-                float floatIndicesX = (pos.x - vecfield.domainMinBoundary.x) / vecfield.gridInterval.x;
-                float floatIndicesY = (pos.y - vecfield.domainMinBoundary.y) / vecfield.gridInterval.y;
+                float floatIndicesX = (pos.x - vecfield.domainMinBoundary.x) * inverse_grid_interval_x;
+                float floatIndicesY = (pos.y - vecfield.domainMinBoundary.y) * inverse_grid_interval_y;
 
                 if (!(0 <= floatIndicesX && floatIndicesX < Xdim && 0 <= floatIndicesY && floatIndicesY < Ydim)) {
                     break; // Stop if we move outside the texture bounds
@@ -145,12 +159,12 @@ std::vector<std::vector<float>> LICAlgorithm(
             }
 
             // Trace backward
-            pos = { x * vecfield.gridInterval.x + vecfield.domainMinBoundary.x,
-                y * vecfield.gridInterval.y + vecfield.domainMinBoundary.y };
+            pos = { ratio_x * domainRange.x + vecfield.domainMinBoundary.x,
+                ratio_y * domainRange.y + vecfield.domainMinBoundary.y };
 
             for (int i = 0; i < MaxIntegrationSteps; ++i) {
-                float floatIndicesX = (pos.x - vecfield.domainMinBoundary.x) / vecfield.gridInterval.x;
-                float floatIndicesY = (pos.y - vecfield.domainMinBoundary.y) / vecfield.gridInterval.y;
+                float floatIndicesX = (pos.x - vecfield.domainMinBoundary.x) * inverse_grid_interval_x;
+                float floatIndicesY = (pos.y - vecfield.domainMinBoundary.y) * inverse_grid_interval_y;
                 if (!(0 <= floatIndicesX && floatIndicesX < Xdim && 0 <= floatIndicesY && floatIndicesY < Ydim)) {
                     break; // Stop if we move outside the texture bounds
                 }
@@ -174,38 +188,59 @@ std::vector<std::pair<float, int>> generateNParamters(int n)
 {
     std::vector<std::pair<float, int>> parameters = {
         { 1.0, 2 },
-        { 1.0, 2 },
-        { 1.0, 3 },
-        { 1.0, 10 },
-        { 2.0, 1 },
-        { 2.0, 2 },
-        { 2.0, 2 },
-        { 2.0, 3 },
-        { 2.0, 10 },
+        /*   { 1.0, 2 },
+           { 1.0, 3 },
+           { 1.0, 10 },
+           { 2.0, 1 },
+           { 2.0, 2 },
+           { 2.0, 2 },
+           { 2.0, 3 },
+           { 2.0, 10 },*/
     };
 
     std::uniform_real_distribution<float> dist_double(0.01, 2.0);
     std::uniform_int_distribution<int> dist_int(1, 6);
 
-    for (int i = 0; i < n; ++i) {
-        float first = dist_double(rng);
-        int second = dist_int(rng);
-        parameters.emplace_back(first, second);
-    }
+    // for (int i = 0; i < n; ++i) {
+    //     float first = dist_double(rng);
+    //     int second = dist_int(rng);
+    //     parameters.emplace_back(first, second);
+    // }
 
     return parameters;
+}
+std::pair<float, float> computeMinMax(const std::vector<float>& values)
+{
+    if (values.empty()) {
+        throw std::invalid_argument("The input vector is empty.");
+    }
+
+    float minVal = std::numeric_limits<float>::infinity();
+    float maxVal = -std::numeric_limits<float>::infinity();
+
+    for (float val : values) {
+        if (val < minVal) {
+            minVal = val;
+        }
+        if (val > maxVal) {
+            maxVal = val;
+        }
+    }
+
+    return { minVal, maxVal };
 }
 
 int main()
 {
 
     using namespace std;
-    const int Xdim = 128, Ydim = 128;
+    const int Xdim = 64, Ydim = 64;
+    const int LicImageSize = 256;
     vec2d<float> domainMinBoundary = { -2.0, -2.0 };
     vec2d<float> domainMaxBoundary = { 2.0, 2.0 };
     const float stepSize = 0.01;
-    const int maxIteratioOneDirection = 256;
-    int numVelocityFields = 3; // num of fields per n, rc parameter setting
+    const int maxIteratioOneDirection = 128;
+    int numVelocityFields = 1; // num of fields per n, rc parameter setting
 
     vec2d<float> gridInterval = {
         (domainMaxBoundary.x - domainMinBoundary.x) / (Xdim - 1),
@@ -251,6 +286,16 @@ int main()
                     printf("couldn't open file: %s", metaFilename.c_str());
                     return;
                 }
+                std::ofstream outBin(velocityFilename, std::ios::binary);
+                if (!outBin.good()) {
+                    printf("couldn't open file: %s", velocityFilename.c_str());
+                    return;
+                }
+
+                cereal::BinaryOutputArchive archive_Binary(outBin);
+                const std::vector<float> rawData = flatten2D(resData);
+                auto [minV, maxV] = computeMinMax(rawData);
+
                 {
 
                     cereal::JSONOutputArchive archive_o(out);
@@ -265,21 +310,18 @@ int main()
                     archive_o(CEREAL_NVP(theta));
                     archive_o(CEREAL_NVP(sx));
                     archive_o(CEREAL_NVP(sy));
+                    archive_o(CEREAL_NVP(minV));
+                    archive_o(CEREAL_NVP(maxV));
                 }
 
                 // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
                 out.close();
 
-                std::ofstream outBin(velocityFilename, std::ios::binary);
-                if (!outBin.good()) {
-                    printf("couldn't open file: %s", velocityFilename.c_str());
-                    return;
-                }
                 // write raw data
 
-                cereal::BinaryOutputArchive archive_Binary(outBin);
-
-                const std::vector<float> rawData = flatten2D(resData);
+                // ar(make_size_tag(static_cast<size_type=uint64>(vector.size()))); // number of elements
+                // ar(binary_data(vector.data(), vector.size() * sizeof(T)));
+                //  when using other library to read, need to discard the first uint64 (8bytes.)
                 archive_Binary(rawData);
 
                 outBin.close();
@@ -287,9 +329,10 @@ int main()
                 VectorField2D outField {
                     resData,
                     domainMinBoundary,
+                    domainMaxBoundary,
                     gridInterval
                 };
-                auto outputTexture = LICAlgorithm(licNoisetexture, outField, stepSize, maxIteratioOneDirection);
+                auto outputTexture = LICAlgorithm(licNoisetexture, outField, LicImageSize, LicImageSize, stepSize, maxIteratioOneDirection);
 
                 saveAsPNG(outputTexture, licFilename);
 

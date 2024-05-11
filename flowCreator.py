@@ -153,25 +153,41 @@ def bilinear_interpolate(vector_field, x, y):
     return interpolated_vector
 
 
-def LICAlgorithm(texture:np.ndarray, vecfield: SteadyVectorField2D, stepSize:float, MaxIntegrationSteps:int):
+def LICAlgorithm(texture:np.ndarray, vecfield: SteadyVectorField2D, resultImageSizeX, resultImageSizeY,stepSize:float, MaxIntegrationSteps:int):
     """
     A simplified LIC algorithm to visualize the flow of a 2D vector field slice. 
+    texture as same size as the vector field slice, vecfield is the vector field slice,
+    resultImageSizeX and resultImageSizeY are the size of the output image, 
+    stepSize is the step size for integration, and MaxIntegrationSteps is the maximum number of integration steps to take.
     """
-    Ydim, Xdim,_ = texture.shape
-    output_texture = np.zeros_like(texture)
+    if texture.ndim == 2:
+        Ydim, Xdim = texture.shape
+        texture = texture[:, :, np.newaxis]  # Add a dummy channel dimension
+    else:
+        Ydim, Xdim, _ = texture.shape
+
+    output_texture = np.zeros((resultImageSizeY, resultImageSizeX), dtype=np.float32)
     vecfieldData=vecfield.field
-    for y in range(Ydim):
-        for x in range(Xdim):
+    domainRangeX=vecfield.domainMaxBoundary[0]-vecfield.domainMinBoundary[0]
+    domainRangeY=vecfield.domainMaxBoundary[1]-vecfield.domainMinBoundary[1]
+
+    inverse_grid_interval_x=1/float(vecfield.gridInterval[0])
+    inverse_grid_interval_y=1/float(vecfield.gridInterval[1])
+    for y in range(resultImageSizeY):
+        for x in range(resultImageSizeX):
+
+            ratioX=float(x)/float(resultImageSizeX)
+            ratioY=float(y)/float(resultImageSizeY)
             accum_value = 0.0
             accum_count = 0
             
             # Trace forward
             #pos (x,y)
-            pos = np.array([x* vecfield.gridInterval[0]+vecfield.domainMinBoundary[0], y * vecfield.gridInterval[1]+vecfield.domainMinBoundary[1]], dtype=np.float32)
+            pos = np.array([ratioX* domainRangeX+vecfield.domainMinBoundary[0], ratioY* domainRangeY+vecfield.domainMinBoundary[1]], dtype=np.float32)
 
             for _ in range(MaxIntegrationSteps):
-                floatIndexX=(pos[0]-vecfield.domainMinBoundary[0])/vecfield.gridInterval[0]
-                floatIndexY=(pos[1]-vecfield.domainMinBoundary[1])/vecfield.gridInterval[1]
+                floatIndexX=(pos[0]-vecfield.domainMinBoundary[0])*inverse_grid_interval_x
+                floatIndexY=(pos[1]-vecfield.domainMinBoundary[1])*inverse_grid_interval_y
                 if not (0 <= floatIndexX < Xdim and 0 <= floatIndexY < Ydim):
                     break  # Stop if we move outside the texture bounds
 
@@ -181,10 +197,10 @@ def LICAlgorithm(texture:np.ndarray, vecfield: SteadyVectorField2D, stepSize:flo
                 pos += vec * stepSize
                 
             # Trace backward
-            pos = np.array([y, x], dtype=np.float32)
+            pos = np.array([ratioX* domainRangeX+vecfield.domainMinBoundary[0], ratioY* domainRangeY+vecfield.domainMinBoundary[1]], dtype=np.float32)
             for _ in range(MaxIntegrationSteps):
-                floatIndexX=(pos[0]-vecfield.domainMinBoundary[0])/vecfield.gridInterval[0]
-                floatIndexY=(pos[1]-vecfield.domainMinBoundary[1])/vecfield.gridInterval[1]
+                floatIndexX=(pos[0]-vecfield.domainMinBoundary[0])*inverse_grid_interval_x
+                floatIndexY=(pos[1]-vecfield.domainMinBoundary[1])*inverse_grid_interval_y
                 if not (0 <= floatIndexX < Xdim and 0 <= floatIndexY < Ydim):
                     break  # Stop if we move outside the texture bounds
 
@@ -208,13 +224,13 @@ def LICImage_OFFLINE_RENDERING(vecfield: VectorField2D, timeSlice=0,stepSize=0.0
     Render a steady 2D vector field as an LIC image and save to a PNG file.
     """
     # Step 1: Initialize a texture for the LIC process, often random noise
-    texture = np.random.rand(vecfield.Ydim, vecfield.Xdim,1)
+    texture = np.random.rand(vecfield.Ydim, vecfield.Xdim)
     # Detach the tensor, move it to CPU, and convert to NumPy
     VecFieldSlice=vecfield.getSlice(timeSlice)
     # Step 2: Prepare your LIC implementation here. This is a placeholder for
     # the process of integrating along the vector field to modify the texture.
     # You'll need to replace this with your actual LIC algorithm.
-    lic_result = LICAlgorithm(texture, VecFieldSlice, stepSize, MaxIntegrationSteps)
+    lic_result = LICAlgorithm(texture, VecFieldSlice, 128,128,stepSize, MaxIntegrationSteps)
     
     # Step 3: Normalize the LIC result for visualization
     lic_normalized = (lic_result - np.min(lic_result)) / (np.max(lic_result) - np.min(lic_result))
