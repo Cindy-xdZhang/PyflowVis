@@ -4,6 +4,7 @@ import os
 from flowCreator import LICAlgorithm
 from VectorField2d import SteadyVectorField2D
 import matplotlib.pyplot as plt
+import torch
 
 def read_json_file(filepath):
     if not os.path.exists(filepath):
@@ -50,8 +51,6 @@ plt.savefig("vector_field_lic3.png", bbox_inches='tight', pad_inches=0)
 #     print(f"Result Name: {key}")
 #     print("Data:", value)
 
-
-import torch
 # create torch dataset using the load result function:
 class VectorFieldDataset(torch.utils.data.Dataset):
     def __init__(self, directory_path):

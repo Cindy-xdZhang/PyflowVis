@@ -42,6 +42,11 @@ struct vec2d {
     {
         return this->x * rhs.x + this->y * rhs.y;
     }
+    inline T norm() const
+    {
+        const auto r = sqrtf(this->x * this->x + this->y * this->y);
+        return r;
+    }
 
     template <class Archive>
     void serialize(Archive& ar)
@@ -72,15 +77,16 @@ __forceinline int VecComponentAddressTrans(const int x, const int y, const int m
 class VastistasVelocityGenerator {
 public:
     VastistasVelocityGenerator(int Xdim, int Ydim, vec2d<float> minBondary, vec2d<float> maxBondary, float rc, float n);
-    // generate a deformed velocity slice
-    velocityFieldData generate(float sx, float sy, float theta, int Si) const noexcept;
-    velocityFieldData generate() const noexcept;
 
-    inline auto NormalizedVastistasV0(vec2d<float> xy) const noexcept
+    // generate a deformed steady velocity slice  following the paper: Vortex Boundary Identification using Convolutional Neural Network
+    velocityFieldData generateSteady(float sx, float sy, float theta, int Si) const noexcept;
+
+    // generate a deformed Unsteady velocity slice  following the paper: Robust Reference Frame Extraction from Unsteady 2D Vector
+    // Fields with Convolutional Neural Networks
+    velocityFieldData generateSteadyV2(float cx, float cy, float dx, float dy, float tx, float ty) const noexcept;
+
+    inline auto NormalizedVastistasV0(const float r) const noexcept
     {
-        float xpos = xy.x;
-        float ypos = xy.y;
-        const auto r = sqrtf(xpos * xpos + ypos * ypos);
         const auto v0_r = r / (2 * M_PI * (rc * rc) * std::pow(std::pow(r / rc, 2 * n) + 1, 1 / n));
         return v0_r / (r);
     }
@@ -101,4 +107,5 @@ private:
     float xmin, xmax;
     Matrix22<float> SiMatices_[3];
 };
+
 #endif

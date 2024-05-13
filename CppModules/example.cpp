@@ -21,7 +21,7 @@ public:
     {
         std::string result;
         for (int i = 0; i < n_times; ++i)
-            result += "woof! ";
+            result += "woof xxxxxx2022! ";
         std::cout << "c+= cout: " << result << std::endl;
         return result;
     }

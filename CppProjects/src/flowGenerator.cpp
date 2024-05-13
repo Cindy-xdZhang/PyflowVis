@@ -230,12 +230,12 @@ std::pair<float, float> computeMinMax(const std::vector<float>& values)
     return { minVal, maxVal };
 }
 
-int main()
+// todo:
+void generateUnsteadyField()
 {
-
     using namespace std;
     const int Xdim = 64, Ydim = 64;
-    const int LicImageSize = 256;
+    const int LicImageSize = 512;
     vec2d<float> domainMinBoundary = { -2.0, -2.0 };
     vec2d<float> domainMaxBoundary = { 2.0, 2.0 };
     const float stepSize = 0.01;
@@ -253,7 +253,123 @@ int main()
     uniform_real_distribution<float> genTheta(-1.0, 1.0);
     uniform_real_distribution<float> genSx(-2.0, 2.0);
 
-    string root_folder = "../data/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
+    string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
+    if (!filesystem::exists(root_folder)) {
+        filesystem::create_directories(root_folder);
+    }
+
+    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<float, int>& params) {
+        const float rc = params.first;
+        const float n = params.second;
+        const string task_name = "velocity_field_rc_" + to_string(rc) + "n_" + to_string(n);
+        printf("generate data for %s\n", task_name.c_str());
+
+        VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
+
+        for (size_t sample = 0; sample < numVelocityFields; sample++) {
+
+            const auto theta = genTheta(rng);
+            const auto tx = 1 - 0.45 * genSx(rng);
+            const auto ty = 1 - 0.45 * genSx(rng);
+
+            const auto cx = 1;
+            const auto cy = 1;
+            const auto dx = 0;
+            const auto dy = 0;
+
+            auto resData = generator.generateSteadyV2(cx, cy, dx, dy, tx, ty);
+            const string tag_name = "velocity_field_" + std::to_string(sample) + "rc_" + to_string(rc) + "n_" + to_string(n) + "_sample_" + to_string(sample);
+
+            string metaFilename = root_folder + tag_name + "meta.json";
+            string velocityFilename = root_folder + tag_name + "velocity.bin";
+            string licFilename = root_folder + tag_name + "lic.png";
+
+            // save meta info:
+            std::ofstream out(metaFilename);
+            if (!out.good()) {
+                printf("couldn't open file: %s", metaFilename.c_str());
+                return;
+            }
+            std::ofstream outBin(velocityFilename, std::ios::binary);
+            if (!outBin.good()) {
+                printf("couldn't open file: %s", velocityFilename.c_str());
+                return;
+            }
+
+            cereal::BinaryOutputArchive archive_Binary(outBin);
+            const std::vector<float> rawData = flatten2D(resData);
+            auto [minV, maxV] = computeMinMax(rawData);
+
+            {
+
+                cereal::JSONOutputArchive archive_o(out);
+                archive_o(CEREAL_NVP(Xdim));
+                archive_o(CEREAL_NVP(Ydim));
+                archive_o(CEREAL_NVP(domainMinBoundary));
+                archive_o(CEREAL_NVP(domainMaxBoundary));
+
+                archive_o(CEREAL_NVP(n));
+                archive_o(CEREAL_NVP(rc));
+
+                archive_o(CEREAL_NVP(theta));
+                archive_o(CEREAL_NVP(tx));
+                archive_o(CEREAL_NVP(ty));
+                archive_o(CEREAL_NVP(cx));
+                archive_o(CEREAL_NVP(cy));
+                archive_o(CEREAL_NVP(dx));
+                archive_o(CEREAL_NVP(dy));
+                archive_o(CEREAL_NVP(minV));
+                archive_o(CEREAL_NVP(maxV));
+            }
+
+            // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
+            out.close();
+
+            // write raw data
+
+            // ar(make_size_tag(static_cast<size_type=uint64>(vector.size()))); // number of elements
+            // ar(binary_data(vector.data(), vector.size() * sizeof(T)));
+            //  when using other library to read, need to discard the first uint64 (8bytes.)
+            archive_Binary(rawData);
+
+            outBin.close();
+
+            VectorField2D outField {
+                resData,
+                domainMinBoundary,
+                domainMaxBoundary,
+                gridInterval
+            };
+            auto outputTexture = LICAlgorithm(licNoisetexture, outField, LicImageSize, LicImageSize, stepSize, maxIteratioOneDirection);
+
+            saveAsPNG(outputTexture, licFilename);
+        }
+    });
+}
+
+void generateSteadyField()
+{
+    using namespace std;
+    const int Xdim = 64, Ydim = 64;
+    const int LicImageSize = 512;
+    vec2d<float> domainMinBoundary = { -2.0, -2.0 };
+    vec2d<float> domainMaxBoundary = { 2.0, 2.0 };
+    const float stepSize = 0.01;
+    const int maxIteratioOneDirection = 256;
+    int numVelocityFields = 1; // num of fields per n, rc parameter setting
+
+    vec2d<float> gridInterval = {
+        (domainMaxBoundary.x - domainMinBoundary.x) / (Xdim - 1),
+        (domainMaxBoundary.y - domainMinBoundary.y) / (Ydim - 1)
+    };
+
+    const std::vector<std::pair<float, int>> paramters = generateNParamters(1);
+    const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
+
+    uniform_real_distribution<float> genTheta(-1.0, 1.0);
+    uniform_real_distribution<float> genSx(-2.0, 2.0);
+
+    string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
     if (!filesystem::exists(root_folder)) {
         filesystem::create_directories(root_folder);
     }
@@ -273,7 +389,7 @@ int main()
             const auto sy = 1 - 0.5 * genSx(rng);
             for (size_t j = 0; j < 3; j++) { // j denotes selection of si matix
 
-                auto resData = generator.generate(sx, sy, theta, j);
+                auto resData = generator.generateSteady(sx, sy, theta, j);
                 const string tag_name = "velocity_field_ " + std::to_string(sample) + "rc_" + to_string(rc) + "n_" + to_string(n) + "S[" + to_string(j) + "]_";
 
                 string metaFilename = root_folder + tag_name + "meta.json";
@@ -339,6 +455,12 @@ int main()
             } // for j
         }
     });
+}
+
+int main()
+{
+
+    generateUnsteadyField();
 
     return 0;
 }
