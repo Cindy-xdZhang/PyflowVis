@@ -9,7 +9,7 @@
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
-#include <algorithm>
+
 #include <execution>
 #include <filesystem>
 #include <fstream>
@@ -80,41 +80,10 @@ std::vector<float> flatten2D(const std::vector<std::vector<vec2d<float>>>& x2D)
     return result;
 }
 
-template <typename T>
-T bilinear_interpolate(const std::vector<std::vector<T>>& vector_field, float x, float y)
-{
-    x = std::clamp(x, float(0), float(vector_field[0].size() - 1));
-    y = std::clamp(y, float(0), float(vector_field.size() - 1));
-
-    int x0 = static_cast<int>(x);
-    int y0 = static_cast<int>(y);
-
-    int x1 = std::min(x0 + 1, static_cast<int>(vector_field[0].size() - 1));
-    int y1 = std::min(y0 + 1, static_cast<int>(vector_field.size() - 1));
-
-    float tx = x - x0;
-    float ty = y - y0;
-
-    T v00 = vector_field[y0][x0];
-    T v01 = vector_field[y0][x1];
-    T v10 = vector_field[y1][x0];
-    T v11 = vector_field[y1][x1];
-    T a = v00 * (1 - tx) + v01 * tx;
-    T b = v10 * (1 - tx) + v11 * tx;
-    return a * (1 - ty) + b * ty;
-}
-
-struct VectorField2D {
-    std::vector<std::vector<vec2d<float>>> field;
-    vec2d<float> domainMinBoundary;
-    vec2d<float> domainMaxBoundary;
-    vec2d<float> gridInterval;
-};
-
 // The result image size is the same as the input texture.
 std::vector<std::vector<float>> LICAlgorithm(
     const std::vector<std::vector<float>>& texture,
-    const VectorField2D& vecfield,
+    const SteadyVectorField2D& vecfield,
     const int licImageSizeX,
     const int licImageSizeY,
     float stepSize,
@@ -128,9 +97,9 @@ std::vector<std::vector<float>> LICAlgorithm(
     std::vector<std::vector<float>> output_texture(licImageSizeY, std::vector<float>(licImageSizeX, 0.0f));
 
     const auto& vecfieldData = vecfield.field;
-    const vec2d<float> domainRange = vecfield.domainMaxBoundary - vecfield.domainMinBoundary;
-    const float inverse_grid_interval_x = 1.0f / (float)vecfield.gridInterval.x;
-    const float inverse_grid_interval_y = 1.0f / (float)vecfield.gridInterval.y;
+    const vec2d<float> domainRange = vecfield.spatialDomainMaxBoundary - vecfield.spatialDomainMinBoundary;
+    const float inverse_grid_interval_x = 1.0f / (float)vecfield.spatialGridInterval.x;
+    const float inverse_grid_interval_y = 1.0f / (float)vecfield.spatialGridInterval.y;
     for (int y = 0; y < licImageSizeY; ++y) {
         for (int x = 0; x < licImageSizeX; ++x) {
             float accum_value = 0.0f;
@@ -142,12 +111,12 @@ std::vector<std::vector<float>> LICAlgorithm(
 
             // Trace forward
             // physicalPositionInVectorfield
-            vec2d<float> pos = { ratio_x * domainRange.x + vecfield.domainMinBoundary.x,
-                ratio_y * domainRange.y + vecfield.domainMinBoundary.y };
+            vec2d<float> pos = { ratio_x * domainRange.x + vecfield.spatialDomainMinBoundary.x,
+                ratio_y * domainRange.y + vecfield.spatialDomainMinBoundary.y };
 
             for (int i = 0; i < MaxIntegrationSteps; ++i) {
-                float floatIndicesX = (pos.x - vecfield.domainMinBoundary.x) * inverse_grid_interval_x;
-                float floatIndicesY = (pos.y - vecfield.domainMinBoundary.y) * inverse_grid_interval_y;
+                float floatIndicesX = (pos.x - vecfield.spatialDomainMinBoundary.x) * inverse_grid_interval_x;
+                float floatIndicesY = (pos.y - vecfield.spatialDomainMinBoundary.y) * inverse_grid_interval_y;
 
                 if (!(0 <= floatIndicesX && floatIndicesX < Xdim && 0 <= floatIndicesY && floatIndicesY < Ydim)) {
                     break; // Stop if we move outside the texture bounds
@@ -159,12 +128,12 @@ std::vector<std::vector<float>> LICAlgorithm(
             }
 
             // Trace backward
-            pos = { ratio_x * domainRange.x + vecfield.domainMinBoundary.x,
-                ratio_y * domainRange.y + vecfield.domainMinBoundary.y };
+            pos = { ratio_x * domainRange.x + vecfield.spatialDomainMinBoundary.x,
+                ratio_y * domainRange.y + vecfield.spatialDomainMinBoundary.y };
 
             for (int i = 0; i < MaxIntegrationSteps; ++i) {
-                float floatIndicesX = (pos.x - vecfield.domainMinBoundary.x) * inverse_grid_interval_x;
-                float floatIndicesY = (pos.y - vecfield.domainMinBoundary.y) * inverse_grid_interval_y;
+                float floatIndicesX = (pos.x - vecfield.spatialDomainMinBoundary.x) * inverse_grid_interval_x;
+                float floatIndicesY = (pos.y - vecfield.spatialDomainMinBoundary.y) * inverse_grid_interval_y;
                 if (!(0 <= floatIndicesX && floatIndicesX < Xdim && 0 <= floatIndicesY && floatIndicesY < Ydim)) {
                     break; // Stop if we move outside the texture bounds
                 }
@@ -198,11 +167,11 @@ std::vector<std::pair<float, int>> generateNParamters(int n)
            { 2.0, 10 },*/
     };
 
-    std::uniform_real_distribution<float> dist_double(0.01, 2.0);
+    std::uniform_real_distribution<float> dist_T(0.01, 2.0);
     std::uniform_int_distribution<int> dist_int(1, 6);
 
     // for (int i = 0; i < n; ++i) {
-    //     float first = dist_double(rng);
+    //     float first = dist_T(rng);
     //     int second = dist_int(rng);
     //     parameters.emplace_back(first, second);
     // }
@@ -230,7 +199,104 @@ std::pair<float, float> computeMinMax(const std::vector<float>& values)
     return { minVal, maxVal };
 }
 
-// todo:
+// todo: transform input field with respect to observer motion(v*=pullback(v-u))
+template <typename T>
+void referenceFrameTransformation(const SteadyVectorField2D& input_field, const int timesteps)
+{
+
+    auto integratePathlineOneStep = [](T x, T y, T t, T dt, T& x_new, T& y_new) {
+        // RK4 integration step
+        vec2d<float> odeStepStartPoint;
+        odeStepStartPoint << x, y;
+
+        const T h = dt;
+
+        // coefficients
+        constexpr T a21 = 0.5;
+        constexpr T a31 = 0.;
+        constexpr T a32 = 0.5;
+        constexpr T a41 = 0.;
+        constexpr T a42 = 0.;
+        constexpr T a43 = 1.;
+
+        constexpr T c2 = 0.5;
+        constexpr T c3 = 0.5;
+        constexpr T c4 = 1.;
+
+        constexpr T b1 = 1. / 6.;
+        constexpr T b2 = 1. / 3.;
+        constexpr T b3 = b2;
+        constexpr T b4 = b1;
+
+        // 4 stages of 2 equations (i.e., 2 dimensions of the manifold and the tangent vector space)
+
+        // stage 1
+        vec2d<float> k1 = fieldFunction_u(odeStepStartPoint, t);
+
+        // stage 2
+        vec2d<float> stagePoint = odeStepStartPoint + k1 * a21 * h;
+        vec2d<float> k2 = fieldFunction_u(stagePoint, t + c2 * h);
+
+        // stage 3
+        stagePoint = odeStepStartPoint + (a31 * k1 + a32 * k2) * h;
+        vec2d<float> k3 = fieldFunction_u(stagePoint, t + c3 * h);
+
+        // stage 4
+        stagePoint = odeStepStartPoint + (a41 * k1 + a42 * k2 + a43 * k3) * h;
+        vec2d<float> k4 = fieldFunction_u(stagePoint, t + c4 * h);
+
+        vec2d<float> result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
+
+        x_new = result_p(0);
+        y_new = result_p(1);
+    };
+
+    //// integrationStep integrates starting from x, y, t, to target_t arriving at point x_new, y_new.
+    //// the push_forward the matrix that does the transformation that a vector would undergo when going one step dt starting at t
+    //// the push_forward is computed by draging a frame (2 vectors) along the curve.
+    // auto integrationStep = [&integratePathlineStep, dx, dy](T x, T y, T t, T dt, T& x_new, T& y_new, Matrix22& push_forward) {
+    //     vec2d<float> p_north;
+    //     vec2d<float> p_south;
+    //     vec2d<float> p_east;
+    //     vec2d<float> p_west;
+
+    //    integratePathlineStep(x, y, t, dt, x_new, y_new);
+    //    integratePathlineStep(x, y + 0.5 * dy, t, dt, p_north(0), p_north(1));
+    //    integratePathlineStep(x, y - 0.5 * dy, t, dt, p_south(0), p_south(1));
+    //    integratePathlineStep(x + 0.5 * dx, y, t, dt, p_east(0), p_east(1));
+    //    integratePathlineStep(x - 0.5 * dx, y, t, dt, p_west(0), p_west(1));
+
+    //    push_forward.col(0) = (p_east - p_west) * (1. / dx); // TODO: check the divide by dx
+    //    push_forward.col(1) = (p_north - p_south) * (1. / dy); // TODO: check the divide by dy
+    //};
+
+    //// integrate starting from x, y, t, to target_t arriving at point x_new, y_new.
+    //// push_forward is the matrix that does the transformation that a vector would undergo when going from t to target_t.
+    //// internally it uses the composition of multiple integration steps.
+    //// if the estimation of the push_forward of one step becomes unreliable a shorter stepsize can be chosen.
+    // auto integrateFrame = [&integrationStep](T x, T y, T t, T target_t, int numberOfSteps, T& x_new, T& y_new, Matrix22& push_forward) {
+    //     T stepsize = (target_t - t) / numberOfSteps;
+
+    //    push_forward(0, 0) = 1;
+    //    push_forward(1, 1) = 1;
+    //    push_forward(0, 1) = 0;
+    //    push_forward(1, 0) = 0;
+
+    //    T x_running = x;
+    //    T y_running = y;
+
+    //    for (int i = 0; i < numberOfSteps; i++) {
+    //        T t_running = t + i * stepsize;
+    //        Matrix22 push_forward_step;
+    //        integrationStep(x_running, y_running, t_running, stepsize, x_running, y_running, push_forward_step);
+    //        push_forward *= push_forward_step; // TODO: check there is no times dt
+    //    }
+
+    //    x_new = x_running;
+    //    y_new = y_running;
+    //};
+}
+
 void generateUnsteadyField()
 {
     using namespace std;
@@ -334,7 +400,7 @@ void generateUnsteadyField()
 
             outBin.close();
 
-            VectorField2D outField {
+            SteadyVectorField2D outField {
                 resData,
                 domainMinBoundary,
                 domainMaxBoundary,
@@ -442,7 +508,7 @@ void generateSteadyField()
 
                 outBin.close();
 
-                VectorField2D outField {
+                SteadyVectorField2D outField {
                     resData,
                     domainMinBoundary,
                     domainMaxBoundary,
