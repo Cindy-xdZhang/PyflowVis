@@ -3,10 +3,11 @@
 #include "cereal/archives/binary.hpp"
 #include "cereal/archives/json.hpp"
 #include "cereal/types/vector.hpp"
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 #include <iostream>
 #include <random>
 #include <vector>
-
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
@@ -64,7 +65,7 @@ std::vector<std::vector<float>> randomNoiseTexture(int width, int height)
     return texture;
 }
 // Function to flatten a 2D vector to a 1D vector
-std::vector<float> flatten2D(const std::vector<std::vector<vec2d<float>>>& x2D)
+std::vector<float> flatten2D(const std::vector<std::vector<Eigen::Vector2f>>& x2D)
 {
     const size_t ydim = x2D.size();
     assert(ydim > 0);
@@ -73,8 +74,8 @@ std::vector<float> flatten2D(const std::vector<std::vector<vec2d<float>>>& x2D)
     result.resize(xdim * ydim * 2);
     for (size_t i = 0; i < ydim; i++)
         for (size_t j = 0; j < xdim; j++) {
-            result[2 * (i * xdim + j)] = x2D[i][j].x;
-            result[2 * (i * xdim + j) + 1] = x2D[i][j].y;
+            result[2 * (i * xdim + j)] = x2D[i][j](0);
+            result[2 * (i * xdim + j) + 1] = x2D[i][j](1);
         }
 
     return result;
@@ -97,9 +98,10 @@ std::vector<std::vector<float>> LICAlgorithm(
     std::vector<std::vector<float>> output_texture(licImageSizeY, std::vector<float>(licImageSizeX, 0.0f));
 
     const auto& vecfieldData = vecfield.field;
-    const vec2d<float> domainRange = vecfield.spatialDomainMaxBoundary - vecfield.spatialDomainMinBoundary;
-    const float inverse_grid_interval_x = 1.0f / (float)vecfield.spatialGridInterval.x;
-    const float inverse_grid_interval_y = 1.0f / (float)vecfield.spatialGridInterval.y;
+    const Eigen::Vector2f domainRange = vecfield.spatialDomainMaxBoundary - vecfield.spatialDomainMinBoundary;
+    const float inverse_grid_interval_x = 1.0f / (float)vecfield.spatialGridInterval(0);
+    const float inverse_grid_interval_y = 1.0f / (float)vecfield.spatialGridInterval(1);
+
     for (int y = 0; y < licImageSizeY; ++y) {
         for (int x = 0; x < licImageSizeX; ++x) {
             float accum_value = 0.0f;
@@ -111,35 +113,35 @@ std::vector<std::vector<float>> LICAlgorithm(
 
             // Trace forward
             // physicalPositionInVectorfield
-            vec2d<float> pos = { ratio_x * domainRange.x + vecfield.spatialDomainMinBoundary.x,
-                ratio_y * domainRange.y + vecfield.spatialDomainMinBoundary.y };
+            Eigen::Vector2f pos = { ratio_x * domainRange(0) + vecfield.spatialDomainMinBoundary(0),
+                ratio_y * domainRange(1) + vecfield.spatialDomainMinBoundary(1) };
 
             for (int i = 0; i < MaxIntegrationSteps; ++i) {
-                float floatIndicesX = (pos.x - vecfield.spatialDomainMinBoundary.x) * inverse_grid_interval_x;
-                float floatIndicesY = (pos.y - vecfield.spatialDomainMinBoundary.y) * inverse_grid_interval_y;
+                float floatIndicesX = (pos(0) - vecfield.spatialDomainMinBoundary(0)) * inverse_grid_interval_x;
+                float floatIndicesY = (pos(1) - vecfield.spatialDomainMinBoundary(1)) * inverse_grid_interval_y;
 
                 if (!(0 <= floatIndicesX && floatIndicesX < Xdim && 0 <= floatIndicesY && floatIndicesY < Ydim)) {
                     break; // Stop if we move outside the texture bounds
                 }
                 accum_value += bilinear_interpolate(texture, floatIndicesX, floatIndicesY);
                 accum_count += 1;
-                vec2d<float> vec = bilinear_interpolate(vecfieldData, floatIndicesX, floatIndicesY);
+                Eigen::Vector2f vec = bilinear_interpolate(vecfieldData, floatIndicesX, floatIndicesY);
                 pos += vec * stepSize;
             }
 
             // Trace backward
-            pos = { ratio_x * domainRange.x + vecfield.spatialDomainMinBoundary.x,
-                ratio_y * domainRange.y + vecfield.spatialDomainMinBoundary.y };
+            pos = { ratio_x * domainRange(0) + vecfield.spatialDomainMinBoundary(0),
+                ratio_y * domainRange(1) + vecfield.spatialDomainMinBoundary(1) };
 
             for (int i = 0; i < MaxIntegrationSteps; ++i) {
-                float floatIndicesX = (pos.x - vecfield.spatialDomainMinBoundary.x) * inverse_grid_interval_x;
-                float floatIndicesY = (pos.y - vecfield.spatialDomainMinBoundary.y) * inverse_grid_interval_y;
+                float floatIndicesX = (pos(0) - vecfield.spatialDomainMinBoundary(0)) * inverse_grid_interval_x;
+                float floatIndicesY = (pos(1) - vecfield.spatialDomainMinBoundary(1)) * inverse_grid_interval_y;
                 if (!(0 <= floatIndicesX && floatIndicesX < Xdim && 0 <= floatIndicesY && floatIndicesY < Ydim)) {
                     break; // Stop if we move outside the texture bounds
                 }
                 accum_value += bilinear_interpolate(texture, floatIndicesX, floatIndicesY);
                 accum_count += 1;
-                vec2d<float> vec = bilinear_interpolate(vecfieldData, floatIndicesX, floatIndicesY);
+                Eigen::Vector2f vec = bilinear_interpolate(vecfieldData, floatIndicesX, floatIndicesY);
                 pos -= vec * stepSize;
             }
 
@@ -206,7 +208,7 @@ void referenceFrameTransformation(const SteadyVectorField2D& input_field, const 
 
     auto integratePathlineOneStep = [](T x, T y, T t, T dt, T& x_new, T& y_new) {
         // RK4 integration step
-        vec2d<float> odeStepStartPoint;
+        Eigen::Vector2f odeStepStartPoint;
         odeStepStartPoint << x, y;
 
         const T h = dt;
@@ -231,21 +233,21 @@ void referenceFrameTransformation(const SteadyVectorField2D& input_field, const 
         // 4 stages of 2 equations (i.e., 2 dimensions of the manifold and the tangent vector space)
 
         // stage 1
-        vec2d<float> k1 = fieldFunction_u(odeStepStartPoint, t);
+        Eigen::Vector2f k1 = fieldFunction_u(odeStepStartPoint, t);
 
         // stage 2
-        vec2d<float> stagePoint = odeStepStartPoint + k1 * a21 * h;
-        vec2d<float> k2 = fieldFunction_u(stagePoint, t + c2 * h);
+        Eigen::Vector2f stagePoint = odeStepStartPoint + k1 * a21 * h;
+        Eigen::Vector2f k2 = fieldFunction_u(stagePoint, t + c2 * h);
 
         // stage 3
         stagePoint = odeStepStartPoint + (a31 * k1 + a32 * k2) * h;
-        vec2d<float> k3 = fieldFunction_u(stagePoint, t + c3 * h);
+        Eigen::Vector2f k3 = fieldFunction_u(stagePoint, t + c3 * h);
 
         // stage 4
         stagePoint = odeStepStartPoint + (a41 * k1 + a42 * k2 + a43 * k3) * h;
-        vec2d<float> k4 = fieldFunction_u(stagePoint, t + c4 * h);
+        Eigen::Vector2f k4 = fieldFunction_u(stagePoint, t + c4 * h);
 
-        vec2d<float> result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
+        Eigen::Vector2f result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
 
         x_new = result_p(0);
         y_new = result_p(1);
@@ -255,10 +257,10 @@ void referenceFrameTransformation(const SteadyVectorField2D& input_field, const 
     //// the push_forward the matrix that does the transformation that a vector would undergo when going one step dt starting at t
     //// the push_forward is computed by draging a frame (2 vectors) along the curve.
     // auto integrationStep = [&integratePathlineStep, dx, dy](T x, T y, T t, T dt, T& x_new, T& y_new, Matrix22& push_forward) {
-    //     vec2d<float> p_north;
-    //     vec2d<float> p_south;
-    //     vec2d<float> p_east;
-    //     vec2d<float> p_west;
+    //     Eigen::Vector2f p_north;
+    //     Eigen::Vector2f p_south;
+    //     Eigen::Vector2f p_east;
+    //     Eigen::Vector2f p_west;
 
     //    integratePathlineStep(x, y, t, dt, x_new, y_new);
     //    integratePathlineStep(x, y + 0.5 * dy, t, dt, p_north(0), p_north(1));
@@ -297,20 +299,162 @@ void referenceFrameTransformation(const SteadyVectorField2D& input_field, const 
     //};
 }
 
+// function killingABCtransformation transform a SteadyVectorField2D& inputField to an unsteady field by observing it with respect to KillingAbcField& observerfield
+// the result field has same spatial grid size domain size as inputField and has same time domian size grid size  as observerfield
+template <typename T>
+void killingABCtransformation(const KillingAbcField& observerfield, const Eigen::Vector2f StartPosition, const SteadyVectorField2D& inputField)
+{
+    const auto tmin = observerfield.tmin;
+    const auto tmax = observerfield.tmax;
+    const float dt = observerfield.dt;
+    const int timestep = observerfield.n;
+
+    auto fieldFunction_u = [&](const Eigen::Vector2f& pos, float t) {
+        return observerfield.getKillingVector(pos, t);
+    };
+
+    auto integratePathlineOneStep = [fieldFunction_u](T x, T y, T t, T dt) -> Eigen::Vector2f {
+        // RK4 integration step
+        Eigen::Vector2f odeStepStartPoint = { x, y };
+
+        const T h = dt;
+
+        // coefficients
+        constexpr T a21 = 0.5;
+        constexpr T a31 = 0.;
+        constexpr T a32 = 0.5;
+        constexpr T a41 = 0.;
+        constexpr T a42 = 0.;
+        constexpr T a43 = 1.;
+
+        constexpr T c2 = 0.5;
+        constexpr T c3 = 0.5;
+        constexpr T c4 = 1.;
+
+        constexpr T b1 = 1. / 6.;
+        constexpr T b2 = 1. / 3.;
+        constexpr T b3 = b2;
+        constexpr T b4 = b1;
+
+        // 4 stages of 2 equations (i.e., 2 dimensions of the manifold and the tangent vector space)
+
+        // stage 1
+        Eigen::Vector2f k1 = fieldFunction_u(odeStepStartPoint, t);
+
+        // stage 2
+        Eigen::Vector2f stagePoint = odeStepStartPoint + k1 * a21 * h;
+        Eigen::Vector2f k2 = fieldFunction_u(stagePoint, t + c2 * h);
+
+        // stage 3
+        stagePoint = odeStepStartPoint + (a31 * k1 + a32 * k2) * h;
+        Eigen::Vector2f k3 = fieldFunction_u(stagePoint, t + c3 * h);
+
+        // stage 4
+        stagePoint = odeStepStartPoint + (a41 * k1 + a42 * k2 + a43 * k3) * h;
+        Eigen::Vector2f k4 = fieldFunction_u(stagePoint, t + c4 * h);
+
+        Eigen::Vector2f result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
+
+        return result_p;
+    };
+
+    // integration of worldline
+    auto runIntegration = [&](const Eigen::Vector2f& startPoint, /*const double observationTime,*/ const double targetIntegrationTime,
+                              const std::vector<Eigen::Vector2f> pathVelocitys, const std::vector<Eigen::Vector3f>& pathPositions) -> bool {
+        const float startTime = 0.0;
+        const int maxIterationCount = 2000;
+        const float spaceConversionRatio = 1.0;
+
+        bool integrationOutOfDomainBounds = false;
+        bool outOfIntegrationTimeBounds = false;
+        int iterationCount = 0;
+        float integrationTimeStepSize = dt;
+
+        if (targetIntegrationTime < startTime) {
+            // we integrate back in time
+            integrationTimeStepSize *= -1.0;
+        }
+        const auto minDomainBounds = inputField.spatialDomainMinBoundary;
+        const auto maxDomainBounds = inputField.spatialDomainMinBoundary;
+        // This function checks if the current point is in the domain
+        std::function<bool(const Eigen::Vector2f& point)> checkIfOutOfDomain = [&minDomainBounds, &maxDomainBounds](const Eigen::Vector2f& point) {
+            if (point(0) <= minDomainBounds(0))
+                return true;
+            if (point(0) >= maxDomainBounds(0))
+                return true;
+            if (point(1) <= minDomainBounds(1))
+                return true;
+            if (point(1) >= maxDomainBounds(1))
+                return true;
+            return false;
+        };
+
+        Eigen::Vector2f currentPoint = startPoint;
+
+        integrationOutOfDomainBounds = checkIfOutOfDomain(currentPoint);
+
+        // do integration
+        double currentTime = startTime;
+        // integrate until either
+        // - we reached the max iteration count
+        // - we reached the upper limit of the time domain
+        // - we ran out of spatial domain
+        while ((!integrationOutOfDomainBounds) && (!outOfIntegrationTimeBounds) && (pathPositions.size() < maxIterationCount)) {
+
+            // advance to a new point in the chart
+            auto newPoint = integratePathlineOneStep(currentPoint(0), currentPoint(1), currentTime, dt);
+            integrationOutOfDomainBounds = checkIfOutOfDomain(newPoint);
+            if (!integrationOutOfDomainBounds) {
+                auto newTime = currentTime + integrationTimeStepSize;
+                // check if currentTime is out of the time domain -> we are done
+                if ((targetIntegrationTime > startTime) && (newTime >= targetIntegrationTime)) {
+                    outOfIntegrationTimeBounds = true;
+                } else if ((targetIntegrationTime < startTime) && (newTime <= targetIntegrationTime)) {
+                    outOfIntegrationTimeBounds = true;
+                } else {
+                    // add  current point to the result list and set currentPoint to newPoint -> everything fine -> continue with the while loop
+                    Eigen::Vector3f pointAndTime = { currentPoint(0), currentPoint(1), currentTime };
+                    pathPositions.emplace_back(pointAndTime);
+                    auto velocity = fieldFunction_u(currentPoint);
+                    pathVelocitys.emplace_back(velocity);
+                    currentPoint = newPoint;
+                    currentTime = newTime;
+                    iterationCount++;
+                }
+            }
+        }
+        bool suc = pathPositions.size() > 1 && pathPositions.size() == pathVelocitys.size();
+        return suc;
+    };
+
+    std::vector<Eigen::Vector2f> pathVelocitys;
+    std::vector<Eigen::Vector3f>& pathPositions;
+    bool suc = runIntegration(StartPosition, tmax, pathVelocitys, pathPositions);
+    assert(suc && pathPositions.size() == timestep);
+
+    // get rotate c of t
+    for (size_t i = 0; i < timestep; i++) {
+        const float t = observerfield.tmin + i * observerfield.dt;
+        const Eigen::Vector3f abc = observerfield.func_(t);
+        // compute observer's relative transformation as M=T(position)*integral of [ R(matrix_exponential(spinTensor))] * T(-startPoint)
+        // then observer bring transformation  M-1=T(startPoint)*integral of [ R(matrix_exponential(spinTensor))]^T * T(-position)
+    }
+}
+
 void generateUnsteadyField()
 {
     using namespace std;
     const int Xdim = 64, Ydim = 64;
     const int LicImageSize = 512;
-    vec2d<float> domainMinBoundary = { -2.0, -2.0 };
-    vec2d<float> domainMaxBoundary = { 2.0, 2.0 };
+    Eigen::Vector2f domainMinBoundary = { -2.0, -2.0 };
+    Eigen::Vector2f domainMaxBoundary = { 2.0, 2.0 };
     const float stepSize = 0.01;
     const int maxIteratioOneDirection = 128;
     int numVelocityFields = 1; // num of fields per n, rc parameter setting
 
-    vec2d<float> gridInterval = {
-        (domainMaxBoundary.x - domainMinBoundary.x) / (Xdim - 1),
-        (domainMaxBoundary.y - domainMinBoundary.y) / (Ydim - 1)
+    Eigen::Vector2f gridInterval = {
+        (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
+        (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
     };
 
     const std::vector<std::pair<float, int>> paramters = generateNParamters(1);
@@ -371,8 +515,10 @@ void generateUnsteadyField()
                 cereal::JSONOutputArchive archive_o(out);
                 archive_o(CEREAL_NVP(Xdim));
                 archive_o(CEREAL_NVP(Ydim));
-                archive_o(CEREAL_NVP(domainMinBoundary));
-                archive_o(CEREAL_NVP(domainMaxBoundary));
+                std::vector<float> domainMininumBoundary = { domainMinBoundary(0), domainMinBoundary(1) };
+                std::vector<float> domainMaxinumBoundary = { domainMaxBoundary(0), domainMaxBoundary(1) };
+                archive_o(CEREAL_NVP(domainMininumBoundary));
+                archive_o(CEREAL_NVP(domainMaxinumBoundary));
 
                 archive_o(CEREAL_NVP(n));
                 archive_o(CEREAL_NVP(rc));
@@ -418,15 +564,15 @@ void generateSteadyField()
     using namespace std;
     const int Xdim = 64, Ydim = 64;
     const int LicImageSize = 512;
-    vec2d<float> domainMinBoundary = { -2.0, -2.0 };
-    vec2d<float> domainMaxBoundary = { 2.0, 2.0 };
+    Eigen::Vector2f domainMinBoundary = { -2.0, -2.0 };
+    Eigen::Vector2f domainMaxBoundary = { 2.0, 2.0 };
     const float stepSize = 0.01;
     const int maxIteratioOneDirection = 256;
     int numVelocityFields = 1; // num of fields per n, rc parameter setting
 
-    vec2d<float> gridInterval = {
-        (domainMaxBoundary.x - domainMinBoundary.x) / (Xdim - 1),
-        (domainMaxBoundary.y - domainMinBoundary.y) / (Ydim - 1)
+    Eigen::Vector2f gridInterval = {
+        (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
+        (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
     };
 
     const std::vector<std::pair<float, int>> paramters = generateNParamters(1);
@@ -483,8 +629,10 @@ void generateSteadyField()
                     cereal::JSONOutputArchive archive_o(out);
                     archive_o(CEREAL_NVP(Xdim));
                     archive_o(CEREAL_NVP(Ydim));
-                    archive_o(CEREAL_NVP(domainMinBoundary));
-                    archive_o(CEREAL_NVP(domainMaxBoundary));
+                    std::vector<float> domainMininumBoundary = { domainMinBoundary(0), domainMinBoundary(1) };
+                    std::vector<float> domainMaxinumBoundary = { domainMaxBoundary(0), domainMaxBoundary(1) };
+                    archive_o(CEREAL_NVP(domainMininumBoundary));
+                    archive_o(CEREAL_NVP(domainMaxinumBoundary));
 
                     archive_o(CEREAL_NVP(n));
                     archive_o(CEREAL_NVP(rc));

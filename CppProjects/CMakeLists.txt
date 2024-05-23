@@ -12,3 +12,4 @@ src/flowGenerator.cpp
 
 add_executable(FlowGenerator ${sources})
 target_include_directories(FlowGenerator PUBLIC include/)
+target_include_directories(FlowGenerator PUBLIC external/eigen-3.3.7)
