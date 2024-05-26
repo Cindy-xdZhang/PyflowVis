@@ -70,13 +70,25 @@ struct SteadyVectorField2D {
     }
 };
 
-struct UnSteadyVectorField2D {
+struct IUnsteadField2D {
+public:
+    virtual Eigen::Vector2f
+    getVector(int x, int y, int t) const
+        = 0;
+    virtual Eigen::Vector2f getVector(float x, float y, float t) const = 0;
+
+public:
+    float tmin, tmax;
+    int timeSteps = -1;
+};
+
+class UnSteadyVectorField2D : public IUnsteadField2D {
+public:
     std::vector<std::vector<std::vector<Eigen::Vector2f>>> field; // first t, then y dimension then x dimension
     Eigen::Vector2f spatialDomainMinBoundary;
     Eigen::Vector2f spatialDomainMaxBoundary;
     Eigen::Vector2f spatialGridInterval;
-    float tmin, tmax;
-    int timeSteps = -1;
+
     Eigen::Vector2f getVector(int x, int y, int t) const
     {
         return field[t][y][x];
@@ -127,6 +139,101 @@ struct UnSteadyVectorField2D {
     {
         return getVector(pos(0), pos(1), t);
     }
+
+    const SteadyVectorField2D getVectorfieldSliceAtTime(int t) const
+    {
+        SteadyVectorField2D vecfield;
+        vecfield.spatialDomainMinBoundary = spatialDomainMinBoundary;
+        vecfield.spatialDomainMaxBoundary = spatialDomainMaxBoundary;
+        vecfield.spatialGridInterval = spatialGridInterval;
+        if (t >= 0 && t < timeSteps) {
+            vecfield.field = field[static_cast<int>(t)];
+        } else {
+            assert(false);
+        }
+
+        return vecfield;
+    }
+};
+class KillingAbcField : public IUnsteadField2D {
+public:
+    KillingAbcField(std::function<Eigen::Vector3f(float)> func, int n, float tmin, float tmax)
+        : tmin(tmin)
+        , tmax(tmax)
+        , timeSteps(n)
+    {
+        dt = (tmax - tmin) / (float)(n - 1);
+        assert(n > 1);
+        assert(dt > 0.0);
+        centerPos = { 0.0, 0.0 };
+        this->func_ = std::move(func);
+    }
+    float tmin, tmax;
+    int timeSteps = -1;
+    float dt;
+    Eigen::Vector2f centerPos;
+    std::function<Eigen::Vector3f(float)> func_ = nullptr;
+    // give a curve of a(t),b(t),c(t), killing vector(x,t) = a(t)+b(t)+ [0,-c(t);c(t),0]*(x-o), where o is the center of the plane.
+    inline Eigen::Vector2f getKillingVector(const Eigen::Vector2f& queryPos, float t) const
+    {
+        if (this->func_)
+            [[likely]] {
+            Eigen::Vector3f abc = this->func_(t);
+
+            Eigen::Vector2f uv = { abc(0), abc(1) };
+            auto ra = queryPos - centerPos;
+
+            const auto c = abc(2);
+            //[0,-c(t);c(t),0]*(ra)
+            Eigen::Vector2f c_componnet = { ra(1) * -c, ra(0) * c };
+            return uv + c_componnet;
+        }
+        assert(false);
+    }
+    virtual Eigen::Vector2f getVector(int x, int y, int t) const
+    {
+        // we don't need this function
+        assert(false);
+        return getKillingVector({ (float)x, (float)y }, t);
+    };
+
+    virtual Eigen::Vector2f getVector(float x, float y, float t) const
+    {
+        return getKillingVector({ (float)x, (float)y }, t);
+    };
+    UnSteadyVectorField2D resample2UnsteadyField(
+        const Eigen::Vector2i& gridSize,
+        const Eigen::Vector2f& domainBoundaryMin,
+        const Eigen::Vector2f& domainBoundaryMax)
+    {
+        UnSteadyVectorField2D vectorField2d;
+
+        vectorField2d.spatialDomainMinBoundary = domainBoundaryMin;
+        vectorField2d.spatialDomainMaxBoundary = domainBoundaryMax;
+        vectorField2d.timeSteps = this->timeSteps;
+        vectorField2d.tmin = this->tmin;
+        vectorField2d.tmax = this->tmax;
+
+        Eigen::Vector2f spatialGridInterval;
+        spatialGridInterval(0) = (domainBoundaryMax(0) - domainBoundaryMin(0)) / (gridSize(0) - 1);
+        spatialGridInterval(1) = (domainBoundaryMax(1) - domainBoundaryMin(1)) / (gridSize(1) - 1);
+        vectorField2d.spatialGridInterval = spatialGridInterval;
+
+        vectorField2d.field.resize(this->timeSteps, std::vector<std::vector<Eigen::Vector2f>>(gridSize.y(), std::vector<Eigen::Vector2f>(gridSize.x())));
+
+        for (int t = 0; t < timeSteps; ++t) {
+            float time = this->tmin + t * this->dt;
+            for (int y = 0; y < gridSize.y(); ++y) {
+                float posY = domainBoundaryMin(1) + y * spatialGridInterval(1);
+                for (int x = 0; x < gridSize.x(); ++x) {
+                    float posX = domainBoundaryMin(0) + x * spatialGridInterval(0);
+                    vectorField2d.field[t][y][x] = getVector(posX, posY, time);
+                }
+            }
+        }
+
+        return vectorField2d;
+    }
 };
 
 class VastistasVelocityGenerator {
@@ -166,43 +273,26 @@ private:
     Eigen::Matrix2f SiMatices_[3];
 };
 
-class KillingAbcField {
+// Definition of the AnalyticalFlowCreator class
+class AnalyticalFlowCreator {
 public:
-    KillingAbcField(int n, std::function<Eigen::Vector3f(float)> func, float tmin, float tmax)
-        : tmin(tmin)
-        , tmax(tmax)
-        , func_(func)
-        , n(n)
-    {
-        dt = (tmax - tmin) / (float)(n - 1);
-        assert(n > 1);
-        assert(dt > 0.0);
-        centerPos = { 0.0, 0.0 };
-    }
-    ~KillingAbcField();
-    float tmin;
-    float tmax;
-    float dt;
-    int n;
-    Eigen::Vector2f centerPos;
-    std::function<Eigen::Vector3f(float)> func_ = nullptr;
-    // give a curve of a(t),b(t),c(t), killing vector(x,t) = a(t)+b(t)+ [0,-c(t);c(t),0]*(x-o), where o is the center of the plane.
-    inline Eigen::Vector2f getKillingVector(const Eigen::Vector2f& queryPos, float t)
-    {
-        if (this->func_)
-            [[likely]] {
-            Eigen::Vector3f abc = this->func_(t);
+    AnalyticalFlowCreator(Eigen::Vector2i grid_size, int time_steps,
+        Eigen::Vector2f domainBoundaryMin = Eigen::Vector2f(-2.0, -2.0),
+        Eigen::Vector2f domainBoundaryMax = Eigen::Vector2f(2.0, 2.0), float tmin = 0.0f, float tmax = 2 * M_PI);
 
-            Eigen::Vector2f uv = { abc(0), abc(1) };
-            auto ra = queryPos - centerPos;
+    // Method to create the flow field using a lambda function
+    UnSteadyVectorField2D createFlowField(std::function<Eigen::Vector2f(Eigen::Vector2f, double)> lambda_func);
 
-            const auto c = abc(2);
-            //[0,-c(t);c(t),0]*(ra)
-            Eigen::Vector2f c_componnet = { ra(1) * -c, ra(0) * c };
-            return uv + c_componnet;
-        }
-        return {};
-    }
+private:
+    Eigen::Vector2i grid_size;
+    int time_steps;
+    Eigen::Vector2f domainBoundaryMin;
+    Eigen::Vector2f domainBoundaryMax;
+    float tmin, tmax, t_interval;
+    std::vector<double> t_values;
+    Eigen::VectorXf x_values;
+    Eigen::VectorXf y_values;
+    Eigen::Vector2f spatialGridInterval;
 };
 
 #endif

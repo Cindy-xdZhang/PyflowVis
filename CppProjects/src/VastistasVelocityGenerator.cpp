@@ -72,3 +72,52 @@ velocityFieldData VastistasVelocityGenerator::generateSteadyV2(float cx, float c
         }
     return data_;
 }
+
+AnalyticalFlowCreator::AnalyticalFlowCreator(Eigen::Vector2i grid_size, int time_steps /*= 10*/, Eigen::Vector2f domainBoundaryMin /*= Eigen::Vector2f(-2.0, -2.0)*/, Eigen::Vector2f domainBoundaryMax /*= Eigen::Vector2f(2.0, 2.0)*/,
+    float tmin /*= 0.0f*/, float tmax /*=2 * M_PI*/)
+    : grid_size(grid_size)
+    , time_steps(time_steps)
+    , domainBoundaryMin(domainBoundaryMin)
+    , domainBoundaryMax(domainBoundaryMax)
+    , tmin(tmin)
+    , tmax(tmax)
+{
+    // Generate time steps
+    t_interval = (tmax - tmin) / (time_steps - 1);
+
+    t_values.resize(time_steps);
+    for (int i = 0; i < time_steps; ++i) {
+        t_values[i] = tmin + i * t_interval;
+    }
+
+    // Generate grid
+    x_values = Eigen::VectorXf::LinSpaced(grid_size.x(), domainBoundaryMin.x(), domainBoundaryMax.x());
+    y_values = Eigen::VectorXf::LinSpaced(grid_size.y(), domainBoundaryMin.y(), domainBoundaryMax.y());
+    spatialGridInterval = { (domainBoundaryMax.x() - domainBoundaryMin.x()) / (grid_size.x() - 1),
+        (domainBoundaryMax.y() - domainBoundaryMin.y()) / (grid_size.y() - 1) };
+}
+
+UnSteadyVectorField2D AnalyticalFlowCreator::createFlowField(std::function<Eigen::Vector2f(Eigen::Vector2f, double)> lambda_func)
+{
+    UnSteadyVectorField2D vectorField2d;
+    vectorField2d.spatialDomainMinBoundary = domainBoundaryMin;
+    vectorField2d.spatialDomainMaxBoundary = domainBoundaryMax;
+    vectorField2d.timeSteps = time_steps;
+    vectorField2d.tmin = tmin;
+    vectorField2d.tmax = tmax;
+    vectorField2d.spatialGridInterval = spatialGridInterval;
+
+    vectorField2d.field.resize(time_steps, std::vector<std::vector<Eigen::Vector2f>>(grid_size.y(), std::vector<Eigen::Vector2f>(grid_size.x())));
+
+    for (int t = 0; t < time_steps; ++t) {
+        double time = t_values[t];
+        for (int y = 0; y < grid_size.y(); ++y) {
+            for (int x = 0; x < grid_size.x(); ++x) {
+                Eigen::Vector2f pos(x_values[x], y_values[y]);
+                vectorField2d.field[t][y][x] = lambda_func(pos, time);
+            }
+        }
+    }
+
+    return vectorField2d;
+}
