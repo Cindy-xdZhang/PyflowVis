@@ -2,12 +2,12 @@
 #include "VastistasVelocityGenerator.h"
 void generateSteadyField();
 void generateUnsteadyField();
-void testKillingTransformation();
+void testKillingTransformationForRFC();
 
 int main()
 {
 
     // generateUnsteadyField();
-    testKillingTransformation();
+    testKillingTransformationForRFC();
     return 0;
 }

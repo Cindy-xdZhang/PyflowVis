@@ -89,7 +89,7 @@ def rotation_four_center(grid_size,timestep,domainBoundaryMin=(-2.0,-2.0,0.0),do
     expression_u="exp(-y * y - x * x) * (al_t * y * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * y * y * y + (12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * y * y + (6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x + 6.0 * scale * cos(al_t * t) * sin(al_t * t)) * y + (3.0 * scale - 6.0 * scale * (cos(al_t * t) * cos(al_t * t))) * x)"
     expression_v="-exp(-y * y - x * x) * (al_t * x * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * y * y + ((12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * x - 6.0 * scale * (cos(al_t * t) * cos(al_t * t)) + 3.0 * scale) * y + 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x * x - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x)"
 
-    flow_creator = AnalyticalFlowCreator(grid_size=grid_size,time_steps=timestep,domainBoundaryMin=domainBoundaryMin,domainBoundaryMax=domainBoundaryMax, parameters={'al_t': 1.0, 'scale': 1.0})
+    flow_creator = AnalyticalFlowCreator(grid_size=grid_size,time_steps=timestep,domainBoundaryMin=domainBoundaryMin,domainBoundaryMax=domainBoundaryMax, parameters={'al_t': 1.0, 'scale': 8.0})
     flow_creator.setExperssioin(expression_u, expression_v)
     vectorField2d= flow_creator.create_flow_field()
     if scale!=1.0:

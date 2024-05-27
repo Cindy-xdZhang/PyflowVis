@@ -4,21 +4,21 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 
-# def load_config(path):
-#     with open(path, 'r') as file:
-#         args = yaml.safe_load(file)
-#     # ==> Device
-#     num_gpus = torch.cuda.device_count()
-#     args['num_gpus'] = num_gpus
-#     device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
-#     args['device'] = device
-#      # ==> Logger
-#     # set_logger(result_dir)
-#     # logging.info(args)
-#     # if  args['wandb']==True:
-#         # wandb init
-#         # pass
-#     return args
+def load_config(path):
+    with open(path, 'r') as file:
+        args = yaml.safe_load(file)
+    # ==> Device
+    num_gpus = torch.cuda.device_count()
+    args['num_gpus'] = num_gpus
+    device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
+    args['device'] = device
+     # ==> Logger
+    # set_logger(result_dir)
+    # logging.info(args)
+    # if  args['wandb']==True:
+        # wandb init
+        # pass
+    return args
     
 # def create_optimizer(network, optimizer_name, learning_rate):
 #     if optimizer_name == 'Adam':
@@ -75,24 +75,5 @@ import numpy as np
 
 
 
-
-#EasyConfig con load multiple yaml file in hierarchical manner and upate the config values
-#wip: using config load from yamle to buidl network
-from openpoints.utils import EasyConfig
-from openpoints.models import build_model_from_cfg
-def test_easyConfig_loading():
-    
-    # args, opts = parser.parse_known_args()
-    opts={}
-    cfg = EasyConfig()
-    cfg.load('config/cfgs/default.yaml', recursive=True)
-    cfg.update(opts)
-    model = build_model_from_cfg(cfg.model)
-    model
-
-
-
-
-if __name__ == '__main__':
     test_easyConfig_loading()
 

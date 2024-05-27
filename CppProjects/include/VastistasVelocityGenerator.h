@@ -104,12 +104,12 @@ public:
         float floatIndicesT = (t - tmin) * inverse_grid_interval_t;
 
         // Trilinear interpolation
-        int x0 = static_cast<int>(std::floor(floatIndicesX));
-        int x1 = std::min(x0 + 1, static_cast<int>(field[0][0].size() - 1));
-        int y0 = static_cast<int>(std::floor(floatIndicesY));
-        int y1 = std::min(y0 + 1, static_cast<int>(field[0].size() - 1));
-        int t0 = static_cast<int>(std::floor(floatIndicesT));
-        int t1 = std::min(t0 + 1, static_cast<int>(field.size() - 1));
+        int x0 = std::clamp(static_cast<int>(std::floor(floatIndicesX)), 0, static_cast<int>(field[0][0].size() - 1));
+        int x1 = std::clamp(x0 + 1, 0, static_cast<int>(field[0][0].size() - 1));
+        int y0 = std::clamp(static_cast<int>(std::floor(floatIndicesY)), 0, static_cast<int>(field[0].size() - 1));
+        int y1 = std::clamp(y0 + 1, 0, static_cast<int>(field[0].size() - 1));
+        int t0 = std::clamp(static_cast<int>(std::floor(floatIndicesT)), 0, static_cast<int>(field.size() - 1));
+        int t1 = std::clamp(t0 + 1, 0, static_cast<int>(field.size() - 1));
 
         float tx = floatIndicesX - x0;
         float ty = floatIndicesY - y0;

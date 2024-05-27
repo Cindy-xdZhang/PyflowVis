@@ -2,7 +2,7 @@ import torch
 from torch import nn
 # from .group import grouping_operation
 from .knn import DilatedKNN
-from openpoints.models.layers.conv import create_convblock2d
+from ..layers.conv import create_convblock2d
 
 
 def gather_features(features, indices, sparse_grad=True):

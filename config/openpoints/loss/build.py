@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss
-from openpoints.utils import registry
+from ..utils import registry
 
 LOSS = registry.Registry('loss')
 LOSS.register_module(name='CrossEntropy', module=CrossEntropyLoss)

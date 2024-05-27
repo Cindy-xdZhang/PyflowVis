@@ -552,8 +552,12 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
     for (size_t i = 1; i < validPathSize; i++) {
         const float t = observerfield.tmin + i * observerfield.dt;
         const Eigen::Vector3f abc = observerfield.func_(t);
-        const auto c_ = std::abs(abc(2));
-        const auto theta = dt * c_;
+        const auto c_ = abc(2);
+        // this abs is important, otherwise flip sign of c_ will cause the spin tensor and rotation angle theta to be flipped simultaneously,
+        // two flip sign cancel out the result stepInstanenousRotation never  change.
+        //
+        // theta is just scalar measure of how many degree the observer rotate with out direction. the rotation angle encoded in Spintensor
+        const auto theta = dt * std::abs(c_);
         Eigen::Matrix3f Spintensor;
         Spintensor(0, 0) = 0.0;
         Spintensor(1, 0) = c_;
@@ -632,16 +636,29 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
             // time slice i
             resultField.field[i].resize(inputField.field[i].size());
             const Eigen::Vector2f u = pathVelocitys[i];
+            const float physical_t_this_slice = tmin + i * dt;
             for (size_t j = 0; j < inputField.field[i].size(); j++) {
                 // y slice
                 resultField.field[i][j].resize(inputField.field[i][j].size());
                 for (size_t k = 0; k < inputField.field[i][j].size(); k++) {
-                    Eigen::Vector2f v = inputField.field[i][j][k];
+                    // get position of this grid point
+                    Eigen::Vector4f pos_x = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
+                        j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f };
 
-                    Eigen::Vector4f v4;
-                    v4 << v(0) - u(0), v(1) - u(1), 0, 0;
-                    Eigen::Vector4f v4_new = transformationMatrices[i] * v4;
-                    resultField.field[i][j][k] = { v4_new(0), v4_new(1) };
+                    // observer under go transformation M, then bring transformation M^(-1): x*= Q(t)x+c(t)
+                    Eigen::Vector4f x_star_homo = transformationMatrices[i] * pos_x;
+                    x_star_homo /= x_star_homo(3);
+                    // get 2d position from 4d x_star
+                    Eigen::Vector2f x_star = { x_star_homo(0), x_star_homo(1) };
+                    // get v(x_star, t) from inputField by bilinear interpolation
+                    Eigen::Vector2f v = inputField.getVector(x_star, physical_t_this_slice);
+
+                    Eigen::Vector3f vminus_lab_frame;
+                    vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
+                    // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
+                    //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
+                    Eigen::Vector3f vminus_observer_frame = rotationMatrices[i] * vminus_lab_frame;
+                    resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
                 }
             }
         }
@@ -655,12 +672,25 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
                 // y slice
                 resultField.field[i][j].resize(inputField.field[j].size());
                 for (size_t k = 0; k < inputField.field[j].size(); k++) {
-                    Eigen::Vector2f v = inputField.field[j][k];
 
-                    Eigen::Vector4f v4;
-                    v4 << v(0) - u(0), v(1) - u(1), 0, 0;
-                    Eigen::Vector4f v4_new = transformationMatrices[i] * v4;
-                    resultField.field[i][j][k] = { v4_new(0), v4_new(1) };
+                    // get position of this grid point
+                    Eigen::Vector4f pos_x = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
+                        j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f };
+
+                    // observer under go transformation M, then bring transformation M^(-1): x*= Q(t)x+c(t)
+                    Eigen::Vector4f x_star_homo = transformationMatrices[i] * pos_x;
+                    x_star_homo /= x_star_homo(3);
+                    // get 2d position from 4d x_star
+                    Eigen::Vector2f x_star = { x_star_homo(0), x_star_homo(1) };
+                    // get v(x_star, t) from inputField by bilinear interpolation
+                    Eigen::Vector2f v = inputField.getVector(x_star.x(), x_star.y());
+
+                    Eigen::Vector3f vminus_lab_frame;
+                    vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
+                    // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
+                    //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
+                    Eigen::Vector3f vminus_observer_frame = rotationMatrices[i] * vminus_lab_frame;
+                    resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
                 }
             }
         }
@@ -918,7 +948,7 @@ struct KillingComponentFunctionFactory {
     }
 };
 
-void testKillingTransformation2()
+void testKillingTransformASteadyField()
 {
 
     const int Xdim = 64, Ydim = 64;
@@ -983,20 +1013,22 @@ void testKillingTransformation2()
     }
 }
 
-void testKillingTransformation()
+void testKillingTransformationForRFC()
 {
     const float tmin = 0.0;
-    const float tmax = 2.0;
+    const float tmax = 2.0 * M_PI;
     const int Xdim = 64, Ydim = 64;
     const int LicImageSize = 128;
     Eigen::Vector2f domainMinBoundary = { -2.0, -2.0 };
     Eigen::Vector2f domainMaxBoundary = { 2.0, 2.0 };
-    const int unsteadyFieldTimeStep = 7;
+    const int unsteadyFieldTimeStep = 32;
     const float stepSize = 0.01;
     const int maxLICIteratioOneDirection = 256;
     int numVelocityFields = 1; // num of fields per n, rc parameter setting
     std::string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
-
+    if (!filesystem::exists(root_folder)) {
+        filesystem::create_directories(root_folder);
+    }
     // Create an instance of AnalyticalFlowCreator
     Eigen::Vector2i grid_size(Xdim, Ydim);
     int time_steps = unsteadyFieldTimeStep;
@@ -1005,15 +1037,17 @@ void testKillingTransformation()
 
     // Define a lambda function for rotating flow
     auto rotatingFourCenter = [](Eigen::Vector2f p, double t) {
-        double x = p(0);
-        double y = p(1);
-        double al_t = 1.0, scale = 1.0, maxVelocity = 1.0;
+        const double x = p(0);
+        const double y = p(1);
+        const double al_t = 1.0;
+        const double scale = 8.0;
+        const double maxVelocity = 1.0;
 
         double u = exp(-y * y - x * x) * (al_t * y * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * y * y * y + (12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * y * y + (6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x + 6.0 * scale * cos(al_t * t) * sin(al_t * t)) * y + (3.0 * scale - 6.0 * scale * (cos(al_t * t) * cos(al_t * t))) * x);
         double v = -exp(-y * y - x * x) * (al_t * x * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * y * y + ((12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * x - 6.0 * scale * (cos(al_t * t) * cos(al_t * t)) + 3.0 * scale) * y + 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x * x - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x);
 
-        double vecU = maxVelocity * u;
-        double vecV = maxVelocity * v;
+        float vecU = maxVelocity * u;
+        float vecV = maxVelocity * v;
 
         Eigen::Vector2f components;
         components << vecU, vecV;
@@ -1022,7 +1056,7 @@ void testKillingTransformation()
     // Create the flow field
     UnSteadyVectorField2D InputflowField = flowCreator.createFlowField(rotatingFourCenter);
 
-    auto func_const_trans = KillingComponentFunctionFactory::constantRotation(1);
+    auto func_const_trans = KillingComponentFunctionFactory::constantRotation(-1.0f);
 
     KillingAbcField observerfield(
         func_const_trans, unsteadyFieldTimeStep, tmin, tmax);
@@ -1033,20 +1067,20 @@ void testKillingTransformation()
     auto unsteady_field = killingABCtransformation(observerfield, StartPosition, InputflowField);
     auto resample_observerfield = observerfield.resample2UnsteadyField(grid_size, domainMinBoundary, domainMaxBoundary);
     // auto outputObserverFieldLic = LICAlgorithm_UnsteadyField(licNoisetexture, resample_observerfield, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
-    //  auto outputTextures0 = LICAlgorithm_UnsteadyField(licNoisetexture, InputflowField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+    auto inputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, InputflowField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
 
     auto outputTexturesObservedField = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
 
     for (size_t i = 0; i < unsteadyFieldTimeStep; i++) {
-        string tag_name0 = "inputfield_" + std::to_string(i);
+        string tag_name0 = "inputField_" + std::to_string(i);
         string licFilename0 = root_folder + tag_name0 + "lic.png";
-        // saveAsPNG(outputTextures0[i], licFilename0);
+        saveAsPNG(inputTextures[i], licFilename0);
 
-        string tag_name1 = "obfield_" + std::to_string(i);
+        string tag_name1 = "observerField_" + std::to_string(i);
         string licFilename1 = root_folder + tag_name1 + "lic.png";
         // saveAsPNG(outputObserverFieldLic[i], licFilename1);
 
-        string tag_name = "killing_transformation_Observed" + std::to_string(i);
+        string tag_name = "killing_transformed_" + std::to_string(i);
         string licFilename = root_folder + tag_name + "lic.png";
         saveAsPNG(outputTexturesObservedField[i], licFilename);
     }

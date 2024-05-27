@@ -116,7 +116,7 @@ class Renderable:
 
 def main():
    
-    config=load_config("config/config.yaml")
+    config=load_config("config\cfgs\config.yaml")
     engine=VisualizationEngine(config=config['rendering'])
     
     size=config['rendering']["window_size"]
@@ -162,7 +162,7 @@ def main():
     args['device'] = device    
     args["epochs"]=50
     
-    vectorField2d= rotation_four_center((16,16),16)
+    vectorField2d= rotation_four_center((32,32),32)
     actFieldWidget.insertField("rfc",vectorField2d)
     # resUfield=train_pipeline(vectorField2d,args)
     # actFieldWidget.insertField("Result field",resUfield)

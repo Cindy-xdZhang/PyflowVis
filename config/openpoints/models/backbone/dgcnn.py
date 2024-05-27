@@ -3,8 +3,8 @@
 import torch
 import torch.nn as nn
 from torch.nn import Sequential as Seq
-from openpoints.models.layers.graph_conv import DynConv, GraphConv, ResDynBlock, DenseDynBlock, DilatedKNN
-from openpoints.models.layers import create_convblock1d
+from ..layers.graph_conv import DynConv, GraphConv, ResDynBlock, DenseDynBlock, DilatedKNN
+from ..layers import create_convblock1d
 import logging
 from ..build import MODELS
 
