@@ -1,13 +1,10 @@
 
 #include "VastistasVelocityGenerator.h"
-void generateSteadyField();
-void generateUnsteadyField();
-void testKillingTransformationForRFC();
-
+#include "flowGenerator.h"
 int main()
 {
 
-    // generateUnsteadyField();
-    testKillingTransformationForRFC();
+    // testKillingTransformationForRFC();
+    generateUnsteadyField(1, 1, 1);
     return 0;
 }

@@ -8,6 +8,7 @@ project(FlowGenerator LANGUAGES CXX)
 set(sources 
 src/VastistasVelocityGenerator.cpp 
 src/flowGenerator.cpp
+src/flowGenerator.h
 src/main.cpp
 )
 

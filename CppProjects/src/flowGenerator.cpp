@@ -1,23 +1,20 @@
 
+#include "flowGenerator.h"
 #include "VastistasVelocityGenerator.h"
 #include "cereal/archives/binary.hpp"
 #include "cereal/archives/json.hpp"
 #include "cereal/types/vector.hpp"
-#include <Eigen/Core>
-#include <Eigen/Geometry>
-#include <iostream>
-#include <random>
-#include <vector>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
+#include "flowGenerator.h"
 #include <execution>
 #include <filesystem>
 #include <fstream>
 #include <thread>
 
 // define execute policy
-#if !defined(ENABLE_CPP_PARALLELISM) || defined(_DEBUG)
+#if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
 auto policy = std::execution::seq;
 #else
 auto policy = std::execution::par_unseq;
@@ -25,8 +22,15 @@ auto policy = std::execution::par_unseq;
 std::mt19937 rng(static_cast<unsigned int>(std::time(0)));
 using namespace std;
 
+const double tmin = 0.0;
+const double tmax = 2.0 * M_PI;
+const int Xdim = 64, Ydim = 64;
+const int LicImageSize = 64;
+Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
+Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
+
 // Function to save the 2D vector as a PNG image
-void saveAsPNG(const std::vector<std::vector<Eigen::Vector3f>>& data, const std::string& filename)
+void saveAsPNG(const std::vector<std::vector<Eigen::Vector3d>>& data, const std::string& filename)
 {
     int width = data[0].size();
     int height = data.size();
@@ -49,23 +53,23 @@ void saveAsPNG(const std::vector<std::vector<Eigen::Vector3f>>& data, const std:
 }
 
 // Function to generate a 2D vector of random noise
-std::vector<std::vector<float>> randomNoiseTexture(int width, int height)
+std::vector<std::vector<double>> randomNoiseTexture(int width, int height)
 {
-    std::vector<std::vector<float>> texture(height, std::vector<float>(width));
+    std::vector<std::vector<double>> texture(height, std::vector<double>(width));
     std::random_device rd; // Seed for the random number engine
     std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
     std::uniform_real_distribution<> dis(0.0, 1.0);
 
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            texture[y][x] = static_cast<float>(dis(gen));
+            texture[y][x] = static_cast<double>(dis(gen));
         }
     }
 
     return texture;
 }
 // Function to flatten a 2D vector to a 1D vector
-std::vector<float> flatten2D(const std::vector<std::vector<Eigen::Vector2f>>& x2D)
+std::vector<float> flatten2DAs1Dfloat(const std::vector<std::vector<Eigen::Vector2d>>& x2D)
 {
     const size_t ydim = x2D.size();
     assert(ydim > 0);
@@ -74,23 +78,41 @@ std::vector<float> flatten2D(const std::vector<std::vector<Eigen::Vector2f>>& x2
     result.resize(xdim * ydim * 2);
     for (size_t i = 0; i < ydim; i++)
         for (size_t j = 0; j < xdim; j++) {
-            result[2 * (i * xdim + j)] = x2D[i][j](0);
-            result[2 * (i * xdim + j) + 1] = x2D[i][j](1);
+            result[2 * (i * xdim + j)] = static_cast<float>(x2D[i][j](0));
+            result[2 * (i * xdim + j) + 1] = static_cast<float>(x2D[i][j](1));
         }
 
     return result;
 }
+std::vector<float> flatten3DAs1Dfloat(const std::vector<std::vector<std::vector<Eigen::Vector2d>>>& x3D)
+{
+    const size_t tdim = x3D.size();
+    assert(tdim > 0);
+    const size_t ydim = x3D[0].size();
+    assert(ydim > 0);
+    const size_t xdim = x3D[0][0].size();
+    std::vector<float> result;
+    result.resize(xdim * ydim * tdim * 2);
+    for (size_t t = 0; t < tdim; t++)
+        for (size_t i = 0; i < ydim; i++)
+            for (size_t j = 0; j < xdim; j++) {
+                result[2 * ((t * ydim + i) * xdim + j)] = static_cast<float>(x3D[t][i][j](0));
+                result[2 * ((t * ydim + i) * xdim + j) + 1] = static_cast<float>(x3D[t][i][j](1));
+            }
 
-std::pair<float, float> computeMinMax(const std::vector<float>& values)
+    return result;
+}
+template <class T>
+std::pair<double, double> computeMinMax(const std::vector<T>& values)
 {
     if (values.empty()) {
         throw std::invalid_argument("The input vector is empty.");
     }
 
-    float minVal = std::numeric_limits<float>::infinity();
-    float maxVal = -std::numeric_limits<float>::infinity();
+    T minVal = std::numeric_limits<T>::infinity();
+    T maxVal = -std::numeric_limits<T>::infinity();
 
-    for (float val : values) {
+    for (T val : values) {
         if (val < minVal) {
             minVal = val;
         }
@@ -101,17 +123,18 @@ std::pair<float, float> computeMinMax(const std::vector<float>& values)
 
     return { minVal, maxVal };
 }
-std::pair<float, float> computeMinMax(const std::vector<std::vector<float>>& values)
+template <class T>
+std::pair<double, double> computeMinMax(const std::vector<std::vector<T>>& values)
 {
     if (values.empty() || values[0].empty()) {
         throw std::invalid_argument("The input vector is empty.");
     }
 
-    float minVal = std::numeric_limits<float>::infinity();
-    float maxVal = -std::numeric_limits<float>::infinity();
+    T minVal = std::numeric_limits<T>::infinity();
+    T maxVal = -std::numeric_limits<T>::infinity();
 
     for (const auto& row : values) {
-        for (float val : row) {
+        for (T val : row) {
             if (val < minVal) {
                 minVal = val;
             }
@@ -124,12 +147,12 @@ std::pair<float, float> computeMinMax(const std::vector<std::vector<float>>& val
     return { minVal, maxVal };
 }
 // The result image size is the same as the input texture.
-std::vector<std::vector<Eigen::Vector3f>> LICAlgorithm(
-    const std::vector<std::vector<float>>& texture,
+std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(
+    const std::vector<std::vector<double>>& texture,
     const SteadyVectorField2D& vecfield,
     const int licImageSizeX,
     const int licImageSizeY,
-    float stepSize,
+    double stepSize,
     int MaxIntegrationSteps,
     bool curlColorBlend = true)
 {
@@ -138,23 +161,24 @@ std::vector<std::vector<Eigen::Vector3f>> LICAlgorithm(
     const int Ydim = vecfield.field.size();
     const int Xdim = vecfield.field[0].size();
     assert(YTexdim == Ydim && Xdim == XTexdim);
-    std::vector<std::vector<Eigen::Vector3f>> output_texture(licImageSizeY, std::vector<Eigen::Vector3f>(licImageSizeX, { 0.0f, 0.0f, 0.0f }));
+    std::vector<std::vector<Eigen::Vector3d>> output_texture(licImageSizeY, std::vector<Eigen::Vector3d>(licImageSizeX, { 0.0f, 0.0f, 0.0f }));
 
     const auto& vecfieldData = vecfield.field;
-    const Eigen::Vector2f domainRange = vecfield.spatialDomainMaxBoundary - vecfield.spatialDomainMinBoundary;
-    const float inverse_grid_interval_x = 1.0f / (float)vecfield.spatialGridInterval(0);
-    const float inverse_grid_interval_y = 1.0f / (float)vecfield.spatialGridInterval(1);
+    const Eigen::Vector2d domainRange = vecfield.spatialDomainMaxBoundary - vecfield.spatialDomainMinBoundary;
+    const double inverse_grid_interval_x = 1.0f / (double)vecfield.spatialGridInterval(0);
+    const double inverse_grid_interval_y = 1.0f / (double)vecfield.spatialGridInterval(1);
 
-    std::vector<std::vector<float>> curl(Ydim, std::vector<float>(Xdim, 0.0f));
-    float minCurl;
-    float maxCurl;
+    std::vector<std::vector<double>> curl(Ydim, std::vector<double>(Xdim, 0.0f));
+    double minCurl;
+    double maxCurl;
     if (curlColorBlend) {
         // Calculate curl (vorticity) of the vector field
         for (int y = 1; y < Ydim - 1; ++y) {
             for (int x = 1; x < Xdim - 1; ++x) {
-                auto dv_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5f * inverse_grid_interval_x;
-                auto du_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5f * inverse_grid_interval_y;
-                curl[y][x] = dv_dx(1) - du_dy(0);
+                Eigen::Vector2d dv_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5f * inverse_grid_interval_x;
+                Eigen::Vector2d du_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5f * inverse_grid_interval_y;
+                double curl_ = dv_dx(1) - du_dy(0);
+                curl[y][x] = curl_;
             }
         }
 
@@ -162,35 +186,35 @@ std::vector<std::vector<Eigen::Vector3f>> LICAlgorithm(
         auto minMaxCurl = computeMinMax(curl);
         minCurl = minMaxCurl.first;
         maxCurl = minMaxCurl.second;
-        if (!(maxCurl > minCurl && maxCurl > 0 && minCurl < 0)) {
+        if (!(maxCurl > minCurl && maxCurl > 0 && minCurl < 0) || std::abs(maxCurl) < 1e-7 || std::abs(minCurl) < 1e-7) {
             curlColorBlend = false;
         }
     }
 
     for (int y = 0; y < licImageSizeY; ++y) {
         for (int x = 0; x < licImageSizeX; ++x) {
-            float accum_value = 0.0f;
+            double accum_value = 0.0f;
             int accum_count = 0;
 
             // map position from texture image grid coordinate to vector field
-            float ratio_x = (float)((float)x / (float)licImageSizeX);
-            float ratio_y = (float)((float)y / (float)licImageSizeY);
+            double ratio_x = (double)((double)x / (double)licImageSizeX);
+            double ratio_y = (double)((double)y / (double)licImageSizeY);
 
             // Trace forward
             // physicalPositionInVectorfield
-            Eigen::Vector2f pos = { ratio_x * domainRange(0) + vecfield.spatialDomainMinBoundary(0),
+            Eigen::Vector2d pos = { ratio_x * domainRange(0) + vecfield.spatialDomainMinBoundary(0),
                 ratio_y * domainRange(1) + vecfield.spatialDomainMinBoundary(1) };
 
             for (int i = 0; i < MaxIntegrationSteps; ++i) {
-                float floatIndicesX = (pos(0) - vecfield.spatialDomainMinBoundary(0)) * inverse_grid_interval_x;
-                float floatIndicesY = (pos(1) - vecfield.spatialDomainMinBoundary(1)) * inverse_grid_interval_y;
+                double floatIndicesX = (pos(0) - vecfield.spatialDomainMinBoundary(0)) * inverse_grid_interval_x;
+                double floatIndicesY = (pos(1) - vecfield.spatialDomainMinBoundary(1)) * inverse_grid_interval_y;
 
                 if (!(0 <= floatIndicesX && floatIndicesX < Xdim && 0 <= floatIndicesY && floatIndicesY < Ydim)) {
                     break; // Stop if we move outside the texture bounds
                 }
                 accum_value += bilinear_interpolate(texture, floatIndicesX, floatIndicesY);
                 accum_count += 1;
-                Eigen::Vector2f vec = bilinear_interpolate(vecfieldData, floatIndicesX, floatIndicesY);
+                Eigen::Vector2d vec = bilinear_interpolate(vecfieldData, floatIndicesX, floatIndicesY);
                 pos += vec * stepSize;
             }
 
@@ -199,14 +223,14 @@ std::vector<std::vector<Eigen::Vector3f>> LICAlgorithm(
                 ratio_y * domainRange(1) + vecfield.spatialDomainMinBoundary(1) };
 
             for (int i = 0; i < MaxIntegrationSteps; ++i) {
-                float floatIndicesX = (pos(0) - vecfield.spatialDomainMinBoundary(0)) * inverse_grid_interval_x;
-                float floatIndicesY = (pos(1) - vecfield.spatialDomainMinBoundary(1)) * inverse_grid_interval_y;
+                double floatIndicesX = (pos(0) - vecfield.spatialDomainMinBoundary(0)) * inverse_grid_interval_x;
+                double floatIndicesY = (pos(1) - vecfield.spatialDomainMinBoundary(1)) * inverse_grid_interval_y;
                 if (!(0 <= floatIndicesX && floatIndicesX < Xdim && 0 <= floatIndicesY && floatIndicesY < Ydim)) {
                     break; // Stop if we move outside the texture bounds
                 }
                 accum_value += bilinear_interpolate(texture, floatIndicesX, floatIndicesY);
                 accum_count += 1;
-                Eigen::Vector2f vec = bilinear_interpolate(vecfieldData, floatIndicesX, floatIndicesY);
+                Eigen::Vector2d vec = bilinear_interpolate(vecfieldData, floatIndicesX, floatIndicesY);
                 pos -= vec * stepSize;
             }
 
@@ -215,14 +239,14 @@ std::vector<std::vector<Eigen::Vector3f>> LICAlgorithm(
                 auto licValue = accum_value / accum_count;
                 if (curlColorBlend) {
                     // Compute the normalized curl value
-                    float curlValue = curl[static_cast<int>(ratio_y * Ydim)][static_cast<int>(ratio_x * Xdim)];
-                    float normalizedCurl = (curlValue - minCurl) / (maxCurl - minCurl);
-                    Eigen::Vector3f curlColor = { normalizedCurl, 0.1f, 1.0f - normalizedCurl };
+                    auto curlValue = curl[static_cast<int>(ratio_y * Ydim)][static_cast<int>(ratio_x * Xdim)];
+                    double normalizedCurl = (curlValue - minCurl) / (maxCurl - minCurl);
+                    Eigen::Vector3d curlColor = { normalizedCurl, 0.1, 1.0 - normalizedCurl };
 
-                    float whiteish = licValue;
-                    whiteish = std::min(std::max(0.0f, (whiteish - 0.4f) * (1.5f / 0.4f)), 1.0f);
-                    // output_texture[y][x] = mix(curlColor, Eigen::Vector3f(licValue, licValue, licValue), 1.0 - whiteish);
-                    output_texture[y][x] = Eigen::Vector3f(licValue, licValue, licValue) * (1.0f - whiteish) + curlColor * whiteish;
+                    auto whiteish = licValue;
+                    whiteish = std::min(std::max(0.0, (whiteish - 0.4) * (1.5 / 0.4)), 1.0);
+                    // output_texture[y][x] = mix(curlColor, Eigen::Vector3d(licValue, licValue, licValue), 1.0 - whiteish);
+                    output_texture[y][x] = Eigen::Vector3d(licValue, licValue, licValue) * (1.0 - whiteish) + curlColor * whiteish;
 
                 } else {
                     output_texture[y][x] = { licValue, licValue, licValue };
@@ -234,32 +258,32 @@ std::vector<std::vector<Eigen::Vector3f>> LICAlgorithm(
     return output_texture;
 }
 
-std::vector<std::vector<std::vector<Eigen::Vector3f>>>
-LICAlgorithm_UnsteadyField(const std::vector<std::vector<float>>& texture,
+std::vector<std::vector<std::vector<Eigen::Vector3d>>>
+LICAlgorithm_UnsteadyField(const std::vector<std::vector<double>>& texture,
     const UnSteadyVectorField2D& vecfield,
     const int licImageSizeX,
     const int licImageSizeY,
-    float stepSize,
-    int MaxIntegrationSteps)
+    double stepSize,
+    int MaxIntegrationSteps, bool curlColorBlend = true)
 {
     std::vector<int> timeIndex;
     timeIndex.resize(vecfield.timeSteps);
     std::iota(timeIndex.begin(), timeIndex.end(), 0);
-    std::vector<std::vector<std::vector<Eigen::Vector3f>>> resultData;
+    std::vector<std::vector<std::vector<Eigen::Vector3d>>> resultData;
     resultData.resize(vecfield.timeSteps);
 
-    std::transform(std::execution::par_unseq, timeIndex.begin(), timeIndex.end(), resultData.begin(), [&](int time) {
+    std::transform(policy, timeIndex.begin(), timeIndex.end(), resultData.begin(), [&](int time) {
         std::cout << "parallel lic rendering.. timeIndex size: " << time << std::endl;
         auto slice = vecfield.getVectorfieldSliceAtTime(time);
-        auto licPic = LICAlgorithm(texture, slice, licImageSizeX, licImageSizeY, stepSize, MaxIntegrationSteps);
+        auto licPic = LICAlgorithm(texture, slice, licImageSizeX, licImageSizeY, stepSize, MaxIntegrationSteps, curlColorBlend);
         return std::move(licPic);
     });
     return resultData;
 }
 
-std::vector<std::pair<float, int>> generateNParamters(int n)
+std::vector<std::pair<double, int>> generateNParamters(int n)
 {
-    std::vector<std::pair<float, int>> parameters = {
+    std::vector<std::pair<double, int>> parameters = {
         { 1.0, 2 },
         /*   { 1.0, 2 },
            { 1.0, 3 },
@@ -271,11 +295,11 @@ std::vector<std::pair<float, int>> generateNParamters(int n)
            { 2.0, 10 },*/
     };
 
-    std::uniform_real_distribution<float> dist_T(0.01, 2.0);
+    std::uniform_real_distribution<double> dist_T(0.01, 2.0);
     std::uniform_int_distribution<int> dist_int(1, 6);
 
     // for (int i = 0; i < n; ++i) {
-    //     float first = dist_T(rng);
+    //     double first = dist_T(rng);
     //     int second = dist_int(rng);
     //     parameters.emplace_back(first, second);
     // }
@@ -290,7 +314,7 @@ void referenceFrameTransformation(const SteadyVectorField2D& input_field, const 
 
     auto integratePathlineOneStep = [](T x, T y, T t, T dt, T& x_new, T& y_new) {
         // RK4 integration step
-        Eigen::Vector2f odeStepStartPoint;
+        Eigen::Vector2d odeStepStartPoint;
         odeStepStartPoint << x, y;
 
         const T h = dt;
@@ -315,21 +339,21 @@ void referenceFrameTransformation(const SteadyVectorField2D& input_field, const 
         // 4 stages of 2 equations (i.e., 2 dimensions of the manifold and the tangent vector space)
 
         // stage 1
-        Eigen::Vector2f k1 = fieldFunction_u(odeStepStartPoint, t);
+        Eigen::Vector2d k1 = fieldFunction_u(odeStepStartPoint, t);
 
         // stage 2
-        Eigen::Vector2f stagePoint = odeStepStartPoint + k1 * a21 * h;
-        Eigen::Vector2f k2 = fieldFunction_u(stagePoint, t + c2 * h);
+        Eigen::Vector2d stagePoint = odeStepStartPoint + k1 * a21 * h;
+        Eigen::Vector2d k2 = fieldFunction_u(stagePoint, t + c2 * h);
 
         // stage 3
         stagePoint = odeStepStartPoint + (a31 * k1 + a32 * k2) * h;
-        Eigen::Vector2f k3 = fieldFunction_u(stagePoint, t + c3 * h);
+        Eigen::Vector2d k3 = fieldFunction_u(stagePoint, t + c3 * h);
 
         // stage 4
         stagePoint = odeStepStartPoint + (a41 * k1 + a42 * k2 + a43 * k3) * h;
-        Eigen::Vector2f k4 = fieldFunction_u(stagePoint, t + c4 * h);
+        Eigen::Vector2d k4 = fieldFunction_u(stagePoint, t + c4 * h);
 
-        Eigen::Vector2f result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
+        Eigen::Vector2d result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
 
         x_new = result_p(0);
         y_new = result_p(1);
@@ -339,10 +363,10 @@ void referenceFrameTransformation(const SteadyVectorField2D& input_field, const 
     //// the push_forward the matrix that does the transformation that a vector would undergo when going one step dt starting at t
     //// the push_forward is computed by draging a frame (2 vectors) along the curve.
     // auto integrationStep = [&integratePathlineStep, dx, dy](T x, T y, T t, T dt, T& x_new, T& y_new, Matrix22& push_forward) {
-    //     Eigen::Vector2f p_north;
-    //     Eigen::Vector2f p_south;
-    //     Eigen::Vector2f p_east;
-    //     Eigen::Vector2f p_west;
+    //     Eigen::Vector2d p_north;
+    //     Eigen::Vector2d p_south;
+    //     Eigen::Vector2d p_east;
+    //     Eigen::Vector2d p_west;
 
     //    integratePathlineStep(x, y, t, dt, x_new, y_new);
     //    integratePathlineStep(x, y + 0.5 * dy, t, dt, p_north(0), p_north(1));
@@ -385,17 +409,17 @@ void referenceFrameTransformation(const SteadyVectorField2D& input_field, const 
 // @note: the result field has same spatial information(grid size, domain size) as the steady inputField and has same time (domain size, timesteps)  as the killing observerfield.
 // inputField could be steady or unsteady field
 // if  inputField  is unsteady field, the observerfield should have the same time domain as the inputField.
-template <typename T = float, class inputFieldType>
-UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfield, const Eigen::Vector2f StartPosition, const inputFieldType& inputField)
+template <typename T = double, class inputFieldType>
+UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfield, const Eigen::Vector2d StartPosition, const inputFieldType& inputField)
 {
     const auto tmin = observerfield.tmin;
     const auto tmax = observerfield.tmax;
-    const float dt = observerfield.dt;
+    const auto dt = observerfield.dt;
     const int timestep = observerfield.timeSteps;
 
-    auto integratePathlineOneStep_RK4 = [&observerfield](T x, T y, T t, T dt) -> Eigen::Vector2f {
+    auto integratePathlineOneStep_RK4 = [&observerfield](T x, T y, T t, T dt) -> Eigen::Vector2d {
         // RK4 integration step
-        Eigen::Vector2f odeStepStartPoint = { x, y };
+        Eigen::Vector2d odeStepStartPoint = { x, y };
 
         const T h = dt;
 
@@ -419,36 +443,36 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
         // 4 stages of 2 equations (i.e., 2 dimensions of the manifold and the tangent vector space)
 
         // stage 1
-        Eigen::Vector2f k1 = observerfield.getKillingVector(odeStepStartPoint, t);
+        Eigen::Vector2d k1 = observerfield.getKillingVector(odeStepStartPoint, t);
 
         // stage 2
-        Eigen::Vector2f stagePoint = odeStepStartPoint + k1 * a21 * h;
-        Eigen::Vector2f k2 = observerfield.getKillingVector(stagePoint, t + c2 * h);
+        Eigen::Vector2d stagePoint = odeStepStartPoint + k1 * a21 * h;
+        Eigen::Vector2d k2 = observerfield.getKillingVector(stagePoint, t + c2 * h);
 
         // stage 3
         stagePoint = odeStepStartPoint + (a31 * k1 + a32 * k2) * h;
-        Eigen::Vector2f k3 = observerfield.getKillingVector(stagePoint, t + c3 * h);
+        Eigen::Vector2d k3 = observerfield.getKillingVector(stagePoint, t + c3 * h);
 
         // stage 4
         stagePoint = odeStepStartPoint + (a41 * k1 + a42 * k2 + a43 * k3) * h;
-        Eigen::Vector2f k4 = observerfield.getKillingVector(stagePoint, t + c4 * h);
+        Eigen::Vector2d k4 = observerfield.getKillingVector(stagePoint, t + c4 * h);
 
-        Eigen::Vector2f result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
+        Eigen::Vector2d result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
 
         return result_p;
     };
 
     // integration of worldline
-    auto runIntegration = [&](const Eigen::Vector2f& startPoint, /*const double observationTime,*/ const double targetIntegrationTime,
-                              std::vector<Eigen::Vector2f>& pathVelocitys, std::vector<Eigen::Vector3f>& pathPositions) -> bool {
-        const float startTime = 0.0;
+    auto runIntegration = [&](const Eigen::Vector2d& startPoint, /*const double observationTime,*/ const double targetIntegrationTime,
+                              std::vector<Eigen::Vector2d>& pathVelocitys, std::vector<Eigen::Vector3d>& pathPositions) -> bool {
+        const double startTime = 0.0;
         const int maxIterationCount = 2000;
-        const float spaceConversionRatio = 1.0;
+        const double spaceConversionRatio = 1.0;
 
         bool integrationOutOfDomainBounds = false;
         bool outOfIntegrationTimeBounds = false;
         int iterationCount = 0;
-        float integrationTimeStepSize = dt;
+        double integrationTimeStepSize = dt;
 
         if (targetIntegrationTime < startTime) {
             // we integrate back in time
@@ -457,7 +481,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
         const auto minDomainBounds = inputField.spatialDomainMinBoundary;
         const auto maxDomainBounds = inputField.spatialDomainMaxBoundary;
         // This function checks if the current point is in the domain
-        std::function<bool(const Eigen::Vector2f& point)> checkIfOutOfDomain = [&minDomainBounds, &maxDomainBounds](const Eigen::Vector2f& point) {
+        std::function<bool(const Eigen::Vector2d& point)> checkIfOutOfDomain = [&minDomainBounds, &maxDomainBounds](const Eigen::Vector2d& point) {
             if (point(0) <= minDomainBounds(0))
                 return true;
             if (point(0) >= maxDomainBounds(0))
@@ -469,7 +493,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
             return false;
         };
 
-        Eigen::Vector2f currentPoint = startPoint;
+        Eigen::Vector2d currentPoint = startPoint;
 
         integrationOutOfDomainBounds = checkIfOutOfDomain(currentPoint);
 
@@ -477,7 +501,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
         auto currentTime = startTime;
 
         // push init_velocity  &start point
-        Eigen::Vector3f pointAndTime = { currentPoint(0), currentPoint(1), currentTime };
+        Eigen::Vector3d pointAndTime = { currentPoint(0), currentPoint(1), currentTime };
         pathPositions.emplace_back(pointAndTime);
         auto init_velocity = observerfield.getKillingVector(currentPoint, currentTime);
         pathVelocitys.emplace_back(init_velocity);
@@ -489,7 +513,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
         while ((!integrationOutOfDomainBounds) && (!outOfIntegrationTimeBounds) && (pathPositions.size() < maxIterationCount)) {
 
             // advance to a new point in the chart
-            Eigen::Vector2f newPoint = integratePathlineOneStep_RK4(currentPoint(0), currentPoint(1), currentTime, dt);
+            Eigen::Vector2d newPoint = integratePathlineOneStep_RK4(currentPoint(0), currentPoint(1), currentTime, dt);
             integrationOutOfDomainBounds = checkIfOutOfDomain(newPoint);
             if (!integrationOutOfDomainBounds) {
                 auto newTime = currentTime + integrationTimeStepSize;
@@ -500,7 +524,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
                     outOfIntegrationTimeBounds = true;
                 } else {
                     // add  current point to the result list and set currentPoint to newPoint -> everything fine -> continue with the while loop
-                    Eigen::Vector3f new_pointAndTime = { newPoint(0), newPoint(1), newTime };
+                    Eigen::Vector3d new_pointAndTime = { newPoint(0), newPoint(1), newTime };
                     pathPositions.emplace_back(new_pointAndTime);
                     auto velocity = observerfield.getKillingVector(newPoint, newTime);
                     pathVelocitys.emplace_back(velocity);
@@ -514,8 +538,8 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
         return suc;
     };
 
-    std::vector<Eigen::Vector2f> pathVelocitys;
-    std::vector<Eigen::Vector3f> pathPositions;
+    std::vector<Eigen::Vector2d> pathVelocitys;
+    std::vector<Eigen::Vector3d> pathPositions;
     bool suc = runIntegration(StartPosition, tmax, pathVelocitys, pathPositions);
     assert(suc);
 
@@ -528,8 +552,8 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
     //    // extendPath =true;
     //}
 
-    auto NoramlizeSpinTensor = [](Eigen::Matrix3f& input) {
-        Eigen::Vector3f unitAngular;
+    auto NoramlizeSpinTensor = [](Eigen::Matrix3d& input) {
+        Eigen::Vector3d unitAngular;
         unitAngular << input(2, 1), input(0, 2), input(1, 0);
         unitAngular.normalize();
         input << 0, -unitAngular(2), unitAngular(1),
@@ -537,28 +561,28 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
             -unitAngular(1), unitAngular(0), 0;
         return;
     };
-    std::vector<Eigen::Matrix3f> rotationMatrices;
+    std::vector<Eigen::Matrix3d> rotationMatrices;
     rotationMatrices.resize(timestep);
-    rotationMatrices[0] = Eigen::Matrix3f::Identity();
+    rotationMatrices[0] = Eigen::Matrix3d::Identity();
 
-    std::vector<Eigen::Matrix4f> transformationMatrices;
+    std::vector<Eigen::Matrix4d> transformationMatrices;
     transformationMatrices.resize(timestep);
-    transformationMatrices[0] = Eigen::Matrix4f::Identity();
+    transformationMatrices[0] = Eigen::Matrix4d::Identity();
     const auto observerStartPoint = pathPositions.at(0);
 
     // force start point saved in worldline.
     // assert(observerStartPoint == StartPosition);
 
     for (size_t i = 1; i < validPathSize; i++) {
-        const float t = observerfield.tmin + i * observerfield.dt;
-        const Eigen::Vector3f abc = observerfield.func_(t);
+        const double t = observerfield.tmin + i * observerfield.dt;
+        const Eigen::Vector3d abc = observerfield.func_(t);
         const auto c_ = abc(2);
         // this abs is important, otherwise flip sign of c_ will cause the spin tensor and rotation angle theta to be flipped simultaneously,
         // two flip sign cancel out the result stepInstanenousRotation never  change.
         //
         // theta is just scalar measure of how many degree the observer rotate with out direction. the rotation angle encoded in Spintensor
         const auto theta = dt * std::abs(c_);
-        Eigen::Matrix3f Spintensor;
+        Eigen::Matrix3d Spintensor;
         Spintensor(0, 0) = 0.0;
         Spintensor(1, 0) = c_;
         Spintensor(2, 0) = 0;
@@ -571,12 +595,12 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
         Spintensor(1, 2) = 0.0;
         Spintensor(2, 2) = 0.0;
         NoramlizeSpinTensor(Spintensor);
-        Eigen::Matrix3f Spi_2;
+        Eigen::Matrix3d Spi_2;
         Spi_2 = Spintensor * Spintensor;
-        float sinTheta = sin(theta);
-        float cosTheta = cos(theta);
-        Eigen::Matrix3f I = Eigen::Matrix<float, 3, 3>::Identity();
-        Eigen::Matrix3f stepInstanenousRotation = I + sinTheta * Spintensor + (1 - cosTheta) * Spi_2;
+        double sinTheta = sin(theta);
+        double cosTheta = cos(theta);
+        Eigen::Matrix3d I = Eigen::Matrix<double, 3, 3>::Identity();
+        Eigen::Matrix3d stepInstanenousRotation = I + sinTheta * Spintensor + (1 - cosTheta) * Spi_2;
         // get rotate c of t
         rotationMatrices[i] = stepInstanenousRotation * rotationMatrices[i - 1];
         const auto& stepRotation = rotationMatrices[i];
@@ -587,18 +611,18 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
 
         // eigen << fill data in row major regardless of storage order
 
-        Eigen::Matrix4f inv_translationPostR;
-        inv_translationPostR << 1, 0, 0, -tP1(0), // first row
+        Eigen::Matrix4d inv_translationPostR;
+        inv_translationPostR << 1, 0, 0, -tP1(0), // first rowm
             0, 1, 0, -tP1(1), // second row
             0, 0, 1, 0,
             0.0, 0, 0, 1;
 
-        Eigen::Matrix4f inv_translationPreR;
+        Eigen::Matrix4d inv_translationPreR;
         inv_translationPreR << 1, 0, 0, observerStartPoint(0), // first row
             0, 1, 0, observerStartPoint(1), // second row
             0, 0, 1, 0,
             0.0, 0, 0, 1;
-        Eigen::Matrix4f inv_rotation = Eigen::Matrix4f::Zero();
+        Eigen::Matrix4d inv_rotation = Eigen::Matrix4d::Zero();
         inv_rotation(0, 0) = stepRotation(0, 0);
         inv_rotation(0, 1) = stepRotation(0, 1);
         inv_rotation(0, 2) = stepRotation(0, 2);
@@ -612,12 +636,14 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
 
         // Eigen::Matrix4f  Transformation = translationPostR * (rotationMatrices[i] * translationPreR);
         //  combine translation and rotation into final transformation
-        Eigen::Matrix4f InvserseTransformation = inv_translationPreR * (inv_rotation.transpose() * inv_translationPostR);
+        Eigen::Matrix4d InvserseTransformation = inv_translationPreR * (inv_rotation.transpose() * inv_translationPostR);
         transformationMatrices[i] = InvserseTransformation;
     }
+    const auto lastPushforward = rotationMatrices[validPathSize - 1];
     const auto lastTransformation = transformationMatrices[validPathSize - 1];
     for (size_t i = validPathSize; i < timestep; i++) {
         transformationMatrices[i] = lastTransformation;
+        rotationMatrices[i] = lastPushforward;
         pathVelocitys.emplace_back(0.0f, 0.0f);
     }
 
@@ -635,29 +661,29 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
         for (size_t i = 0; i < timestep; i++) {
             // time slice i
             resultField.field[i].resize(inputField.field[i].size());
-            const Eigen::Vector2f u = pathVelocitys[i];
-            const float physical_t_this_slice = tmin + i * dt;
+            const Eigen::Vector2d u = pathVelocitys[i];
+            const double physical_t_this_slice = tmin + i * dt;
             for (size_t j = 0; j < inputField.field[i].size(); j++) {
                 // y slice
                 resultField.field[i][j].resize(inputField.field[i][j].size());
                 for (size_t k = 0; k < inputField.field[i][j].size(); k++) {
                     // get position of this grid point
-                    Eigen::Vector4f pos_x = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
+                    Eigen::Vector4d pos_x = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
                         j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f };
 
                     // observer under go transformation M, then bring transformation M^(-1): x*= Q(t)x+c(t)
-                    Eigen::Vector4f x_star_homo = transformationMatrices[i] * pos_x;
+                    Eigen::Vector4d x_star_homo = transformationMatrices[i] * pos_x;
                     x_star_homo /= x_star_homo(3);
                     // get 2d position from 4d x_star
-                    Eigen::Vector2f x_star = { x_star_homo(0), x_star_homo(1) };
+                    Eigen::Vector2d x_star = { x_star_homo(0), x_star_homo(1) };
                     // get v(x_star, t) from inputField by bilinear interpolation
-                    Eigen::Vector2f v = inputField.getVector(x_star, physical_t_this_slice);
+                    Eigen::Vector2d v = inputField.getVector(x_star, physical_t_this_slice);
 
-                    Eigen::Vector3f vminus_lab_frame;
+                    Eigen::Vector3d vminus_lab_frame;
                     vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
                     // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
                     //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
-                    Eigen::Vector3f vminus_observer_frame = rotationMatrices[i] * vminus_lab_frame;
+                    Eigen::Vector3d vminus_observer_frame = rotationMatrices[i] * vminus_lab_frame;
                     resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
                 }
             }
@@ -667,29 +693,29 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
         for (size_t i = 0; i < timestep; i++) {
             // time slice i
             resultField.field[i].resize(inputField.field.size());
-            const Eigen::Vector2f u = pathVelocitys[i];
+            const Eigen::Vector2d u = pathVelocitys[i];
             for (size_t j = 0; j < inputField.field.size(); j++) {
                 // y slice
                 resultField.field[i][j].resize(inputField.field[j].size());
                 for (size_t k = 0; k < inputField.field[j].size(); k++) {
 
                     // get position of this grid point
-                    Eigen::Vector4f pos_x = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
+                    Eigen::Vector4d pos_x = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
                         j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f };
 
                     // observer under go transformation M, then bring transformation M^(-1): x*= Q(t)x+c(t)
-                    Eigen::Vector4f x_star_homo = transformationMatrices[i] * pos_x;
+                    Eigen::Vector4d x_star_homo = transformationMatrices[i] * pos_x;
                     x_star_homo /= x_star_homo(3);
                     // get 2d position from 4d x_star
-                    Eigen::Vector2f x_star = { x_star_homo(0), x_star_homo(1) };
+                    Eigen::Vector2d x_star = { x_star_homo(0), x_star_homo(1) };
                     // get v(x_star, t) from inputField by bilinear interpolation
-                    Eigen::Vector2f v = inputField.getVector(x_star.x(), x_star.y());
+                    Eigen::Vector2d v = inputField.getVector(x_star.x(), x_star.y());
 
-                    Eigen::Vector3f vminus_lab_frame;
+                    Eigen::Vector3d vminus_lab_frame;
                     vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
                     // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
                     //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
-                    Eigen::Vector3f vminus_observer_frame = rotationMatrices[i] * vminus_lab_frame;
+                    Eigen::Vector3d vminus_observer_frame = rotationMatrices[i] * vminus_lab_frame;
                     resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
                 }
             }
@@ -699,153 +725,35 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
     return resultField;
 }
 
-void generateUnsteadyField()
-{
-    const int Xdim = 64, Ydim = 64;
-    const int LicImageSize = 64;
-    Eigen::Vector2f domainMinBoundary = { -2.0, -2.0 };
-    Eigen::Vector2f domainMaxBoundary = { 2.0, 2.0 };
-    const float stepSize = 0.01;
-    const int maxIteratioOneDirection = 128;
-    int numVelocityFields = 1; // num of fields per n, rc parameter setting
-
-    Eigen::Vector2f gridInterval = {
-        (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
-        (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
-    };
-
-    const std::vector<std::pair<float, int>> paramters = generateNParamters(1);
-    const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
-
-    uniform_real_distribution<float> genTheta(-1.0, 1.0);
-    uniform_real_distribution<float> genSx(-2.0, 2.0);
-
-    string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
-    if (!filesystem::exists(root_folder)) {
-        filesystem::create_directories(root_folder);
-    }
-
-    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<float, int>& params) {
-        const float rc = params.first;
-        const float n = params.second;
-        const string task_name = "velocity_field_rc_" + to_string(rc) + "n_" + to_string(n);
-        printf("generate data for %s\n", task_name.c_str());
-
-        VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
-
-        for (size_t sample = 0; sample < numVelocityFields; sample++) {
-
-            const auto theta = genTheta(rng);
-            const auto tx = 1 - 0.45 * genSx(rng);
-            const auto ty = 1 - 0.45 * genSx(rng);
-
-            const auto cx = 1;
-            const auto cy = 1;
-            const auto dx = 0;
-            const auto dy = 0;
-            // generate steady field data
-            auto resData = generator.generateSteadyV2(cx, cy, dx, dy, tx, ty);
-            const string tag_name = "velocity_field_" + std::to_string(sample) + "rc_" + to_string(rc) + "n_" + to_string(n) + "_sample_" + to_string(sample);
-
-            string metaFilename = root_folder + tag_name + "meta.json";
-            string velocityFilename = root_folder + tag_name + "velocity.bin";
-            string licFilename = root_folder + tag_name + "lic.png";
-
-            // save meta info:
-            std::ofstream out(metaFilename);
-            if (!out.good()) {
-                printf("couldn't open file: %s", metaFilename.c_str());
-                return;
-            }
-            std::ofstream outBin(velocityFilename, std::ios::binary);
-            if (!outBin.good()) {
-                printf("couldn't open file: %s", velocityFilename.c_str());
-                return;
-            }
-
-            cereal::BinaryOutputArchive archive_Binary(outBin);
-            const std::vector<float> rawData = flatten2D(resData);
-            auto [minV, maxV] = computeMinMax(rawData);
-
-            {
-
-                cereal::JSONOutputArchive archive_o(out);
-                archive_o(CEREAL_NVP(Xdim));
-                archive_o(CEREAL_NVP(Ydim));
-                std::vector<float> domainMininumBoundary = { domainMinBoundary(0), domainMinBoundary(1) };
-                std::vector<float> domainMaxinumBoundary = { domainMaxBoundary(0), domainMaxBoundary(1) };
-                archive_o(CEREAL_NVP(domainMininumBoundary));
-                archive_o(CEREAL_NVP(domainMaxinumBoundary));
-
-                archive_o(CEREAL_NVP(n));
-                archive_o(CEREAL_NVP(rc));
-
-                archive_o(CEREAL_NVP(theta));
-                archive_o(CEREAL_NVP(tx));
-                archive_o(CEREAL_NVP(ty));
-                archive_o(CEREAL_NVP(cx));
-                archive_o(CEREAL_NVP(cy));
-                archive_o(CEREAL_NVP(dx));
-                archive_o(CEREAL_NVP(dy));
-                archive_o(CEREAL_NVP(minV));
-                archive_o(CEREAL_NVP(maxV));
-            }
-
-            // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
-            out.close();
-
-            // write raw data
-
-            // ar(make_size_tag(static_cast<size_type=uint64>(vector.size()))); // number of elements
-            // ar(binary_data(vector.data(), vector.size() * sizeof(T)));
-            //  when using other library to read, need to discard the first uint64 (8bytes.)
-            archive_Binary(rawData);
-
-            outBin.close();
-
-            SteadyVectorField2D outField {
-                resData,
-                domainMinBoundary,
-                domainMaxBoundary,
-                gridInterval
-            };
-            auto outputTexture = LICAlgorithm(licNoisetexture, outField, LicImageSize, LicImageSize, stepSize, maxIteratioOneDirection);
-
-            saveAsPNG(outputTexture, licFilename);
-        }
-    });
-}
-
 void generateSteadyField()
 {
-    using namespace std;
     const int Xdim = 64, Ydim = 64;
     const int LicImageSize = 512;
-    Eigen::Vector2f domainMinBoundary = { -2.0, -2.0 };
-    Eigen::Vector2f domainMaxBoundary = { 2.0, 2.0 };
-    const float stepSize = 0.01;
+    Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
+    Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
+    const double stepSize = 0.01;
     const int maxIteratioOneDirection = 256;
     int numVelocityFields = 1; // num of fields per n, rc parameter setting
 
-    Eigen::Vector2f gridInterval = {
+    Eigen::Vector2d gridInterval = {
         (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
         (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
     };
 
-    const std::vector<std::pair<float, int>> paramters = generateNParamters(1);
+    const std::vector<std::pair<double, int>> paramters = generateNParamters(1);
     const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
 
-    uniform_real_distribution<float> genTheta(-1.0, 1.0);
-    uniform_real_distribution<float> genSx(-2.0, 2.0);
+    uniform_real_distribution<double> genTheta(-1.0, 1.0);
+    uniform_real_distribution<double> genSx(-2.0, 2.0);
 
     string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
     if (!filesystem::exists(root_folder)) {
         filesystem::create_directories(root_folder);
     }
 
-    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<float, int>& params) {
-        const float rc = params.first;
-        const float n = params.second;
+    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, int>& params) {
+        const double rc = params.first;
+        const double n = params.second;
         const string task_name = "velocity_field_rc_" + to_string(rc) + "n_" + to_string(n);
         printf("generate data for %s\n", task_name.c_str());
 
@@ -878,7 +786,7 @@ void generateSteadyField()
                 }
 
                 cereal::BinaryOutputArchive archive_Binary(outBin);
-                const std::vector<float> rawData = flatten2D(resData);
+                const auto rawData = flatten2DAs1Dfloat(resData);
                 auto [minV, maxV] = computeMinMax(rawData);
 
                 {
@@ -886,8 +794,8 @@ void generateSteadyField()
                     cereal::JSONOutputArchive archive_o(out);
                     archive_o(CEREAL_NVP(Xdim));
                     archive_o(CEREAL_NVP(Ydim));
-                    std::vector<float> domainMininumBoundary = { domainMinBoundary(0), domainMinBoundary(1) };
-                    std::vector<float> domainMaxinumBoundary = { domainMaxBoundary(0), domainMaxBoundary(1) };
+                    std::vector<double> domainMininumBoundary = { domainMinBoundary(0), domainMinBoundary(1) };
+                    std::vector<double> domainMaxinumBoundary = { domainMaxBoundary(0), domainMaxBoundary(1) };
                     archive_o(CEREAL_NVP(domainMininumBoundary));
                     archive_o(CEREAL_NVP(domainMaxinumBoundary));
 
@@ -928,50 +836,30 @@ void generateSteadyField()
     });
 }
 
-struct KillingComponentFunctionFactory {
-
-    static std::function<Eigen::Vector3f(float)> constantTranslation(int direction, float scale)
-    {
-        return [=](float t) {
-            if (direction == 0) {
-                return Eigen::Vector3f(scale, 0, 0);
-            } else
-                return Eigen::Vector3f(0, scale, 0);
-        };
-    }
-
-    static std::function<Eigen::Vector3f(float)> constantRotation(float speed)
-    {
-        return [=](float t) {
-            return Eigen::Vector3f(0, 0, speed);
-        };
-    }
-};
-
 void testKillingTransformASteadyField()
 {
 
     const int Xdim = 64, Ydim = 64;
     const int LicImageSize = 128;
-    Eigen::Vector2f domainMinBoundary = { -2.0, -2.0 };
-    Eigen::Vector2f domainMaxBoundary = { 2.0, 2.0 };
+    Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
+    Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
     const int unsteadyFieldTimeStep = 32;
 
-    const float stepSize = 0.01;
+    const double stepSize = 0.01;
     const int maxLICIteratioOneDirection = 256;
     int numVelocityFields = 1; // num of fields per n, rc parameter setting
     std::string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
 
-    Eigen::Vector2f gridInterval = {
+    Eigen::Vector2d gridInterval = {
         (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
         (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
     };
     const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
 
-    const std::vector<std::pair<float, int>> paramters = generateNParamters(1);
-    float rc = 1.0;
-    float n = 2;
-    std::uniform_real_distribution<float> genSx(-2.0, 2.0);
+    const std::vector<std::pair<double, int>> paramters = generateNParamters(1);
+    double rc = 1.0;
+    double n = 2;
+    std::uniform_real_distribution<double> genSx(-2.0, 2.0);
     const auto tx = 1 - 0.45 * genSx(rng);
     const auto ty = 1 - 0.45 * genSx(rng);
 
@@ -994,13 +882,13 @@ void testKillingTransformASteadyField()
 
     auto func_const_trans = KillingComponentFunctionFactory::constantTranslation(0, 0.1);
 
-    std::function<Eigen::Vector3f(float)> func_decreasespeedTranslate = [=](float t) {
-        return Eigen::Vector3f(0.1 * (1 - t / 2 * M_PI), 0, 0) * 0.1;
+    std::function<Eigen::Vector3d(double)> func_decreasespeedTranslate = [=](double t) {
+        return Eigen::Vector3d(0.1 * (1 - t / 2 * M_PI), 0, 0) * 0.1;
     };
 
     KillingAbcField observerfield(
         func_decreasespeedTranslate, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
-    Eigen::Vector2f StartPosition = { 0.0, 0.0 };
+    Eigen::Vector2d StartPosition = { 0.0, 0.0 };
     auto unsteady_field = killingABCtransformation(observerfield, StartPosition, steadyField);
 
     saveAsPNG(outputSteadyTexture, licFilename0);
@@ -1015,17 +903,17 @@ void testKillingTransformASteadyField()
 
 void testKillingTransformationForRFC()
 {
-    const float tmin = 0.0;
-    const float tmax = 2.0 * M_PI;
+    const double tmin = 0.0;
+    const double tmax = 2.0 * M_PI;
     const int Xdim = 64, Ydim = 64;
-    const int LicImageSize = 128;
-    Eigen::Vector2f domainMinBoundary = { -2.0, -2.0 };
-    Eigen::Vector2f domainMaxBoundary = { 2.0, 2.0 };
+    const int LicImageSize = 512;
+    Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
+    Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
     const int unsteadyFieldTimeStep = 32;
-    const float stepSize = 0.01;
+    const double stepSize = 0.01;
     const int maxLICIteratioOneDirection = 256;
     int numVelocityFields = 1; // num of fields per n, rc parameter setting
-    std::string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
+    std::string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/" + "test/";
     if (!filesystem::exists(root_folder)) {
         filesystem::create_directories(root_folder);
     }
@@ -1036,7 +924,7 @@ void testKillingTransformationForRFC()
     AnalyticalFlowCreator flowCreator(grid_size, time_steps, domainMinBoundary, domainMaxBoundary);
 
     // Define a lambda function for rotating flow
-    auto rotatingFourCenter = [](Eigen::Vector2f p, double t) {
+    auto rotatingFourCenter = [](Eigen::Vector2d p, double t) {
         const double x = p(0);
         const double y = p(1);
         const double al_t = 1.0;
@@ -1046,21 +934,21 @@ void testKillingTransformationForRFC()
         double u = exp(-y * y - x * x) * (al_t * y * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * y * y * y + (12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * y * y + (6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x + 6.0 * scale * cos(al_t * t) * sin(al_t * t)) * y + (3.0 * scale - 6.0 * scale * (cos(al_t * t) * cos(al_t * t))) * x);
         double v = -exp(-y * y - x * x) * (al_t * x * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * y * y + ((12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * x - 6.0 * scale * (cos(al_t * t) * cos(al_t * t)) + 3.0 * scale) * y + 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x * x - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x);
 
-        float vecU = maxVelocity * u;
-        float vecV = maxVelocity * v;
+        double vecU = maxVelocity * u;
+        double vecV = maxVelocity * v;
 
-        Eigen::Vector2f components;
+        Eigen::Vector2d components;
         components << vecU, vecV;
         return components;
     };
     // Create the flow field
     UnSteadyVectorField2D InputflowField = flowCreator.createFlowField(rotatingFourCenter);
 
-    auto func_const_trans = KillingComponentFunctionFactory::constantRotation(-1.0f);
+    auto func_const_trans = KillingComponentFunctionFactory::constantRotation(1.0);
 
     KillingAbcField observerfield(
         func_const_trans, unsteadyFieldTimeStep, tmin, tmax);
-    Eigen::Vector2f StartPosition = { 0.0, 0.0 };
+    Eigen::Vector2d StartPosition = { 0.0, 0.0 };
 
     const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
 
@@ -1084,4 +972,171 @@ void testKillingTransformationForRFC()
         string licFilename = root_folder + tag_name + "lic.png";
         saveAsPNG(outputTexturesObservedField[i], licFilename);
     }
+}
+
+// number of result traing data = Nparamters * samplePerParameters * observerPerSetting
+void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting = 1)
+{
+
+    const int unsteadyFieldTimeStep = 32;
+    const double stepSize = 0.01;
+    const int maxLICIteratioOneDirection = 200;
+    int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
+    std::string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
+    if (!filesystem::exists(root_folder)) {
+        filesystem::create_directories(root_folder);
+    }
+
+    Eigen::Vector2d gridInterval = {
+        (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
+        (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
+    };
+
+    const std::vector<std::pair<double, int>> paramters = generateNParamters(Nparamters);
+    const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
+
+    uniform_real_distribution<double> genTheta(-1.0, 1.0);
+    uniform_real_distribution<double> genSx(-2.0, 2.0);
+
+    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, int>& params) {
+        const double rc = params.first;
+        const double n = params.second;
+
+        VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
+        std::uniform_int_distribution<int> dist_int(0, 2);
+
+        printf("generate %d sample for rc=%f , n=%f \n", numVelocityFields, rc, n);
+
+        const string Major_task_foldername = "velocity_rc_" + to_string(rc) + "n_" + to_string(n) + "/";
+        const string Major_task_Licfoldername = "velocity_rc_" + to_string(rc) + "n_" + to_string(n) + "/LIC/";
+        std::string task_folder = root_folder + Major_task_foldername;
+        if (!filesystem::exists(task_folder)) {
+            filesystem::create_directories(task_folder);
+        }
+        std::string task_licfolder = root_folder + Major_task_Licfoldername;
+        if (!filesystem::exists(task_licfolder)) {
+            filesystem::create_directories(task_licfolder);
+        }
+        for (size_t sample = 0; sample < numVelocityFields; sample++) {
+
+            // if (false) {
+            //     const auto theta = genTheta(rng);
+            //     const auto tx = 1 - 0.45 * genSx(rng);
+            //     const auto ty = 1 - 0.45 * genSx(rng);
+
+            //    const auto cx = 1;
+            //    const auto cy = 1;
+            //    const auto dx = 0;
+            //    const auto dy = 0;
+            //    // auto resData = generator.generateSteadyV2(cx, cy, dx, dy, tx, ty);
+            //}
+
+            // generate steady field with vortex
+            const auto theta = genTheta(rng);
+            const auto sx = 1 - 0.5f * genSx(rng);
+            const auto sy = 1 - 0.5f * genSx(rng);
+            int Si = dist_int(rng);
+            Si = 0;
+            auto resData = generator.generateSteady(sx, sy, theta, Si);
+            const string sample_tag_name = "velocity_rc_" + to_string(rc) + "_n_" + to_string(n) + "_sample_" + to_string(sample);
+
+            // create folder for every n rc parameter setting.
+
+            string metaFilename = task_folder + sample_tag_name + "meta.json";
+            string velocityFilename = task_folder + sample_tag_name + "velocity.bin";
+
+            // save meta info:
+            std::ofstream jsonOut(metaFilename);
+            if (!jsonOut.good()) {
+                printf("couldn't open file: %s", metaFilename.c_str());
+                return;
+            }
+            std::ofstream outBin(velocityFilename, std::ios::binary);
+            if (!outBin.good()) {
+                printf("couldn't open file: %s", velocityFilename.c_str());
+                return;
+            }
+
+            cereal::BinaryOutputArchive archive_Binary(outBin);
+            const std::vector<float> rawData = flatten2DAs1Dfloat(resData);
+            auto [minV, maxV] = computeMinMax(rawData);
+
+            std::function<Eigen::Vector3d(double)> func = [](double t) -> Eigen::Vector3d {
+                auto res = Eigen::Vector3d(0.1 * (1 - t / (2 * M_PI)), 0, 0.1);
+                return res;
+            };
+            std::function<Eigen::Vector3d(double)> func_inverse = [](double t) -> Eigen::Vector3d {
+                auto res = Eigen::Vector3d(0.1 * (1 - t / (2 * M_PI)), 0, 0.1) * -1;
+                return res;
+            };
+            KillingAbcField observerfieldDeform(
+                func, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
+
+            KillingAbcField observerfield(
+                func_inverse, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
+
+            {
+                cereal::JSONOutputArchive archive_o(jsonOut);
+                archive_o(CEREAL_NVP(Xdim));
+                archive_o(CEREAL_NVP(Ydim));
+                archive_o(CEREAL_NVP(domainMinBoundary));
+                archive_o(CEREAL_NVP(domainMaxBoundary));
+                Eigen::Vector3d n_rc = { n, rc, (double)Si };
+                Eigen::Vector3d deform = { theta, sx, sy };
+                archive_o(cereal::make_nvp("n_rc_Si", n_rc));
+                archive_o(cereal::make_nvp("deform_theta_sx_sy", deform));
+                // archive_o(CEREAL_NVP(rc));
+                // archive_o(CEREAL_NVP(theta));
+                // archive_o(CEREAL_NVP(sx));
+                // archive_o(CEREAL_NVP(sy));
+                archive_o(CEREAL_NVP(minV));
+                archive_o(CEREAL_NVP(maxV));
+                // meta for observer field
+                archive_o(CEREAL_NVP(observerfieldDeform));
+            }
+
+            // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
+            jsonOut.close();
+
+            // rendering LIC
+            {
+                SteadyVectorField2D steadyField {
+                    resData,
+                    domainMinBoundary,
+                    domainMaxBoundary,
+                    gridInterval
+                };
+                auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+                string steadyField_name = "steady_beforeTransformation_";
+                string licFilename0 = task_licfolder + steadyField_name + "lic.png";
+                saveAsPNG(outputSteadyTexture, licFilename0);
+
+                Eigen::Vector2d StartPosition = { 0.0, 0.0 };
+                auto unsteady_field = killingABCtransformation(observerfieldDeform, StartPosition, steadyField);
+                // reconstruct unsteady field from observer field
+                auto reconstruct_field = killingABCtransformation(observerfield, StartPosition, unsteady_field);
+
+                auto outputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
+                auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(licNoisetexture, reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
+
+                for (size_t i = 0; i < outputTextures.size(); i++) {
+                    string tag_name = "killing_transformation_" + std::to_string(i);
+                    string licFilename = task_licfolder + tag_name + "lic.png";
+                    saveAsPNG(outputTextures[i], licFilename);
+
+                    string tag_name_rec = "reconstruct_" + std::to_string(i);
+                    string licFilename_rec = task_licfolder + tag_name_rec + "lic.png";
+                    saveAsPNG(outputTexturesReconstruct[i], licFilename_rec);
+                }
+
+                auto rawUnsteadyFieldData = flatten3DAs1Dfloat(unsteady_field.field);
+                // write raw data
+                // ar(make_size_tag(static_cast<size_type=uint64>(vector.size()))); // number of elements
+                // ar(binary_data(vector.data(), vector.size() * sizeof(T)));
+                //  when using other library to read, need to discard the first uint64 (8bytes.)
+                archive_Binary(rawUnsteadyFieldData);
+                outBin.close();
+            }
+        }
+    });
 }
