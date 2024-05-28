@@ -28,6 +28,7 @@ const int Xdim = 64, Ydim = 64;
 const int LicImageSize = 64;
 Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
+const int unsteadyFieldTimeStep = 16;
 
 // Function to save the 2D vector as a PNG image
 void saveAsPNG(const std::vector<std::vector<Eigen::Vector3d>>& data, const std::string& filename)
@@ -285,24 +286,24 @@ std::vector<std::pair<double, int>> generateNParamters(int n)
 {
     std::vector<std::pair<double, int>> parameters = {
         { 1.0, 2 },
-        /*   { 1.0, 2 },
-           { 1.0, 3 },
-           { 1.0, 10 },
-           { 2.0, 1 },
-           { 2.0, 2 },
-           { 2.0, 2 },
-           { 2.0, 3 },
-           { 2.0, 10 },*/
+        { 1.0, 2 },
+        { 1.0, 3 },
+        { 1.0, 10 },
+        { 2.0, 1 },
+        { 2.0, 2 },
+        { 2.0, 2 },
+        { 2.0, 3 },
+        { 2.0, 10 },
     };
+    std::normal_distribution<double> dist_rc(1.87, 0.37); // mean = 1.87, stddev = 0.37
+    std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
 
-    std::uniform_real_distribution<double> dist_T(0.01, 2.0);
-    std::uniform_int_distribution<int> dist_int(1, 6);
-
-    // for (int i = 0; i < n; ++i) {
-    //     double first = dist_T(rng);
-    //     int second = dist_int(rng);
-    //     parameters.emplace_back(first, second);
-    // }
+    int m = parameters.size();
+    for (int i = m; i < n; ++i) {
+        double rc = dist_rc(rng);
+        int n = dist_n(rng);
+        parameters.emplace_back(rc, n);
+    }
 
     return parameters;
 }
@@ -727,10 +728,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
 
 void generateSteadyField()
 {
-    const int Xdim = 64, Ydim = 64;
-    const int LicImageSize = 512;
-    Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
-    Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
+
     const double stepSize = 0.01;
     const int maxIteratioOneDirection = 256;
     int numVelocityFields = 1; // num of fields per n, rc parameter setting
@@ -839,10 +837,6 @@ void generateSteadyField()
 void testKillingTransformASteadyField()
 {
 
-    const int Xdim = 64, Ydim = 64;
-    const int LicImageSize = 128;
-    Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
-    Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
     const int unsteadyFieldTimeStep = 32;
 
     const double stepSize = 0.01;
@@ -856,7 +850,6 @@ void testKillingTransformASteadyField()
     };
     const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
 
-    const std::vector<std::pair<double, int>> paramters = generateNParamters(1);
     double rc = 1.0;
     double n = 2;
     std::uniform_real_distribution<double> genSx(-2.0, 2.0);
@@ -903,12 +896,7 @@ void testKillingTransformASteadyField()
 
 void testKillingTransformationForRFC()
 {
-    const double tmin = 0.0;
-    const double tmax = 2.0 * M_PI;
-    const int Xdim = 64, Ydim = 64;
-    const int LicImageSize = 512;
-    Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
-    Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
+
     const int unsteadyFieldTimeStep = 32;
     const double stepSize = 0.01;
     const int maxLICIteratioOneDirection = 256;
@@ -974,11 +962,50 @@ void testKillingTransformationForRFC()
     }
 }
 
+void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inputLicImage, const SteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn)
+{
+    // if si=0 then no vortex
+    if (meta_n_rc_si.z() == 0.0) {
+        return;
+    }
+    const auto rc = meta_n_rc_si(1);
+    auto judgeVortex = [rc](const Eigen::Vector2d& pos) -> bool {
+        return pos.norm() < rc;
+    };
+    const int licImageSizeY = inputLicImage.size();
+    const int licImageSizeX = inputLicImage[0].size();
+    const auto domainRange = domainMax - domainMIn;
+    for (size_t i = 0; i < licImageSizeX; i++) {
+        for (size_t j = 0; j < licImageSizeY; j++) {
+            // map position from texture image grid coordinate to vector field
+            double ratio_x = (double)((double)j / (double)licImageSizeX);
+            double ratio_y = (double)((double)i / (double)licImageSizeY);
+
+            // Trace forward
+            // physicalPositionInVectorfield
+            Eigen::Vector2d pos = { ratio_x * domainRange(0) + domainMIn(0),
+                ratio_y * domainRange(1) + domainMIn(1) };
+
+            if (judgeVortex(pos)) {
+                auto preColor = inputLicImage[i][j];
+                // red for critial point(coreline)
+                auto velocity = vectorField.getVector(pos.x(), pos.y());
+                if (velocity.norm() < 1e-12)
+                    [[unlikely]] {
+                    inputLicImage[i][j] = 0.5 * preColor + 0.5 * Eigen::Vector3d(1.0, 0.0, 0.0);
+                } else {
+                    // yellow for vortex region
+                    inputLicImage[i][j] = 0.5 * preColor + 0.5 * Eigen::Vector3d(1.0, 1.0, 0.0);
+                }
+            }
+        }
+    }
+}
+
 // number of result traing data = Nparamters * samplePerParameters * observerPerSetting
-void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting = 1)
+void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting)
 {
 
-    const int unsteadyFieldTimeStep = 32;
     const double stepSize = 0.01;
     const int maxLICIteratioOneDirection = 200;
     int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
@@ -995,8 +1022,8 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     const std::vector<std::pair<double, int>> paramters = generateNParamters(Nparamters);
     const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
 
-    uniform_real_distribution<double> genTheta(-1.0, 1.0);
-    uniform_real_distribution<double> genSx(-2.0, 2.0);
+    std::normal_distribution<double> genTheta(0.0, 1.0);
+    std::normal_distribution<double> genSx(0.0, 2.0);
 
     for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, int>& params) {
         const double rc = params.first;
@@ -1017,6 +1044,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
         if (!filesystem::exists(task_licfolder)) {
             filesystem::create_directories(task_licfolder);
         }
+
         for (size_t sample = 0; sample < numVelocityFields; sample++) {
 
             // if (false) {
@@ -1036,106 +1064,105 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             const auto sx = 1 - 0.5f * genSx(rng);
             const auto sy = 1 - 0.5f * genSx(rng);
             int Si = dist_int(rng);
-            Si = 0;
+            Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
             auto resData = generator.generateSteady(sx, sy, theta, Si);
-            const string sample_tag_name = "velocity_rc_" + to_string(rc) + "_n_" + to_string(n) + "_sample_" + to_string(sample);
 
-            // create folder for every n rc parameter setting.
+            for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
 
-            string metaFilename = task_folder + sample_tag_name + "meta.json";
-            string velocityFilename = task_folder + sample_tag_name + "velocity.bin";
+                const string sample_tag_name = "rc_" + to_string(rc) + "_n_" + to_string(n) + "_sample_" + to_string(sample) + "Observer_" + to_string(observerIndex);
 
-            // save meta info:
-            std::ofstream jsonOut(metaFilename);
-            if (!jsonOut.good()) {
-                printf("couldn't open file: %s", metaFilename.c_str());
-                return;
-            }
-            std::ofstream outBin(velocityFilename, std::ios::binary);
-            if (!outBin.good()) {
-                printf("couldn't open file: %s", velocityFilename.c_str());
-                return;
-            }
+                // create folder for every n rc parameter setting.
 
-            cereal::BinaryOutputArchive archive_Binary(outBin);
-            const std::vector<float> rawData = flatten2DAs1Dfloat(resData);
-            auto [minV, maxV] = computeMinMax(rawData);
+                string metaFilename = task_folder + sample_tag_name + "meta.json";
+                string velocityFilename = task_folder + sample_tag_name + ".bin";
 
-            std::function<Eigen::Vector3d(double)> func = [](double t) -> Eigen::Vector3d {
-                auto res = Eigen::Vector3d(0.1 * (1 - t / (2 * M_PI)), 0, 0.1);
-                return res;
-            };
-            std::function<Eigen::Vector3d(double)> func_inverse = [](double t) -> Eigen::Vector3d {
-                auto res = Eigen::Vector3d(0.1 * (1 - t / (2 * M_PI)), 0, 0.1) * -1;
-                return res;
-            };
-            KillingAbcField observerfieldDeform(
-                func, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
-
-            KillingAbcField observerfield(
-                func_inverse, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
-
-            {
-                cereal::JSONOutputArchive archive_o(jsonOut);
-                archive_o(CEREAL_NVP(Xdim));
-                archive_o(CEREAL_NVP(Ydim));
-                archive_o(CEREAL_NVP(domainMinBoundary));
-                archive_o(CEREAL_NVP(domainMaxBoundary));
-                Eigen::Vector3d n_rc = { n, rc, (double)Si };
-                Eigen::Vector3d deform = { theta, sx, sy };
-                archive_o(cereal::make_nvp("n_rc_Si", n_rc));
-                archive_o(cereal::make_nvp("deform_theta_sx_sy", deform));
-                // archive_o(CEREAL_NVP(rc));
-                // archive_o(CEREAL_NVP(theta));
-                // archive_o(CEREAL_NVP(sx));
-                // archive_o(CEREAL_NVP(sy));
-                archive_o(CEREAL_NVP(minV));
-                archive_o(CEREAL_NVP(maxV));
-                // meta for observer field
-                archive_o(CEREAL_NVP(observerfieldDeform));
-            }
-
-            // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
-            jsonOut.close();
-
-            // rendering LIC
-            {
-                SteadyVectorField2D steadyField {
-                    resData,
-                    domainMinBoundary,
-                    domainMaxBoundary,
-                    gridInterval
-                };
-                auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
-                string steadyField_name = "steady_beforeTransformation_";
-                string licFilename0 = task_licfolder + steadyField_name + "lic.png";
-                saveAsPNG(outputSteadyTexture, licFilename0);
-
-                Eigen::Vector2d StartPosition = { 0.0, 0.0 };
-                auto unsteady_field = killingABCtransformation(observerfieldDeform, StartPosition, steadyField);
-                // reconstruct unsteady field from observer field
-                auto reconstruct_field = killingABCtransformation(observerfield, StartPosition, unsteady_field);
-
-                auto outputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
-                auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(licNoisetexture, reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
-
-                for (size_t i = 0; i < outputTextures.size(); i++) {
-                    string tag_name = "killing_transformation_" + std::to_string(i);
-                    string licFilename = task_licfolder + tag_name + "lic.png";
-                    saveAsPNG(outputTextures[i], licFilename);
-
-                    string tag_name_rec = "reconstruct_" + std::to_string(i);
-                    string licFilename_rec = task_licfolder + tag_name_rec + "lic.png";
-                    saveAsPNG(outputTexturesReconstruct[i], licFilename_rec);
+                // save meta info:
+                std::ofstream jsonOut(metaFilename);
+                if (!jsonOut.good()) {
+                    printf("couldn't open file: %s", metaFilename.c_str());
+                    return;
+                }
+                std::ofstream outBin(velocityFilename, std::ios::binary);
+                if (!outBin.good()) {
+                    printf("couldn't open file: %s", velocityFilename.c_str());
+                    return;
                 }
 
-                auto rawUnsteadyFieldData = flatten3DAs1Dfloat(unsteady_field.field);
-                // write raw data
-                // ar(make_size_tag(static_cast<size_type=uint64>(vector.size()))); // number of elements
-                // ar(binary_data(vector.data(), vector.size() * sizeof(T)));
-                //  when using other library to read, need to discard the first uint64 (8bytes.)
-                archive_Binary(rawUnsteadyFieldData);
-                outBin.close();
+                cereal::BinaryOutputArchive archive_Binary(outBin);
+                const std::vector<float> rawData = flatten2DAs1Dfloat(resData);
+                auto [minV, maxV] = computeMinMax(rawData);
+                auto func = KillingComponentFunctionFactory::randomObserver();
+                auto inv_func = KillingComponentFunctionFactory::getInverseObserver(func);
+                KillingAbcField observerfieldDeform(
+                    func, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
+
+                KillingAbcField observerfield(
+                    inv_func, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
+
+                {
+                    cereal::JSONOutputArchive archive_o(jsonOut);
+                    archive_o(CEREAL_NVP(Xdim));
+                    archive_o(CEREAL_NVP(Ydim));
+                    archive_o(CEREAL_NVP(domainMinBoundary));
+                    archive_o(CEREAL_NVP(domainMaxBoundary));
+
+                    Eigen::Vector3d deform = { theta, sx, sy };
+                    archive_o(cereal::make_nvp("n_rc_Si", n_rc_si));
+                    archive_o(cereal::make_nvp("deform_theta_sx_sy", deform));
+                    // archive_o(CEREAL_NVP(rc));
+                    // archive_o(CEREAL_NVP(theta));
+                    // archive_o(CEREAL_NVP(sx));
+                    // archive_o(CEREAL_NVP(sy));
+                    archive_o(CEREAL_NVP(minV));
+                    archive_o(CEREAL_NVP(maxV));
+                    // meta for observer field
+                    archive_o(CEREAL_NVP(observerfieldDeform));
+                }
+
+                // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
+                jsonOut.close();
+
+                // rendering LIC
+                {
+                    SteadyVectorField2D steadyField {
+                        resData,
+                        domainMinBoundary,
+                        domainMaxBoundary,
+                        gridInterval
+                    };
+                    auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+                    // add segmentation visualization for steady lic
+                    addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary);
+                    string steadyField_name = "steady_beforeTransformation_";
+                    string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
+                    saveAsPNG(outputSteadyTexture, licFilename0);
+
+                    Eigen::Vector2d StartPosition = { 0.0, 0.0 };
+                    auto unsteady_field = killingABCtransformation(observerfieldDeform, StartPosition, steadyField);
+                    // reconstruct unsteady field from observer field
+                    auto reconstruct_field = killingABCtransformation(observerfield, StartPosition, unsteady_field);
+
+                    auto outputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
+                    auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(licNoisetexture, reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
+
+                    for (size_t i = 0; i < outputTextures.size(); i++) {
+                        string tag_name = sample_tag_name + "killing_deformed_" + std::to_string(i);
+                        string licFilename = task_licfolder + tag_name + "lic.png";
+                        saveAsPNG(outputTextures[i], licFilename);
+
+                        string tag_name_rec = sample_tag_name + "reconstruct_" + std::to_string(i);
+                        string licFilename_rec = task_licfolder + tag_name_rec + "lic.png";
+                        saveAsPNG(outputTexturesReconstruct[i], licFilename_rec);
+                    }
+
+                    auto rawUnsteadyFieldData = flatten3DAs1Dfloat(unsteady_field.field);
+                    // write raw data
+                    // ar(make_size_tag(static_cast<size_type=uint64>(vector.size()))); // number of elements
+                    // ar(binary_data(vector.data(), vector.size() * sizeof(T)));
+                    //  when using other library to read, need to discard the first uint64 (8bytes.)
+                    archive_Binary(rawUnsteadyFieldData);
+                    outBin.close();
+                }
             }
         }
     });

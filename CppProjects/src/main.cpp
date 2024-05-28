@@ -5,6 +5,6 @@ int main()
 {
 
     // testKillingTransformationForRFC();
-    generateUnsteadyField(1, 1, 1);
+    generateUnsteadyField(10, 10, 1);
     return 0;
 }

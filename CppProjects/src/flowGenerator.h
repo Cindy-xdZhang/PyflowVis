@@ -6,6 +6,54 @@
 #include <vector>
 struct KillingComponentFunctionFactory {
 
+    static std::function<Eigen::Vector3d(double)> getInverseObserver(const std::function<Eigen::Vector3d(double)>& funcA)
+    {
+        return [=](double t) -> Eigen::Vector3d {
+            return -funcA(t);
+        };
+    }
+
+    static std::function<Eigen::Vector3d(double)> randomObserver()
+    {
+        // Random device and generator
+        std::random_device rd;
+        std::mt19937 gen(rd());
+
+        // Distribution for selecting type
+        std::uniform_int_distribution<int> dist_type(0, 5);
+
+        // Gaussian distributions for generating parameters
+        std::normal_distribution<double> dist_speed(0.0, 0.5);
+        std::normal_distribution<double> dist_acc(0.0, 0.2);
+        std::normal_distribution<double> dist_rot(0.0, 0.2);
+
+        // Randomly select a type
+        int type = dist_type(gen);
+
+        // Randomly generate parameters
+        int direction = std::uniform_int_distribution<int>(0, 1)(gen);
+        double scale = dist_speed(gen);
+        double acc = dist_acc(gen);
+        double rot = dist_rot(gen);
+
+        // Return the corresponding function
+        switch (type) {
+        case 0:
+            return constantTranslation(direction, scale);
+        case 1:
+            return constantAccTranslation(direction, acc);
+        case 2:
+            return combinedconstantTranslationRotation(direction, scale, rot);
+        case 3:
+            return constantRotation(scale);
+        case 4:
+            return constantAccRotation(acc);
+        case 5:
+            return constantAccTranslationRotation(direction, acc, rot);
+        default:
+            return constantTranslation(0, scale); // default case, should never hit
+        }
+    }
     // constant translation velocity(killing  a or b), acc =0.
     static std::function<Eigen::Vector3d(double)> constantTranslation(int direction, double scale)
     {

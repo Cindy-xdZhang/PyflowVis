@@ -156,15 +156,18 @@ public:
     }
 };
 namespace cereal {
+
+// Specialization for saving as array
 template <class Archive>
-void serialize(Archive& ar, Eigen::Vector3d& vec)
+void save(Archive& ar, const Eigen::Vector2d& vec)
 {
-    ar(vec[0], vec[1], vec[2]);
+    ar(vec.x(), vec.y());
 }
+
 template <class Archive>
-void serialize(Archive& ar, Eigen::Vector2d& vec)
+void save(Archive& ar, const Eigen::Vector3d& vec)
 {
-    ar(vec[0], vec[1]);
+    ar(vec.x(), vec.y(), vec.z());
 }
 }
 class KillingAbcField : public IUnsteadField2D {
