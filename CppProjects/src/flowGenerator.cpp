@@ -13,7 +13,8 @@
 #include <fstream>
 #include <thread>
 
-// define execute policy
+// #define DISABLE_CPP_PARALLELISM
+//  define execute policy
 #if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
 auto policy = std::execution::seq;
 #else
@@ -28,7 +29,8 @@ const int Xdim = 64, Ydim = 64;
 const int LicImageSize = 64;
 Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
-const int unsteadyFieldTimeStep = 16;
+const int unsteadyFieldTimeStep = 32;
+const int LicSaveFrequency = 2; // every 2 time steps save one
 
 // Function to save the 2D vector as a PNG image
 void saveAsPNG(const std::vector<std::vector<Eigen::Vector3d>>& data, const std::string& filename)
@@ -281,6 +283,13 @@ LICAlgorithm_UnsteadyField(const std::vector<std::vector<double>>& texture,
     });
     return resultData;
 }
+struct pair_hash {
+    template <class T1, class T2>
+    std::size_t operator()(const std::pair<T1, T2>& pair) const
+    {
+        return std::hash<T1>()(pair.first) ^ std::hash<T2>()(pair.second);
+    }
+};
 
 std::vector<std::pair<double, int>> generateNParamters(int n)
 {
@@ -288,21 +297,30 @@ std::vector<std::pair<double, int>> generateNParamters(int n)
         { 1.0, 2 },
         { 1.0, 2 },
         { 1.0, 3 },
-        { 1.0, 10 },
+        { 1.0, 5 },
         { 2.0, 1 },
         { 2.0, 2 },
         { 2.0, 2 },
         { 2.0, 3 },
-        { 2.0, 10 },
+        { 2.0, 5 },
     };
+
+    std::unordered_set<std::pair<double, int>, pair_hash> unique_params(parameters.begin(), parameters.end());
+
+    std::random_device rd;
+    std::mt19937 rng(rd());
     std::normal_distribution<double> dist_rc(1.87, 0.37); // mean = 1.87, stddev = 0.37
     std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
 
-    int m = parameters.size();
-    for (int i = m; i < n; ++i) {
+    while (parameters.size() < n) {
         double rc = dist_rc(rng);
-        int n = dist_n(rng);
-        parameters.emplace_back(rc, n);
+        int nr = static_cast<int>(round(dist_n(rng)));
+        std::pair<double, int> new_pair = { rc, nr };
+
+        if (unique_params.find(new_pair) == unique_params.end()) {
+            parameters.emplace_back(new_pair);
+            unique_params.insert(new_pair);
+        }
     }
 
     return parameters;
@@ -1025,12 +1043,18 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     std::normal_distribution<double> genTheta(0.0, 1.0);
     std::normal_distribution<double> genSx(0.0, 2.0);
 
+    // this generate coreline's point(critial point) for vortex region
+    std::normal_distribution<double> genTx(0.0, 0.59);
+
+    // Distribution for selecting type
+    std::uniform_int_distribution<int> dist_Observer_type(0, 5);
+    std::uniform_int_distribution<int> dist_int(0, 2);
+
     for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, int>& params) {
         const double rc = params.first;
         const double n = params.second;
 
         VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
-        std::uniform_int_distribution<int> dist_int(0, 2);
 
         printf("generate %d sample for rc=%f , n=%f \n", numVelocityFields, rc, n);
 
@@ -1057,19 +1081,30 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             //    const auto dx = 0;
             //    const auto dy = 0;
             //    // auto resData = generator.generateSteadyV2(cx, cy, dx, dy, tx, ty);
+            /*   auto tx = genTx(rng);
+               auto ty = genTx(rng);
+
+                   // clamp tx ty to 0.5*domian
+            tx = std::clamp(tx, 0.75 * domainMinBoundary.x(), 0.75 * domainMaxBoundary.x());
+            ty = std::clamp(ty, 0.75 * domainMinBoundary.y(), 0.75 * domainMaxBoundary.y());
+*/
             //}
 
             // generate steady field with vortex
             const auto theta = genTheta(rng);
             const auto sx = 1 - 0.5f * genSx(rng);
             const auto sy = 1 - 0.5f * genSx(rng);
+
             int Si = dist_int(rng);
             Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
             auto resData = generator.generateSteady(sx, sy, theta, Si);
 
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
 
-                const string sample_tag_name = "rc_" + to_string(rc) + "_n_" + to_string(n) + "_sample_" + to_string(sample) + "Observer_" + to_string(observerIndex);
+                // Randomly select a type
+                int type = dist_Observer_type(rng);
+                type = ObserverType::ConstantTranslation;
+                const string sample_tag_name = "rc_" + to_string(rc) + "_n_" + to_string(n) + "_sample_" + to_string(sample) + "observer_" + to_string(observerIndex) + "type_" + to_string(type);
 
                 // create folder for every n rc parameter setting.
 
@@ -1091,8 +1126,11 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 cereal::BinaryOutputArchive archive_Binary(outBin);
                 const std::vector<float> rawData = flatten2DAs1Dfloat(resData);
                 auto [minV, maxV] = computeMinMax(rawData);
-                auto func = KillingComponentFunctionFactory::randomObserver();
+
+                auto func = KillingComponentFunctionFactory::randomObserver(type);
+
                 auto inv_func = KillingComponentFunctionFactory::getInverseObserver(func);
+
                 KillingAbcField observerfieldDeform(
                     func, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
 
@@ -1116,6 +1154,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     archive_o(CEREAL_NVP(minV));
                     archive_o(CEREAL_NVP(maxV));
                     // meta for observer field
+                    archive_o(cereal::make_nvp("Observer Type", type));
                     archive_o(CEREAL_NVP(observerfieldDeform));
                 }
 
@@ -1141,11 +1180,28 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     auto unsteady_field = killingABCtransformation(observerfieldDeform, StartPosition, steadyField);
                     // reconstruct unsteady field from observer field
                     auto reconstruct_field = killingABCtransformation(observerfield, StartPosition, unsteady_field);
+                    // #if _DEBUG
+
+                    for (size_t rec = 1; rec < reconstruct_field.field.size() - 1; rec++) {
+                        auto reconstruct_slice = reconstruct_field.field[rec];
+                        // compute reconstruct slice difference with steady field
+                        double diffSum = 0.0;
+                        for (size_t y = 1; y < Ydim - 1; y++)
+                            for (size_t x = 1; x < Xdim - 1; x++) {
+                                auto diff = reconstruct_slice[y][x] - resData[y][x];
+                                diffSum += diff.norm();
+                            }
+                        // has debug, major reson for reconstruction failure is velocity too big make observer transformation query value from region out of boundary
+                        if (diffSum > (Xdim - 2) * (Ydim - 2) * 0.05) {
+                            printf("reconstruct field not equal to steady field at step %u,check is velocity too big make observer out of boundary\n", rec);
+                        }
+                    }
+                    // #endif
 
                     auto outputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
                     auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(licNoisetexture, reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
 
-                    for (size_t i = 0; i < outputTextures.size(); i++) {
+                    for (size_t i = 0; i < outputTextures.size(); i += LicSaveFrequency) {
                         string tag_name = sample_tag_name + "killing_deformed_" + std::to_string(i);
                         string licFilename = task_licfolder + tag_name + "lic.png";
                         saveAsPNG(outputTextures[i], licFilename);
@@ -1154,7 +1210,6 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                         string licFilename_rec = task_licfolder + tag_name_rec + "lic.png";
                         saveAsPNG(outputTexturesReconstruct[i], licFilename_rec);
                     }
-
                     auto rawUnsteadyFieldData = flatten3DAs1Dfloat(unsteady_field.field);
                     // write raw data
                     // ar(make_size_tag(static_cast<size_type=uint64>(vector.size()))); // number of elements

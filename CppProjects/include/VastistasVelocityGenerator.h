@@ -104,16 +104,20 @@ public:
         double floatIndicesT = (t - tmin) * inverse_grid_interval_t;
 
         // Trilinear interpolation
-        int x0 = std::clamp(static_cast<int>(std::floor(floatIndicesX)), 0, static_cast<int>(field[0][0].size() - 1));
-        int x1 = std::clamp(x0 + 1, 0, static_cast<int>(field[0][0].size() - 1));
-        int y0 = std::clamp(static_cast<int>(std::floor(floatIndicesY)), 0, static_cast<int>(field[0].size() - 1));
-        int y1 = std::clamp(y0 + 1, 0, static_cast<int>(field[0].size() - 1));
-        int t0 = std::clamp(static_cast<int>(std::floor(floatIndicesT)), 0, static_cast<int>(field.size() - 1));
-        int t1 = std::clamp(t0 + 1, 0, static_cast<int>(field.size() - 1));
+        auto floorX = static_cast<int>(std::floor(floatIndicesX));
+        auto floorY = static_cast<int>(std::floor(floatIndicesY));
+        auto floorT = static_cast<int>(std::floor(floatIndicesT));
+        // if tx is bigger than one need to clamp
+        double tx = floatIndicesX - floorX;
+        double ty = floatIndicesY - floorY;
+        double tt = floatIndicesT - floorT;
 
-        double tx = floatIndicesX - x0;
-        double ty = floatIndicesY - y0;
-        double tt = floatIndicesT - t0;
+        int x0 = std::clamp(floorX, 0, static_cast<int>(field[0][0].size() - 1));
+        int x1 = std::clamp(floorX + 1, 0, static_cast<int>(field[0][0].size() - 1));
+        int y0 = std::clamp(floorY, 0, static_cast<int>(field[0].size() - 1));
+        int y1 = std::clamp(floorY + 1, 0, static_cast<int>(field[0].size() - 1));
+        int t0 = std::clamp(floorT, 0, static_cast<int>(field.size() - 1));
+        int t1 = std::clamp(floorT + 1, 0, static_cast<int>(field.size() - 1));
 
         const auto& c000 = field[t0][y0][x0];
         const auto& c100 = field[t0][y0][x1];
@@ -270,6 +274,7 @@ public:
     // generate a deformed steady velocity slice  following the paper: Vortex Boundary Identification using Convolutional Neural Network
     velocityFieldData generateSteady(double sx, double sy, double theta, int Si) const noexcept;
 
+    velocityFieldData generateSteady(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept;
     // generate a deformed Unsteady velocity slice  following the paper: Robust Reference Frame Extraction from Unsteady 2D Vector
     // Fields with Convolutional Neural Networks
 

@@ -43,16 +43,36 @@ velocityFieldData VastistasVelocityGenerator::generateSteady(double sx, double s
             auto xy = getPosition(j, i);
 
             const double r = xy.norm();
-            const double v0 = NormalizedVastistasV0(r);
+            const double vastis = NormalizedVastistasV0(r);
 
             /*const double vp_row0 = SiMat22[0] * xy * v0;
             const double vp_row1 = SiMat22[1] * xy * v0;*/
             auto vp = SiMat22 * xy;
+            data_[i][j] = vp * vastis;
+        }
+    return data_;
+}
+velocityFieldData VastistasVelocityGenerator::generateSteady(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept
+{
+
+    std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d { 0.0, 0.0 }));
+
+    /*  const auto SiMat22 = SiMatices_[Si];*/
+    const auto SiMat22 = SiMatices_[Si];
+    const Eigen::Vector2d critial_point = { tx, ty };
+    for (size_t i = 0; i < mgridDim_y; i++)
+        for (size_t j = 0; j < mgridDim_x; j++) {
+            auto xy = getPosition(j, i);
+            Eigen::Vector2d xy_txy = xy - critial_point;
+            const double vastis = NormalizedVastistasV0(xy_txy.norm());
+
+            /*const double vp_row0 = SiMat22[0] * xy * v0;
+            const double vp_row1 = SiMat22[1] * xy * v0;*/
+            auto vp = SiMat22 * xy_txy * vastis;
             data_[i][j] = vp;
         }
     return data_;
 }
-
 velocityFieldData VastistasVelocityGenerator::generateSteadyV2(double cx, double cy, double dx, double dy, double tx, double ty) const noexcept
 {
     std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d { 0.0, 0.0 }));

@@ -4,6 +4,17 @@
 #include <iostream>
 #include <random>
 #include <vector>
+// Enum for observer function types
+enum ObserverType {
+    ConstantTranslation = 0,
+    ConstantRotation,
+    ConstantAccRotation,
+    ConstantAccTranslation,
+    ConstantAccTranslationRotation,
+    Curve,
+    CombinedConstantTranslationRotation,
+    NumTypes // This should always be the last entry
+};
 struct KillingComponentFunctionFactory {
 
     static std::function<Eigen::Vector3d(double)> getInverseObserver(const std::function<Eigen::Vector3d(double)>& funcA)
@@ -13,47 +24,56 @@ struct KillingComponentFunctionFactory {
         };
     }
 
-    static std::function<Eigen::Vector3d(double)> randomObserver()
+    static std::function<Eigen::Vector3d(double)> randomObserver(int itype)
     {
         // Random device and generator
         std::random_device rd;
         std::mt19937 gen(rd());
 
-        // Distribution for selecting type
-        std::uniform_int_distribution<int> dist_type(0, 5);
-
         // Gaussian distributions for generating parameters
-        std::normal_distribution<double> dist_speed(0.0, 0.5);
-        std::normal_distribution<double> dist_acc(0.0, 0.2);
-        std::normal_distribution<double> dist_rot(0.0, 0.2);
-
-        // Randomly select a type
-        int type = dist_type(gen);
+        std::normal_distribution<double> dist_speed(0.0, 0.25);
+        std::normal_distribution<double> dist_acc(0.0, 0.1);
+        std::normal_distribution<double> dist_rot(0.0, 0.1);
 
         // Randomly generate parameters
         int direction = std::uniform_int_distribution<int>(0, 1)(gen);
         double scale = dist_speed(gen);
         double acc = dist_acc(gen);
         double rot = dist_rot(gen);
-
+        ObserverType type = static_cast<ObserverType>(itype);
         // Return the corresponding function
         switch (type) {
-        case 0:
+        case ConstantTranslation:
             return constantTranslation(direction, scale);
-        case 1:
+        case ConstantAccTranslation:
             return constantAccTranslation(direction, acc);
-        case 2:
+        case CombinedConstantTranslationRotation:
             return combinedconstantTranslationRotation(direction, scale, rot);
-        case 3:
+        case ConstantRotation:
             return constantRotation(scale);
-        case 4:
+        case ConstantAccRotation:
             return constantAccRotation(acc);
-        case 5:
+        case ConstantAccTranslationRotation:
             return constantAccTranslationRotation(direction, acc, rot);
+        case Curve:
+            return SinCurveObserver(direction);
         default:
             return constantTranslation(0, scale); // default case, should never hit
         }
     }
+
+    // constant translation velocity(killing  a or b), acc =0.
+    static std::function<Eigen::Vector3d(double)> SinCurveObserver(int direction)
+    {
+        return [=](double t) {
+            double scale = 0.2 * sin(t);
+            if (direction == 0) {
+                return Eigen::Vector3d(scale, 0, 0);
+            } else
+                return Eigen::Vector3d(0, scale, 0);
+        };
+    }
+
     // constant translation velocity(killing  a or b), acc =0.
     static std::function<Eigen::Vector3d(double)> constantTranslation(int direction, double scale)
     {
@@ -103,12 +123,12 @@ struct KillingComponentFunctionFactory {
     static std::function<Eigen::Vector3d(double)> constantAccTranslationRotation(int direction, double transACc, double rotAcc)
     {
         return [=](double t) {
-            auto velocityAcc = transACc * t;
-            auto rotAcc = transACc * t;
+            auto velocity = transACc * t;
+            auto rot = rotAcc * t;
             if (direction == 0) {
-                return Eigen::Vector3d(velocityAcc, 0, rotAcc);
+                return Eigen::Vector3d(velocity, 0, rot);
             } else
-                return Eigen::Vector3d(0, velocityAcc, rotAcc);
+                return Eigen::Vector3d(0, velocity, rot);
         };
     }
 };
