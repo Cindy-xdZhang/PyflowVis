@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from VectorField2d import VectorField2D
+from FLowUtils.VectorField2d import UnsteadyVectorField2D
 #! TODO (s) of PyFLowVis
 #? - [x]  create time-dependent 2d vector field save data as np.ndarray
 #? - [ ]  TODO: create linear operations for 2d vector field
@@ -57,11 +57,31 @@ class VortexClassifier(nn.Module):
 
 
 
+
+
+
 def train_pipeline(INputFieldV,args):
+    #! TODO (s) of PyFLowVis
+    #! TODO (s) of PyFLowVis
+    #! TODO (s) of PyFLowVis    
+    #! TODO (s) of PyFLowVis    
+    #! todo: load unsteady data from cpp generated binary file [DONE]
+    #! todo: create torch dataset   [DONE]
+    #! todo: what is the label? ->fist stage the reference frame: a(t),b(t),c(t)  [DONE]
+    #! todo: DEFINE THE cnn MODEL:   NET0: VORETXNET, NET1: VORETXsegNET, NET3: RESNET
+    #! todo: what is the label? ->second stage the segmentation of as steady as possible (asap) field.
+    #! todo: visualize the model's output: classification of vortex bondary+ coreline  in 3d space (2d space+ 1D time)
+    #! todo:test the model's with RFC, bossineq, helix, spriral motion
+    return None
+
+
+
+
+def ObserverFieldOptimization(INputFieldV,args):
 
     time_steps,Ydim,Xdim = INputFieldV.time_steps,INputFieldV.Ydim,INputFieldV.Xdim
-    # Create an instance of VectorField2D
-    vector_field = VectorField2D(Xdim, Ydim, time_steps)
+    # Create an instance of UnsteadyVectorField2D
+    vector_field = UnsteadyVectorField2D(Xdim, Ydim, time_steps)
     vector_field.to(args['device'])
     INputFieldV.to(args['device'])
     # Training setup
@@ -81,6 +101,17 @@ def train_pipeline(INputFieldV,args):
     vector_field.to('cpu')
     INputFieldV.to('cpu')
     return vector_field
+
+
+
+
+
+
+
+
+
+
+
 
 
 

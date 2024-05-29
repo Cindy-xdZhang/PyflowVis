@@ -102,9 +102,7 @@ class SteadyVectorField2D():
         self.domainMaxBoundary=domainMaxBoundary
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
 
-    
-
-class VectorField2D(nn.Module):
+class UnsteadyVectorField2DNp():
     def __init__(self, Xdim:int, Ydim:int, time_steps,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2*np.pi]):
         """_summary_
 
@@ -115,7 +113,39 @@ class VectorField2D(nn.Module):
             domainMinBoundary (list, optional): [xmin, ymin,tmin]. Defaults to [-2.0,-2.0,0.0].
             domainMaxBoundary (list, optional): [xmax, ymax,tmax]. Defaults to [2.0,2.0,2*np.pi].
         """
-        super(VectorField2D, self).__init__()
+        # super(UnsteadyVectorField2DNp, self).__init__()
+        self.Xdim= Xdim
+        self.Ydim = Ydim
+        self.time_steps = time_steps
+        # Initialize the vector field parameters with random values, considering the time dimension
+        self.field = np.zeros( (time_steps,Ydim,Xdim,2),np.float32)
+        self.domainMinBoundary=domainMinBoundary
+        self.domainMaxBoundary=domainMaxBoundary
+        self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
+        self.timeInterval = (domainMaxBoundary[2]-domainMinBoundary[2])/(time_steps-1)
+
+    def getSlice(self, timeSlice) :
+        # steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary[0:2],self.domainMaxBoundary[0:2])
+        steadyVectorField2D=self.field[timeSlice,:,:,:]
+        return steadyVectorField2D
+    
+    def getSlice(self,sliceStart,sliceEnd) :        
+        VectorField2Dfield=self.field[sliceStart:sliceEnd,:,:,:]
+        return VectorField2Dfield
+
+
+class UnsteadyVectorField2D(nn.Module):
+    def __init__(self, Xdim:int, Ydim:int, time_steps,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2*np.pi]):
+        """_summary_
+
+        Args:
+            Xdim (_type_): _description_
+            Ydim (_type_): _description_
+            time_steps (_type_): _description_
+            domainMinBoundary (list, optional): [xmin, ymin,tmin]. Defaults to [-2.0,-2.0,0.0].
+            domainMaxBoundary (list, optional): [xmax, ymax,tmax]. Defaults to [2.0,2.0,2*np.pi].
+        """
+        super(UnsteadyVectorField2D, self).__init__()
         self.Xdim= Xdim
         self.Ydim = Ydim
         self.time_steps = time_steps
@@ -140,11 +170,11 @@ class VectorField2D(nn.Module):
         return killingEnergy+magnitudeR
     
     # Cereal serialization and deserialization functions
-    def serialize(self, archive):
-        archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
+    # def serialize(self, archive):
+    #     archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
 
-    def deserialize(self, archive):
-        archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
+    # def deserialize(self, archive):
+    #     archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
         
 
 

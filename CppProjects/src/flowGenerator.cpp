@@ -980,24 +980,30 @@ void testKillingTransformationForRFC()
     }
 }
 
-void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inputLicImage, const SteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn)
+void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inputLicImage, const SteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn, const Eigen::Vector2d& txy)
 {
     // if si=0 then no vortex
     if (meta_n_rc_si.z() == 0.0) {
         return;
     }
     const auto rc = meta_n_rc_si(1);
-    auto judgeVortex = [rc](const Eigen::Vector2d& pos) -> bool {
-        return pos.norm() < rc;
+    auto judgeVortex = [rc, txy](const Eigen::Vector2d& pos) -> bool {
+        Eigen::Vector2d center = { txy(0), txy(1) };
+        auto radius = (pos - center).norm();
+        return radius < rc;
     };
     const int licImageSizeY = inputLicImage.size();
     const int licImageSizeX = inputLicImage[0].size();
     const auto domainRange = domainMax - domainMIn;
+    const auto dx = domainRange(0) / licImageSizeX;
+    const auto dy = domainRange(1) / licImageSizeY;
+    const auto maxDistanceAnyPoint2gridPoints = sqrt((0.5 * dx) * (0.5 * dx) + (0.5 * dy) * (0.5 * dy));
+
     for (size_t i = 0; i < licImageSizeX; i++) {
         for (size_t j = 0; j < licImageSizeY; j++) {
             // map position from texture image grid coordinate to vector field
-            double ratio_x = (double)((double)j / (double)licImageSizeX);
-            double ratio_y = (double)((double)i / (double)licImageSizeY);
+            double ratio_x = (double)((double)i / (double)licImageSizeX);
+            double ratio_y = (double)((double)j / (double)licImageSizeY);
 
             // Trace forward
             // physicalPositionInVectorfield
@@ -1005,15 +1011,16 @@ void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inp
                 ratio_y * domainRange(1) + domainMIn(1) };
 
             if (judgeVortex(pos)) {
-                auto preColor = inputLicImage[i][j];
+                auto preColor = inputLicImage[j][i];
                 // red for critial point(coreline)
                 auto velocity = vectorField.getVector(pos.x(), pos.y());
-                if (velocity.norm() < 1e-12)
+                // !note: because txy is random core line center, then critical point==txy(velocity ==0.0) might not  lie on any grid points
+                if (velocity.norm() < 1e-7 || (pos - txy).norm() < maxDistanceAnyPoint2gridPoints)
                     [[unlikely]] {
-                    inputLicImage[i][j] = 0.5 * preColor + 0.5 * Eigen::Vector3d(1.0, 0.0, 0.0);
+                    inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 0.0, 0.0);
                 } else {
                     // yellow for vortex region
-                    inputLicImage[i][j] = 0.5 * preColor + 0.5 * Eigen::Vector3d(1.0, 1.0, 0.0);
+                    inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 1.0, 0.0);
                 }
             }
         }
@@ -1053,13 +1060,19 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, int>& params) {
         const double rc = params.first;
         const double n = params.second;
+        std::string str_Rc = std::to_string(rc);
+        str_Rc.erase(str_Rc.find_last_not_of('0') + 1, std::string::npos);
+        str_Rc.erase(str_Rc.find_last_not_of('.') + 1, std::string::npos);
+        std::string str_n = std::to_string(n);
+        str_n.erase(str_n.find_last_not_of('0') + 1, std::string::npos);
+        str_n.erase(str_n.find_last_not_of('.') + 1, std::string::npos);
 
         VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
 
         printf("generate %d sample for rc=%f , n=%f \n", numVelocityFields, rc, n);
 
-        const string Major_task_foldername = "velocity_rc_" + to_string(rc) + "n_" + to_string(n) + "/";
-        const string Major_task_Licfoldername = "velocity_rc_" + to_string(rc) + "n_" + to_string(n) + "/LIC/";
+        const string Major_task_foldername = "velocity_rc_" + str_Rc + "n_" + str_n + "/";
+        const string Major_task_Licfoldername = Major_task_foldername + "/LIC/";
         std::string task_folder = root_folder + Major_task_foldername;
         if (!filesystem::exists(task_folder)) {
             filesystem::create_directories(task_folder);
@@ -1081,30 +1094,30 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             //    const auto dx = 0;
             //    const auto dy = 0;
             //    // auto resData = generator.generateSteadyV2(cx, cy, dx, dy, tx, ty);
-            /*   auto tx = genTx(rng);
-               auto ty = genTx(rng);
 
-                   // clamp tx ty to 0.5*domian
-            tx = std::clamp(tx, 0.75 * domainMinBoundary.x(), 0.75 * domainMaxBoundary.x());
-            ty = std::clamp(ty, 0.75 * domainMinBoundary.y(), 0.75 * domainMaxBoundary.y());
-*/
             //}
 
             // generate steady field with vortex
             const auto theta = genTheta(rng);
-            const auto sx = 1 - 0.5f * genSx(rng);
-            const auto sy = 1 - 0.5f * genSx(rng);
+            const auto sx = 0.5f * genSx(rng);
+            const auto sy = 0.5f * genSx(rng);
+            auto tx = genTx(rng);
+            auto ty = genTx(rng);
+            // clamp tx ty to 0.5*domian
+            tx = std::clamp(tx, 0.5 * domainMinBoundary.x(), 0.5 * domainMaxBoundary.x());
+            ty = std::clamp(ty, 0.5 * domainMinBoundary.y(), 0.5 * domainMaxBoundary.y());
+            Eigen::Vector2d txy = { tx, ty };
 
             int Si = dist_int(rng);
             Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
-            auto resData = generator.generateSteady(sx, sy, theta, Si);
+            auto resData = generator.generateSteady(tx, ty, sx, sy, theta, Si);
 
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
 
                 // Randomly select a type
                 int type = dist_Observer_type(rng);
-                type = ObserverType::ConstantTranslation;
-                const string sample_tag_name = "rc_" + to_string(rc) + "_n_" + to_string(n) + "_sample_" + to_string(sample) + "observer_" + to_string(observerIndex) + "type_" + to_string(type);
+
+                const string sample_tag_name = "rc_" + str_Rc + "_n_" + str_n + "_sample_" + to_string(sample) + "Si_" + to_string(Si) + "observer_" + to_string(observerIndex) + "type_" + to_string(type);
 
                 // create folder for every n rc parameter setting.
 
@@ -1147,7 +1160,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     Eigen::Vector3d deform = { theta, sx, sy };
                     archive_o(cereal::make_nvp("n_rc_Si", n_rc_si));
                     archive_o(cereal::make_nvp("deform_theta_sx_sy", deform));
-                    // archive_o(CEREAL_NVP(rc));
+                    archive_o(cereal::make_nvp("txy", txy));
                     // archive_o(CEREAL_NVP(theta));
                     // archive_o(CEREAL_NVP(sx));
                     // archive_o(CEREAL_NVP(sy));
@@ -1171,7 +1184,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     };
                     auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     // add segmentation visualization for steady lic
-                    addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary);
+                    addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy);
                     string steadyField_name = "steady_beforeTransformation_";
                     string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
                     saveAsPNG(outputSteadyTexture, licFilename0);

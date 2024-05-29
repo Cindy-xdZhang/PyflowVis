@@ -1,10 +1,10 @@
 from VisualizationEngine import *
 from train_vector_field import *
-from flowCreator import *
+from AnalyticalFlowCreator import *
 from config.LoadConfig import load_config
 from VertexArrayObject import *
 from shaderManager import *
-from VectorField2d import *
+from FLowUtils.VectorField2d import *
 from NLPCommand import *
 from  PlanarManifold import *
 
@@ -164,7 +164,7 @@ def main():
     
     vectorField2d= rotation_four_center((32,32),32)
     actFieldWidget.insertField("rfc",vectorField2d)
-    # resUfield=train_pipeline(vectorField2d,args)
+    # resUfield=ObserverFieldOptimization(vectorField2d,args)
     # actFieldWidget.insertField("Result field",resUfield)
     # circle=VertexArrayObject("Cone")
     # circle.appendConeWithoutCommit(np.array([0,-1,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32), 0.5, 2, 32)

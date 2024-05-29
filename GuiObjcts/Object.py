@@ -6,7 +6,7 @@ from typing import Dict, Any
 from typeguard import typechecked
 import logging
 from .ObjectGUIReflection import *
-from functools import lru_cache
+# from functools import lru_cache
 import hashlib
 
 def singleton(cls):

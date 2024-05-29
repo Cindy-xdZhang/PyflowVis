@@ -1,5 +1,5 @@
 from   .Object import *
-from  VectorField2d import *
+from  FLowUtils.VectorField2d import *
 import pygame
 
 class LICRender(Object):

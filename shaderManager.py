@@ -2,7 +2,8 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 import OpenGL.GL as gl
 import pygame
-from fileMonitor import FileMonitor
+from FLowUtils.fileMonitor import FileMonitor
+from FLowUtils.ImageLoader import ImageLoader
 from GuiObjcts.Object import Object,singleton
 import glm
 import logging
@@ -24,7 +25,7 @@ def create_texture(image_data,data_type=gl.GL_RGB):
 
 #! todo: scalar field &color map
 def load_images_from_folder(folder_path,extension="png"):
-    from ImageLoader import ImageLoader
+
     globalImageLoader=ImageLoader()
     image_dict = {}
     for filename in os.listdir(folder_path):
