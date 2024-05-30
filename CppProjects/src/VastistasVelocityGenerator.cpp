@@ -7,14 +7,16 @@ VastistasVelocityGenerator::VastistasVelocityGenerator(int Xdim, int Ydim, Eigen
     , mgridDim_y(Ydim)
     , rc(rc)
     , n(n)
-    , xmin(minBondary(0))
-    , ymin(minBondary(1))
-    , xmax(maxBondary(0))
-    , ymax(maxBondary(1))
+    , domainBoundaryMin(minBondary)
+    , domainBoundaryMax(maxBondary)
 {
-
-    gridIntervalX = (xmax - xmin) / (Xdim - 1);
-    gridIntervalY = (ymax - ymin) / (Ydim - 1);
+    const auto xmin = minBondary(0);
+    const auto ymin = minBondary(1);
+    const auto xmax = maxBondary(0);
+    const auto ymax = maxBondary(1);
+    const double gridIntervalX = (xmax - xmin) / (Xdim - 1);
+    const double gridIntervalY = (ymax - ymin) / (Ydim - 1);
+    spatialGridInterval = { gridIntervalX, gridIntervalY };
     // S1
     SiMatices_[0] << 1.0, 0.0, 0.0, -1.0;
     /*SiMatices_[0].row(0) = Eigen::RowVector2f{ 1.0f, 0.0f };
@@ -52,7 +54,7 @@ velocityFieldData VastistasVelocityGenerator::generateSteady(double sx, double s
         }
     return data_;
 }
-velocityFieldData VastistasVelocityGenerator::generateSteady(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept
+SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept
 {
 
     std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d { 0.0, 0.0 }));
@@ -71,7 +73,22 @@ velocityFieldData VastistasVelocityGenerator::generateSteady(double tx, double t
             auto vp = SiMat22 * xy_txy * vastis;
             data_[i][j] = vp;
         }
-    return data_;
+    Eigen::Vector2i XdimYdim = { mgridDim_x, mgridDim_y };
+    SteadyVectorField2D steadyField {
+        std::move(data_),
+        this->domainBoundaryMin,
+        this->domainBoundaryMax,
+        this->spatialGridInterval,
+        XdimYdim
+    };
+    steadyField.analyticalFlowfunc_ = [this, SiMat22, critial_point](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+        Eigen::Vector2d xy_txy = pos - critial_point;
+        const double vastis = NormalizedVastistasV0(xy_txy.norm());
+        auto vp = SiMat22 * xy_txy * vastis;
+        return vp;
+    };
+
+    return steadyField;
 }
 velocityFieldData VastistasVelocityGenerator::generateSteadyV2(double cx, double cy, double dx, double dy, double tx, double ty) const noexcept
 {

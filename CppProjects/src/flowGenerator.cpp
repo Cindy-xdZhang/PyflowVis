@@ -291,21 +291,19 @@ struct pair_hash {
     }
 };
 
-std::vector<std::pair<double, int>> generateNParamters(int n)
+std::vector<std::pair<double, double>> generateNParamters(int n)
 {
-    std::vector<std::pair<double, int>> parameters = {
-        { 1.0, 2 },
-        { 1.0, 2 },
-        { 1.0, 3 },
-        { 1.0, 5 },
-        { 2.0, 1 },
-        { 2.0, 2 },
-        { 2.0, 2 },
-        { 2.0, 3 },
-        { 2.0, 5 },
+    std::vector<std::pair<double, double>> parameters = {
+        { 1.0, 2.0 },
+        { 1.0, 3.0 },
+        { 1.0, 5.0 },
+        { 2.0, 1.0 },
+        { 2.0, 2.0 },
+        { 2.0, 3.0 },
+        { 2.0, 5.0 },
     };
 
-    std::unordered_set<std::pair<double, int>, pair_hash> unique_params(parameters.begin(), parameters.end());
+    std::unordered_set<std::pair<double, double>, pair_hash> unique_params(parameters.begin(), parameters.end());
 
     std::random_device rd;
     std::mt19937 rng(rd());
@@ -314,8 +312,8 @@ std::vector<std::pair<double, int>> generateNParamters(int n)
 
     while (parameters.size() < n) {
         double rc = dist_rc(rng);
-        int nr = static_cast<int>(round(dist_n(rng)));
-        std::pair<double, int> new_pair = { rc, nr };
+        double n = static_cast<double>(dist_n(rng));
+        std::pair<double, double> new_pair = { rc, n };
 
         if (unique_params.find(new_pair) == unique_params.end()) {
             parameters.emplace_back(new_pair);
@@ -670,72 +668,110 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
     resultField.spatialDomainMaxBoundary = inputField.spatialDomainMaxBoundary;
     resultField.spatialDomainMinBoundary = inputField.spatialDomainMinBoundary;
     resultField.spatialGridInterval = inputField.spatialGridInterval;
+    resultField.XdimYdim = inputField.XdimYdim;
     resultField.tmin = tmin;
     resultField.tmax = tmax;
     resultField.timeSteps = timestep;
     resultField.field.resize(timestep);
 
-    if constexpr (std::is_same_v<inputFieldType, UnSteadyVectorField2D>) {
-        assert(inputField.field.size() == timestep);
-        for (size_t i = 0; i < timestep; i++) {
-            // time slice i
-            resultField.field[i].resize(inputField.field[i].size());
-            const Eigen::Vector2d u = pathVelocitys[i];
-            const double physical_t_this_slice = tmin + i * dt;
-            for (size_t j = 0; j < inputField.field[i].size(); j++) {
-                // y slice
-                resultField.field[i][j].resize(inputField.field[i][j].size());
-                for (size_t k = 0; k < inputField.field[i][j].size(); k++) {
-                    // get position of this grid point
-                    Eigen::Vector4d pos_x = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
-                        j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f };
+    // if inputField has analytical expression v(x,t) then result field u  has transformatd analytical expression u(x,y)=   pushforward* v(x*,t) =Q(t)^T *v(x*,t)
+    if (inputField.analyticalFlowfunc_) {
+        resultField.analyticalFlowfunc_ = [inputField, dt, observerfield, transformationMatrices, rotationMatrices, pathVelocitys](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+            double tmin = observerfield.tmin;
 
-                    // observer under go transformation M, then bring transformation M^(-1): x*= Q(t)x+c(t)
-                    Eigen::Vector4d x_star_homo = transformationMatrices[i] * pos_x;
-                    x_star_homo /= x_star_homo(3);
-                    // get 2d position from 4d x_star
-                    Eigen::Vector2d x_star = { x_star_homo(0), x_star_homo(1) };
-                    // get v(x_star, t) from inputField by bilinear interpolation
-                    Eigen::Vector2d v = inputField.getVector(x_star, physical_t_this_slice);
+            const double floatingTimeStep = (t - tmin) / dt;
 
-                    Eigen::Vector3d vminus_lab_frame;
-                    vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
-                    // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
-                    //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
-                    Eigen::Vector3d vminus_observer_frame = rotationMatrices[i] * vminus_lab_frame;
-                    resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
+            const int timestep_floor = std::clamp((int)std::floor(floatingTimeStep), 0, observerfield.timeSteps - 1);
+
+            const int timestep_ceil = std::clamp((int)std::floor(floatingTimeStep) + 1, 0, observerfield.timeSteps - 1);
+
+            const double ratio = floatingTimeStep - timestep_floor;
+
+            const auto transformationMat = transformationMatrices[timestep_floor] * (1 - ratio) + transformationMatrices[timestep_ceil] * ratio;
+            const auto rotationMat = rotationMatrices[timestep_floor] * (1 - ratio) + rotationMatrices[timestep_ceil] * ratio;
+            const auto u = pathVelocitys[timestep_floor] * (1 - ratio) + pathVelocitys[timestep_ceil] * ratio;
+
+            Eigen::Vector4d pos_homo = { pos.x(), pos.y(), 0.0f, 1.0f };
+
+            Eigen::Vector4d x_star_homo = transformationMat * pos_homo;
+            x_star_homo /= x_star_homo(3);
+            // get 2d position from 4d x_star
+            Eigen::Vector2d x_star = { x_star_homo(0), x_star_homo(1) };
+            Eigen::Vector2d v = inputField.getVectorAnalytical(x_star, t);
+            Eigen::Vector3d vminusu_lab_frame;
+            vminusu_lab_frame << v(0) - u(0), v(1) - u(1), 0;
+            // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
+            //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
+            const auto vminus_observer_frame = rotationMat * vminusu_lab_frame;
+            Eigen::Vector2d retValue = { vminus_observer_frame(0), vminus_observer_frame(1) };
+            return retValue;
+        };
+
+        resultField.resampleFromAnalyticalExpression();
+
+    } else { // if no analytical expression
+
+        if constexpr (std::is_same_v<inputFieldType, UnSteadyVectorField2D>) {
+            for (size_t i = 0; i < timestep; i++) {
+                // time slice i
+                resultField.field[i].resize(inputField.field[i].size());
+                const Eigen::Vector2d u = pathVelocitys[i];
+                const double physical_t_this_slice = tmin + i * dt;
+                for (size_t j = 0; j < inputField.field[i].size(); j++) {
+                    // y slice
+                    resultField.field[i][j].resize(inputField.field[i][j].size());
+                    for (size_t k = 0; k < inputField.field[i][j].size(); k++) {
+                        // get position of this grid point
+                        Eigen::Vector4d pos_x = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
+                            j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f };
+
+                        // observer under go transformation M, then bring transformation M^(-1): x*= Q(t)x+c(t)
+                        Eigen::Vector4d x_star_homo = transformationMatrices[i] * pos_x;
+                        x_star_homo /= x_star_homo(3);
+                        // get 2d position from 4d x_star
+                        Eigen::Vector2d x_star = { x_star_homo(0), x_star_homo(1) };
+                        // get v(x_star, t) from inputField by bilinear interpolation
+                        Eigen::Vector2d v = inputField.getVector(x_star, physical_t_this_slice);
+
+                        Eigen::Vector3d vminus_lab_frame;
+                        vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
+                        // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
+                        //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
+                        Eigen::Vector3d vminus_observer_frame = rotationMatrices[i] * vminus_lab_frame;
+                        resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
+                    }
                 }
             }
-        }
-    } else {
+        } else {
 
-        for (size_t i = 0; i < timestep; i++) {
-            // time slice i
-            resultField.field[i].resize(inputField.field.size());
-            const Eigen::Vector2d u = pathVelocitys[i];
-            for (size_t j = 0; j < inputField.field.size(); j++) {
-                // y slice
-                resultField.field[i][j].resize(inputField.field[j].size());
-                for (size_t k = 0; k < inputField.field[j].size(); k++) {
+            for (size_t i = 0; i < timestep; i++) {
+                // time slice i
+                resultField.field[i].resize(inputField.field.size());
+                const Eigen::Vector2d u = pathVelocitys[i];
+                for (size_t j = 0; j < inputField.field.size(); j++) {
+                    // y slice
+                    resultField.field[i][j].resize(inputField.field[j].size());
+                    for (size_t k = 0; k < inputField.field[j].size(); k++) {
 
-                    // get position of this grid point
-                    Eigen::Vector4d pos_x = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
-                        j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f };
+                        // get position of this grid point
+                        Eigen::Vector4d pos_x = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
+                            j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f };
 
-                    // observer under go transformation M, then bring transformation M^(-1): x*= Q(t)x+c(t)
-                    Eigen::Vector4d x_star_homo = transformationMatrices[i] * pos_x;
-                    x_star_homo /= x_star_homo(3);
-                    // get 2d position from 4d x_star
-                    Eigen::Vector2d x_star = { x_star_homo(0), x_star_homo(1) };
-                    // get v(x_star, t) from inputField by bilinear interpolation
-                    Eigen::Vector2d v = inputField.getVector(x_star.x(), x_star.y());
+                        // observer under go transformation M, then bring transformation M^(-1): x*= Q(t)x+c(t)
+                        Eigen::Vector4d x_star_homo = transformationMatrices[i] * pos_x;
+                        x_star_homo /= x_star_homo(3);
+                        // get 2d position from 4d x_star
+                        Eigen::Vector2d x_star = { x_star_homo(0), x_star_homo(1) };
+                        // get v(x_star, t) from inputField by bilinear interpolation
+                        Eigen::Vector2d v = inputField.getVector(x_star);
 
-                    Eigen::Vector3d vminus_lab_frame;
-                    vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
-                    // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
-                    //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
-                    Eigen::Vector3d vminus_observer_frame = rotationMatrices[i] * vminus_lab_frame;
-                    resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
+                        Eigen::Vector3d vminus_lab_frame;
+                        vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
+                        // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
+                        //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
+                        Eigen::Vector3d vminus_observer_frame = rotationMatrices[i] * vminus_lab_frame;
+                        resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
+                    }
                 }
             }
         }
@@ -756,7 +792,7 @@ void generateSteadyField()
         (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
     };
 
-    const std::vector<std::pair<double, int>> paramters = generateNParamters(1);
+    const std::vector<std::pair<double, double>> paramters = generateNParamters(1);
     const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
 
     uniform_real_distribution<double> genTheta(-1.0, 1.0);
@@ -767,7 +803,7 @@ void generateSteadyField()
         filesystem::create_directories(root_folder);
     }
 
-    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, int>& params) {
+    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
         const double rc = params.first;
         const double n = params.second;
         const string task_name = "velocity_field_rc_" + to_string(rc) + "n_" + to_string(n);
@@ -1044,7 +1080,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
         (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
     };
 
-    const std::vector<std::pair<double, int>> paramters = generateNParamters(Nparamters);
+    const auto paramters = generateNParamters(Nparamters);
     const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
 
     std::normal_distribution<double> genTheta(0.0, 1.0);
@@ -1055,9 +1091,9 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
 
     // Distribution for selecting type
     std::uniform_int_distribution<int> dist_Observer_type(0, 5);
-    std::uniform_int_distribution<int> dist_int(0, 2);
+    std::uniform_int_distribution<int> dist_int(0, 4); // we prefer more si =1,2->generate 0,1,2,3,4->ceil(divide by two)
 
-    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, int>& params) {
+    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
         const double rc = params.first;
         const double n = params.second;
         std::string str_Rc = std::to_string(rc);
@@ -1108,10 +1144,10 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             ty = std::clamp(ty, 0.5 * domainMinBoundary.y(), 0.5 * domainMaxBoundary.y());
             Eigen::Vector2d txy = { tx, ty };
 
-            int Si = dist_int(rng);
+            int Si = std::clamp((int)std::ceil(dist_int(rng) / 2), 0, 2);
             Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
-            auto resData = generator.generateSteady(tx, ty, sx, sy, theta, Si);
-
+            const SteadyVectorField2D steadyField = generator.generateSteadyField(tx, ty, sx, sy, theta, Si);
+            const auto& resData = steadyField.field;
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
 
                 // Randomly select a type
@@ -1176,12 +1212,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
 
                 // rendering LIC
                 {
-                    SteadyVectorField2D steadyField {
-                        resData,
-                        domainMinBoundary,
-                        domainMaxBoundary,
-                        gridInterval
-                    };
+
                     auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     // add segmentation visualization for steady lic
                     addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy);
