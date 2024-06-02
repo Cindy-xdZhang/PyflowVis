@@ -9,8 +9,30 @@ network:
   output_size: 10
   activation: 'relu'
   
-training:
+
+  # test data loader:
+  #   # dataset: 'mnist' has this area if there are multiple datasets to select from
+  #   root: 'data/'
+  #   train: False
+  #   transform: 'ToTensor'
+
+training: 
+  dataset:
+      # datasetname: 'mnist'has this area if there are multiple datasets to select from
+      root: 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data'
+      train: True
+      transform: 'ToTensor'
+  # device: 'cuda'
+  device: 'cpu'
   optimizer: Adam
   learning_rate: 0.001
   epochs: 20
   loss_function: MSELoss
+  batch_size: 64
+  shuffle: True
+  num_workers: 0
+  pin_memory: False
+  log_interval: 100
+  save_model: True
+  save_model_path: 'models/'
+  

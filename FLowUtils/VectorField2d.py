@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import cereal
-import os
 
 class VectorFieldLinearOperation():
     """ the VectorFieldLinearOperation class implements linear operations on vector fields.
