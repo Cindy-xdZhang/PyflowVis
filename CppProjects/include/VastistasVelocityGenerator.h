@@ -238,7 +238,7 @@ public:
         assert(n > 1);
         assert(dt > 0.0);
         centerPos = { 0.0, 0.0 };
-        this->func_ = std::move(func);
+        this->func_ = func;
     }
     double dt;
     Eigen::Vector2d centerPos;

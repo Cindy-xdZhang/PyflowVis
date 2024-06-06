@@ -1,6 +1,22 @@
 ![alt text](assets/misc/image-1.png)
 
 
+# Flow generator & Reconstruct Field
+1.observe can have multiple types, but from analytical exprssion we can conclude:<font color=#FF000> successful reconstruct(cancel out) iff: observer is doing  rotation  only or  translation only.</font> 
+Given a vector field $v(x,t)$ deformed by an observer $w$ results in $u(x,t)$:
+$$
+u(x,t)=Q(t) v(x^*,t)=Q(t) v( T(Os+\int_0^t w(x,t)) *Q(t)^T*T(-Os) *x)
+$$
+if we use inverse function $-w(x,t)$ try to reconstruct( $R(t)= Q(t)^{-1}$ ):
+$$
+v^{rec}(x,t)= R(t)u(x*,t)=R(t)u( T(Os+\int_0^t -w(x,t)) *R(t)^t*T(-Os) *x,t)
+=R(t)* Q(t) * v(T(Os+\int_0^t -w(x,t)) *R(t)^T*T(-Os) *T(pt) *Q(t)^t*T(-Os) *x ,t)
+$$
+But reconstruction failure doesn't influence use killing observer $w$'s abc label to network.
+
+
+
+
 # Cpp 
 1.Write cpp functions in 'Cppmodules ' folder to export cpp functions to python(using pybind)
 2.For pure cpp program using visual studio etc., write it in  'CppProjects' folder.

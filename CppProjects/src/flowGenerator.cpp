@@ -20,6 +20,7 @@ auto policy = std::execution::seq;
 #else
 auto policy = std::execution::par_unseq;
 #endif
+
 std::mt19937 rng(static_cast<unsigned int>(std::time(0)));
 using namespace std;
 
@@ -662,6 +663,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
         transformationMatrices[i] = lastTransformation;
         rotationMatrices[i] = lastPushforward;
         pathVelocitys.emplace_back(0.0f, 0.0f);
+        // pathPositions.emplace_back(pathPositions.back());
     }
 
     UnSteadyVectorField2D resultField;
@@ -1090,7 +1092,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     std::normal_distribution<double> genTx(0.0, 0.59);
 
     // Distribution for selecting type
-    std::uniform_int_distribution<int> dist_Observer_type(0, 5);
+    std::uniform_int_distribution<int> dist_Observer_type(0, 3);
     std::uniform_int_distribution<int> dist_int(0, 4); // we prefer more si =1,2->generate 0,1,2,3,4->ceil(divide by two)
 
     for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
@@ -1116,6 +1118,21 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
         std::string task_licfolder = root_folder + Major_task_Licfoldername;
         if (!filesystem::exists(task_licfolder)) {
             filesystem::create_directories(task_licfolder);
+        }
+        // create Root meta json file, save plane information here instead of every sample's meta file
+        string taskFolder_rootMetaFilename = task_folder + "meta.json";
+        // save root meta info:
+        std::ofstream root_jsonOut(taskFolder_rootMetaFilename);
+        if (!root_jsonOut.good()) {
+            printf("couldn't open file: %s", taskFolder_rootMetaFilename.c_str());
+            return;
+        } else {
+
+            cereal::JSONOutputArchive archive_o(root_jsonOut);
+            archive_o(CEREAL_NVP(Xdim));
+            archive_o(CEREAL_NVP(Ydim));
+            archive_o(CEREAL_NVP(domainMinBoundary));
+            archive_o(CEREAL_NVP(domainMaxBoundary));
         }
 
         for (size_t sample = 0; sample < numVelocityFields; sample++) {
@@ -1155,7 +1172,8 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
 
                 const string sample_tag_name = "rc_" + str_Rc + "_n_" + str_n + "_sample_" + to_string(sample) + "Si_" + to_string(Si) + "observer_" + to_string(observerIndex) + "type_" + to_string(type);
 
-                // create folder for every n rc parameter setting.
+                // printf("generating sample %s \n", sample_tag_name.c_str());
+                //  create folder for every n rc parameter setting.
 
                 string metaFilename = task_folder + sample_tag_name + "meta.json";
                 string velocityFilename = task_folder + sample_tag_name + ".bin";
@@ -1176,7 +1194,8 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 const std::vector<float> rawData = flatten2DAs1Dfloat(resData);
                 auto [minV, maxV] = computeMinMax(rawData);
 
-                auto func = KillingComponentFunctionFactory::randomObserver(type);
+                // auto func = KillingComponentFunctionFactory::randomObserver(type);
+                auto func = KillingComponentFunctionFactory::combinedconstantTranslationRotation(0, 1.0, 0.1);
 
                 auto inv_func = KillingComponentFunctionFactory::getInverseObserver(func);
 
@@ -1188,10 +1207,10 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
 
                 {
                     cereal::JSONOutputArchive archive_o(jsonOut);
-                    archive_o(CEREAL_NVP(Xdim));
-                    archive_o(CEREAL_NVP(Ydim));
-                    archive_o(CEREAL_NVP(domainMinBoundary));
-                    archive_o(CEREAL_NVP(domainMaxBoundary));
+                    /*     archive_o(CEREAL_NVP(Xdim));
+                         archive_o(CEREAL_NVP(Ydim));
+                         archive_o(CEREAL_NVP(domainMinBoundary));
+                         archive_o(CEREAL_NVP(domainMaxBoundary));*/
 
                     Eigen::Vector3d deform = { theta, sx, sy };
                     archive_o(cereal::make_nvp("n_rc_Si", n_rc_si));
@@ -1210,37 +1229,36 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
                 jsonOut.close();
 
-                // rendering LIC
-                {
+                Eigen::Vector2d StartPosition = { 0.0, 0.0 };
+                auto unsteady_field = killingABCtransformation(observerfieldDeform, StartPosition, steadyField);
+                // reconstruct unsteady field from observer field
+                auto reconstruct_field = killingABCtransformation(observerfield, StartPosition, unsteady_field);
+                // #if _DEBUG
+                // //validate reconstruction result
+                for (size_t rec = 1; rec < reconstruct_field.field.size() - 1; rec++) {
+                    auto reconstruct_slice = reconstruct_field.field[rec];
+                    // compute reconstruct slice difference with steady field
+                    double diffSum = 0.0;
+                    for (size_t y = 1; y < Ydim - 1; y++)
+                        for (size_t x = 1; x < Xdim - 1; x++) {
+                            auto diff = reconstruct_slice[y][x] - resData[y][x];
+                            diffSum += diff.norm();
+                        }
+                    // has debug, major reson for reconstruction failure is velocity too big make observer transformation query value from region out of boundary
+                    if (diffSum > (Xdim - 2) * (Ydim - 2) * 0.001) {
+                        printf("reconstruct field not equal to steady field at step %u,check is velocity too big make observer out of boundary\n", rec);
+                    }
+                }
+                // #endif
 
+                // rendering LIC
+                if (false) {
                     auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     // add segmentation visualization for steady lic
                     addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy);
                     string steadyField_name = "steady_beforeTransformation_";
                     string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
                     saveAsPNG(outputSteadyTexture, licFilename0);
-
-                    Eigen::Vector2d StartPosition = { 0.0, 0.0 };
-                    auto unsteady_field = killingABCtransformation(observerfieldDeform, StartPosition, steadyField);
-                    // reconstruct unsteady field from observer field
-                    auto reconstruct_field = killingABCtransformation(observerfield, StartPosition, unsteady_field);
-                    // #if _DEBUG
-
-                    for (size_t rec = 1; rec < reconstruct_field.field.size() - 1; rec++) {
-                        auto reconstruct_slice = reconstruct_field.field[rec];
-                        // compute reconstruct slice difference with steady field
-                        double diffSum = 0.0;
-                        for (size_t y = 1; y < Ydim - 1; y++)
-                            for (size_t x = 1; x < Xdim - 1; x++) {
-                                auto diff = reconstruct_slice[y][x] - resData[y][x];
-                                diffSum += diff.norm();
-                            }
-                        // has debug, major reson for reconstruction failure is velocity too big make observer transformation query value from region out of boundary
-                        if (diffSum > (Xdim - 2) * (Ydim - 2) * 0.05) {
-                            printf("reconstruct field not equal to steady field at step %u,check is velocity too big make observer out of boundary\n", rec);
-                        }
-                    }
-                    // #endif
 
                     auto outputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
                     auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(licNoisetexture, reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
@@ -1263,6 +1281,6 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     outBin.close();
                 }
             }
-        }
+        } // for sample
     });
 }

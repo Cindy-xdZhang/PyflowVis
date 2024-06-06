@@ -7,12 +7,12 @@
 // Enum for observer function types
 enum ObserverType {
     ConstantTranslation = 0,
-    ConstantRotation,
-    ConstantAccRotation,
-    ConstantAccTranslation,
-    ConstantAccTranslationRotation,
-    Curve,
+    ConstantRotation = 1,
+    ConstantAccRotation = 2,
+    ConstantAccTranslation = 3,
     CombinedConstantTranslationRotation,
+    ConstantAccTranslationRotation,
+    SinCurve,
     NumTypes // This should always be the last entry
 };
 struct KillingComponentFunctionFactory {
@@ -55,7 +55,7 @@ struct KillingComponentFunctionFactory {
             return constantAccRotation(acc);
         case ConstantAccTranslationRotation:
             return constantAccTranslationRotation(direction, acc, rot);
-        case Curve:
+        case SinCurve:
             return SinCurveObserver(direction);
         default:
             return constantTranslation(0, scale); // default case, should never hit
