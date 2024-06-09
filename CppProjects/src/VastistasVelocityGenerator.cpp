@@ -78,7 +78,6 @@ SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField(double tx, d
         std::move(data_),
         this->domainBoundaryMin,
         this->domainBoundaryMax,
-        this->spatialGridInterval,
         XdimYdim
     };
     steadyField.analyticalFlowfunc_ = [this, SiMat22, critial_point](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {

@@ -49,8 +49,28 @@ T bilinear_interpolate(const std::vector<std::vector<T>>& vector_field, double x
     T b = v10 * (1 - tx) + v11 * tx;
     return a * (1 - ty) + b * ty;
 }
+struct IUnsteadField2D {
+public:
+    virtual Eigen::Vector2d getVector(int x, int y, int t) const = 0;
+    virtual Eigen::Vector2d getVector(double x, double y, double t) const = 0;
+
+public:
+    double tmin, tmax;
+    int timeSteps = -1;
+};
 
 struct SteadyVectorField2D {
+    SteadyVectorField2D() = default;
+    SteadyVectorField2D(const std::vector<std::vector<Eigen::Vector2d>>& ifield, const Eigen::Vector2d& ispatialmin, const Eigen::Vector2d& ispatialMax, const Eigen::Vector2i& ixdimydim)
+        : field(ifield)
+        , spatialDomainMinBoundary(ispatialmin)
+        , spatialDomainMaxBoundary(ispatialMax)
+        , XdimYdim(ixdimydim)
+    {
+        spatialGridInterval = (spatialDomainMaxBoundary - spatialDomainMinBoundary).cwiseQuotient(Eigen::Vector2d(XdimYdim.x() - 1, XdimYdim.y() - 1));
+    }
+    Eigen::Vector2d getSpatialMinBoundary() const { return spatialDomainMinBoundary; }
+    Eigen::Vector2d getSpatialMaxBoundary() const { return spatialDomainMaxBoundary; }
     std::vector<std::vector<Eigen::Vector2d>> field; // first y dimension then x dimension
     Eigen::Vector2d spatialDomainMinBoundary;
     Eigen::Vector2d spatialDomainMaxBoundary;
@@ -62,11 +82,6 @@ struct SteadyVectorField2D {
     {
         return field[y][x];
     }
-    Eigen::Vector2d getVector(const Eigen::Vector2d& pos) const
-    {
-        return getVector(pos.x(), pos.y());
-    }
-    // paramter x,y are the physical positon in the vector field domian.
     Eigen::Vector2d getVector(double x, double y) const
     {
         const double inverse_grid_interval_x = 1.0f / (double)spatialGridInterval(0);
@@ -75,6 +90,15 @@ struct SteadyVectorField2D {
         double doubleIndicesY = (y - spatialDomainMinBoundary(1)) * inverse_grid_interval_y;
         return bilinear_interpolate(field, doubleIndicesX, doubleIndicesY);
     }
+    Eigen::Vector2d getVector(const Eigen::Vector2d& pos, double t) const
+    {
+        return getVector(pos.x(), pos.y());
+    }
+    Eigen::Vector2d getVector(const Eigen::Vector2d& pos) const
+    {
+        return getVector(pos.x(), pos.y());
+    }
+    // parameter x,y are the physical position in the vector field domain.
     // SteadyVectorField2D  might have analytical expression, then when query value from out of boundary is return valid value.
 
     inline Eigen::Vector2d getVectorAnalytical(const Eigen::Vector2d& pos, double t_is_useless = 0.0) const
@@ -82,18 +106,6 @@ struct SteadyVectorField2D {
         assert(this->analyticalFlowfunc_);
         return this->analyticalFlowfunc_(pos, t_is_useless);
     }
-};
-
-struct IUnsteadField2D {
-public:
-    virtual Eigen::Vector2d
-    getVector(int x, int y, int t) const
-        = 0;
-    virtual Eigen::Vector2d getVector(double x, double y, double t) const = 0;
-
-public:
-    double tmin, tmax;
-    int timeSteps = -1;
 };
 
 class UnSteadyVectorField2D : public IUnsteadField2D {
@@ -105,7 +117,8 @@ public:
     Eigen::Vector2i XdimYdim;
     // UnSteadyVectorField2D  might have analytical expression, then when query value from out of boundary is return valid value.
     std::function<Eigen::Vector2d(const Eigen::Vector2d& pos, double)> analyticalFlowfunc_ = nullptr;
-
+    Eigen::Vector2d getSpatialMinBoundary() const { return spatialDomainMinBoundary; }
+    Eigen::Vector2d getSpatialMaxBoundary() const { return spatialDomainMaxBoundary; }
     inline Eigen::Vector2d getVectorAnalytical(const Eigen::Vector2d& pos, double t) const
     {
         assert(this->analyticalFlowfunc_);
