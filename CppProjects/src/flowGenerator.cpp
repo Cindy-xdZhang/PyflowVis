@@ -31,7 +31,7 @@ const int LicImageSize = 64;
 Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
 const int unsteadyFieldTimeStep = 32;
-const int LicSaveFrequency = 2; // every 2 time steps save one
+const int LicSaveFrequency = 4; // every 2 time steps save one
 
 // Function to save the 2D vector as a PNG image
 void saveAsPNG(const std::vector<std::vector<Eigen::Vector3d>>& data, const std::string& filename)
@@ -710,22 +710,18 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
     } else { // if no analytical expression
         if constexpr (std::is_same_v<InputFieldTYPE, UnSteadyVectorField2D>) {
             for (size_t i = 0; i < timestep; i++) {
-                // time slice i
                 resultField.field[i].resize(inputField.field[i].size());
-                const double physical_t_this_slice = tmin + i * dt;
+                const double physical_t_this_slice = tmin + i * dt; // time slice i
                 for (size_t j = 0; j < inputField.field[i].size(); j++) {
                     // y slice
                     resultField.field[i][j].resize(inputField.field[i][j].size());
                     for (size_t k = 0; k < inputField.field[i][j].size(); k++) {
-                        // get position of this grid point
                         Eigen::Vector4d pos = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
-                            j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f };
-
-                        const auto tmp = pathPositions[i];
+                            j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f }; // get position of this grid point
                         const Eigen ::Matrix3d Q_transpose = observerRotationMatrices[i];
                         const Eigen ::Matrix3d Q_t = Q_transpose.transpose();
                         const Eigen ::Vector3d pos_3d = { pos.x(), pos.y(), 1.0 };
-                        const Eigen ::Vector3d position_t = { tmp.x(), tmp.y(), 1.0 };
+                        const Eigen ::Vector3d position_t = { pathPositions[i].x(), pathPositions[i].y(), 1.0 };
                         // frame transformation is F(x):x*=Q(t)x+c(t)  or x*=T(Os) *Q*T(-Pt)*x
                         // =>F(x):x* = Q(t)*(x-pt)+Os= Qx-Q*pt+Os -> c=-Q*pt+Os
                         const Eigen ::Vector3d Os = { pathPositions[0].x(), pathPositions[0].y(), 1.0 };
@@ -733,7 +729,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
                         // => F^(-1)(x)= Q^T (x-c)= Q^T *( x+Q*pt-Os)
                         Eigen ::Vector3d F_inverse_x = Q_transpose * (pos_3d - c_t);
                         F_inverse_x /= F_inverse_x(2);
-                        // get 2d position from 4d x_star
+
                         Eigen::Vector2d F_inverse_x_2d = { F_inverse_x(0), F_inverse_x(1) };
 
                         Eigen::Vector2d v = inputField.getVector(F_inverse_x_2d, physical_t_this_slice);
@@ -741,8 +737,8 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
 
                         Eigen::Vector3d vminus_lab_frame;
                         vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
-                        // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
-                        //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
+
+                        // (v-u)*(x,t)=  push forward(  (v-u)(F^-1(x),t) )= Q(t)^T *(v-u)(F^-1(x),t)
                         Eigen::Vector3d vminus_observer_frame = Q_t * vminus_lab_frame;
                         resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
                     }
@@ -774,7 +770,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
                         // => F^(-1)(x)= Q^T (x-c)= Q^T *( x+Q*pt-Os)
                         Eigen ::Vector3d F_inverse_x = Q_transpose * (pos_3d - c_t);
                         F_inverse_x /= F_inverse_x(2);
-                        // get 2d position from 4d x_star
+
                         Eigen::Vector2d F_inverse_x_2d = { F_inverse_x(0), F_inverse_x(1) };
 
                         Eigen::Vector2d v = inputField.getVector(F_inverse_x_2d, physical_t_this_slice);
@@ -782,8 +778,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
 
                         Eigen::Vector3d vminus_lab_frame;
                         vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
-                        // rotationMatrices[i] is Q(t)^T,if  transformation is 0M^(-1): x*= Q(t)x+c(t) then objective vector (v-u) from backgroud coordinate to observer's coordinate is
-                        //  (v-u)(x,t)=  push forward(  (v-u)(x_star,t) )= Q(t)^T *(v-u)(x_star,t)
+
                         Eigen::Vector3d vminus_observer_frame = Q_t * vminus_lab_frame;
                         resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
                     }
@@ -1105,7 +1100,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     std::normal_distribution<double> genTx(0.0, 0.59);
 
     // Distribution for selecting type
-    std::uniform_int_distribution<int> dist_Observer_type(0, 3);
+    std::uniform_int_distribution<int> dist_Observer_type(0, (int)ObserverType::NumTypes);
     std::uniform_int_distribution<int> dist_int(0, 4); // we prefer more si =1,2->generate 0,1,2,3,4->ceil(divide by two)
 
     for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
@@ -1144,8 +1139,11 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             cereal::JSONOutputArchive archive_o(root_jsonOut);
             archive_o(CEREAL_NVP(Xdim));
             archive_o(CEREAL_NVP(Ydim));
+            archive_o(CEREAL_NVP(unsteadyFieldTimeStep));
             archive_o(CEREAL_NVP(domainMinBoundary));
             archive_o(CEREAL_NVP(domainMaxBoundary));
+            archive_o(CEREAL_NVP(tmin));
+            archive_o(CEREAL_NVP(tmax));
         }
 
         for (size_t sample = 0; sample < numVelocityFields; sample++) {
@@ -1168,7 +1166,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
 
                 // Randomly select a type
-                int type = dist_Observer_type(rng);
+                const int type = dist_Observer_type(rng);
 
                 const string sample_tag_name = "rc_" + str_Rc + "_n_" + str_n + "_sample_" + to_string(sample) + "Si_" + to_string(Si) + "observer_" + to_string(observerIndex) + "type_" + to_string(type);
 
@@ -1246,14 +1244,14 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     // has debug, major reson for reconstruction failure is velocity too big make observer transformation query value from region out of boundary
                     if (diffSum > (Xdim - 2) * (Ydim - 2) * 0.001) {
                         printf("\n\n");
-                        printf("reconstruct field not equal to steady field at step %u,check is velocity too big make observer out of boundary\n", (unsigned int)rec);
+                        printf("reconstruct field not equal to steady field at step %u,check observe type %d\n", (unsigned int)rec, type);
                         printf("\n\n");
                     }
                 }
                 // #endif
 
                 // rendering LIC
-                if (true) {
+                if (false) {
                     auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     // add segmentation visualization for steady lic
                     addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy);

@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from .VectorField2d import *
-from .FlowReader import loadOneFlowEntry
+from .FlowReader import read_rootMetaGridresolution,loadOneFlowEntryRawData
 import torch,time,tqdm
 
 # create torch dataset using the load result function:
@@ -9,8 +9,7 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
     def __init__(self, directory_path):
         directory_path=self.FixDataFolder(directory_path)
         #directory_path should be  the direct parent folder of all "rc_xxxx_n_xxx"  folders
-        directory_path=os.path.join( os.path.join(directory_path,"unsteady"),"64_64")
-        self.directory_path = directory_path
+        self.directory_path=os.path.join( os.path.join(directory_path,"unsteady"),"64_64")
         self.data=[]
         self.labelReferenceFrame=[]
         self.labelVortex=[]
@@ -25,23 +24,25 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         if os.path.isdir(parent) and "unsteady" in os.listdir(parent):
             return parent
         gradParent=os.path.dirname(parent)
-        if os.path.isdir(gradParent)and "unsteady" in os.listdir(gradParent):
+        if os.path.isdir(gradParent) and "unsteady" in os.listdir(gradParent):
             return gradParent
         raise ValueError(f"Can't find the folder with name 'unsteady' in {directory_path}, {parent}, {gradParent}")
     
 
     def preLoading(self,slicePerData:int=7, TrainValidationSplitRatio:float=0.8):        
         print("Preloading data......")
-        start = time.time() 
+        start = time.time()         
         rc_n_subfoders=os.listdir(self.directory_path)
         for folder_name in tqdm.tqdm(rc_n_subfoders) :
             sub_folder=os.path.join(self.directory_path,folder_name)
+            folder_meta_file = os.path.join(sub_folder, 'meta.json')
+            Xdim,Ydim,time_steps,dominMinBoundary,dominMaxBoundary=read_rootMetaGridresolution(folder_meta_file)
             #find all *.bin data in this subfoder
             binFiles = [f for f in os.listdir(sub_folder) if f.endswith('.bin')]
             for binFile in binFiles:
                 binPath=os.path.join(sub_folder,binFile)
                 #split according to slicePerData 
-                loadField, labelReferenceFrameABC,vortexlabel=loadOneFlowEntry(binPath)
+                loadField, labelReferenceFrameABC,vortexlabel=loadOneFlowEntryRawData(binPath, Xdim,Ydim,time_steps)
                 timesteps=loadField.shape[0]
                 TimeWindowCount=timesteps//slicePerData
                 for i in range(0,TimeWindowCount):

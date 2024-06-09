@@ -1,6 +1,7 @@
 #pragma once
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <corecrt_math_defines.h>
 #include <iostream>
 #include <random>
 #include <vector>
@@ -11,8 +12,9 @@ enum ObserverType {
     ConstantAccRotation = 2,
     ConstantAccTranslation = 3,
     CombinedConstantTranslationRotation,
-    ConstantAccTranslationRotation,
     SinCurve,
+    STEP_CURVE_ROTATION,
+    STEP_CURVE_TRANSLATION,
     NumTypes // This should always be the last entry
 };
 struct KillingComponentFunctionFactory {
@@ -53,27 +55,16 @@ struct KillingComponentFunctionFactory {
             return constantRotation(scale);
         case ConstantAccRotation:
             return constantAccRotation(acc);
-        case ConstantAccTranslationRotation:
-            return constantAccTranslationRotation(direction, acc, rot);
         case SinCurve:
-            return SinCurveObserver(direction);
+            return SinCurveObserver(direction, scale, rot);
+        case STEP_CURVE_ROTATION:
+            return stepRotation(scale, acc * M_PI);
+        case STEP_CURVE_TRANSLATION:
+            return stepTranslation(direction, scale, acc * M_PI);
         default:
-            return constantTranslation(0, scale); // default case, should never hit
+            return constantTranslation(0, scale); // default case
         }
     }
-
-    // constant translation velocity(killing  a or b), acc =0.
-    static std::function<Eigen::Vector3d(double)> SinCurveObserver(int direction)
-    {
-        return [=](double t) {
-            double scale = 0.2 * sin(t);
-            if (direction == 0) {
-                return Eigen::Vector3d(scale, 0, 0);
-            } else
-                return Eigen::Vector3d(0, scale, 0);
-        };
-    }
-
     // constant translation velocity(killing  a or b), acc =0.
     static std::function<Eigen::Vector3d(double)> constantTranslation(int direction, double scale)
     {
@@ -82,6 +73,53 @@ struct KillingComponentFunctionFactory {
                 return Eigen::Vector3d(scale, 0, 0);
             } else
                 return Eigen::Vector3d(0, scale, 0);
+        };
+    }
+    // constant translation velocity(killing  a or b), acc =0.
+    static std::function<Eigen::Vector3d(double)> SinCurveObserver(int direction, double speed, double start)
+    {
+        return [=](double t) {
+            double theta = speed * t + start;
+            double value = 0.25 * sin(theta);
+            if (direction == 0) {
+                return Eigen::Vector3d(value, 0, 0);
+            } else
+                return Eigen::Vector3d(0, value, 0);
+        };
+    }
+    // constant translation velocity(killing  a or b), acc =0.
+    static std::function<Eigen::Vector3d(double)> stepRotation(double validValue, double StopInterval)
+    {
+        return [=](double t) {
+            // Calculate the period (one cycle of validValue and zero)
+            double period = 2 * StopInterval;
+
+            // Determine the position within the period
+            double positionInPeriod = fmod(t, period);
+
+            // If within the first half of the period, return validValue, otherwise return zero
+            if (positionInPeriod < StopInterval) {
+                return Eigen::Vector3d(validValue, 0, 0);
+            } else {
+                return Eigen::Vector3d(0, 0, 0);
+            }
+        };
+    }
+
+    // constant translation velocity(killing  a or b), acc =0.
+    static std::function<Eigen::Vector3d(double)> stepTranslation(int direction, double validValue, double StopInterval)
+    {
+        return [=](double t) {
+            // Calculate the period (one cycle of validValue and zero)
+            double period = 2 * StopInterval;
+            // Determine the position within the period
+            double positionInPeriod = fmod(t, period);
+
+            auto velocity = positionInPeriod < StopInterval ? validValue : 0;
+            if (direction == 0) {
+                return Eigen::Vector3d(velocity, 0, 0);
+            } else
+                return Eigen::Vector3d(0, velocity, 0);
         };
     }
 
@@ -120,20 +158,8 @@ struct KillingComponentFunctionFactory {
             return Eigen::Vector3d(0, 0, acc * t);
         };
     }
-    static std::function<Eigen::Vector3d(double)> constantAccTranslationRotation(int direction, double transACc, double rotAcc)
-    {
-        return [=](double t) {
-            auto velocity = transACc * t;
-            auto rot = rotAcc * t;
-            if (direction == 0) {
-                return Eigen::Vector3d(velocity, 0, rot);
-            } else
-                return Eigen::Vector3d(0, velocity, rot);
-        };
-    }
 };
 
-void testKillingTransformASteadyField();
 void testKillingTransformationForRFC();
 // number of result traing data = Nparamters * samplePerParameters * observerPerSetting
 void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting);
