@@ -12,7 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
-
+#define RENDERING_LIC_SAVE_DATA
 // #define DISABLE_CPP_PARALLELISM
 //  define execute policy
 #if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
@@ -106,50 +106,7 @@ std::vector<float> flatten3DAs1Dfloat(const std::vector<std::vector<std::vector<
 
     return result;
 }
-template <class T>
-std::pair<double, double> computeMinMax(const std::vector<T>& values)
-{
-    if (values.empty()) {
-        throw std::invalid_argument("The input vector is empty.");
-    }
 
-    T minVal = std::numeric_limits<T>::infinity();
-    T maxVal = -std::numeric_limits<T>::infinity();
-
-    for (T val : values) {
-        if (val < minVal) {
-            minVal = val;
-        }
-        if (val > maxVal) {
-            maxVal = val;
-        }
-    }
-
-    return { minVal, maxVal };
-}
-template <class T>
-std::pair<double, double> computeMinMax(const std::vector<std::vector<T>>& values)
-{
-    if (values.empty() || values[0].empty()) {
-        throw std::invalid_argument("The input vector is empty.");
-    }
-
-    T minVal = std::numeric_limits<T>::infinity();
-    T maxVal = -std::numeric_limits<T>::infinity();
-
-    for (const auto& row : values) {
-        for (T val : row) {
-            if (val < minVal) {
-                minVal = val;
-            }
-            if (val > maxVal) {
-                maxVal = val;
-            }
-        }
-    }
-
-    return { minVal, maxVal };
-}
 // The result image size is the same as the input texture.
 std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(
     const std::vector<std::vector<double>>& texture,
@@ -158,7 +115,7 @@ std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(
     const int licImageSizeY,
     double stepSize,
     int MaxIntegrationSteps,
-    bool curlColorBlend = true)
+    VORTEX_CRITERION criterionlColorBlend = VORTEX_CRITERION::NONE)
 {
     const int YTexdim = texture.size();
     const int XTexdim = texture[0].size();
@@ -172,26 +129,18 @@ std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(
     const double inverse_grid_interval_x = 1.0f / (double)vecfield.spatialGridInterval(0);
     const double inverse_grid_interval_y = 1.0f / (double)vecfield.spatialGridInterval(1);
 
-    std::vector<std::vector<double>> curl(Ydim, std::vector<double>(Xdim, 0.0f));
     double minCurl;
     double maxCurl;
-    if (curlColorBlend) {
-        // Calculate curl (vorticity) of the vector field
-        for (int y = 1; y < Ydim - 1; ++y) {
-            for (int x = 1; x < Xdim - 1; ++x) {
-                Eigen::Vector2d dv_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5f * inverse_grid_interval_x;
-                Eigen::Vector2d du_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5f * inverse_grid_interval_y;
-                double curl_ = dv_dx(1) - du_dy(0);
-                curl[y][x] = curl_;
-            }
-        }
-
+    std::vector<std::vector<double>> curl;
+    if (criterionlColorBlend != VORTEX_CRITERION::NONE) {
+        curl = computeTargetCrtierion(vecfieldData, Xdim, Ydim, vecfield.spatialGridInterval(0), vecfield.spatialGridInterval(1), criterionlColorBlend);
         // Normalize curl values for color mapping
         auto minMaxCurl = computeMinMax(curl);
         minCurl = minMaxCurl.first;
         maxCurl = minMaxCurl.second;
-        if (!(maxCurl > minCurl && maxCurl > 0 && minCurl < 0) || std::abs(maxCurl) < 1e-7 || std::abs(minCurl) < 1e-7) {
-            curlColorBlend = false;
+        if (!(maxCurl > minCurl) || (std::abs(maxCurl) < 1e-7 && std::abs(minCurl) < 1e-7)) {
+            printf("Warning: criterion  %u  has scalar field are too small to be used for color mapping. Switching to NONE coloring.\n", (unsigned int)criterionlColorBlend);
+            criterionlColorBlend = VORTEX_CRITERION::NONE;
         }
     }
 
@@ -241,7 +190,7 @@ std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(
             // Compute the average value along the path
             if (accum_count > 0) {
                 auto licValue = accum_value / accum_count;
-                if (curlColorBlend) {
+                if (criterionlColorBlend != VORTEX_CRITERION::NONE) {
                     // Compute the normalized curl value
                     auto curlValue = curl[static_cast<int>(ratio_y * Ydim)][static_cast<int>(ratio_x * Xdim)];
                     double normalizedCurl = (curlValue - minCurl) / (maxCurl - minCurl);
@@ -268,7 +217,7 @@ LICAlgorithm_UnsteadyField(const std::vector<std::vector<double>>& texture,
     const int licImageSizeX,
     const int licImageSizeY,
     double stepSize,
-    int MaxIntegrationSteps, bool curlColorBlend = true)
+    int MaxIntegrationSteps, VORTEX_CRITERION curlColorBlend = VORTEX_CRITERION::NONE)
 {
     std::vector<int> timeIndex;
     timeIndex.resize(vecfield.timeSteps);
@@ -323,104 +272,6 @@ std::vector<std::pair<double, double>> generateNParamters(int n)
     }
 
     return parameters;
-}
-
-// todo: transform input field with respect to observer motion(v*=pullback(v-u))
-template <typename T>
-void referenceFrameTransformation(const SteadyVectorField2D& input_field, const int timesteps)
-{
-
-    auto integratePathlineOneStep = [](T x, T y, T t, T dt, T& x_new, T& y_new) {
-        // RK4 integration step
-        Eigen::Vector2d odeStepStartPoint;
-        odeStepStartPoint << x, y;
-
-        const T h = dt;
-
-        // coefficients
-        constexpr T a21 = 0.5;
-        constexpr T a31 = 0.;
-        constexpr T a32 = 0.5;
-        constexpr T a41 = 0.;
-        constexpr T a42 = 0.;
-        constexpr T a43 = 1.;
-
-        constexpr T c2 = 0.5;
-        constexpr T c3 = 0.5;
-        constexpr T c4 = 1.;
-
-        constexpr T b1 = 1. / 6.;
-        constexpr T b2 = 1. / 3.;
-        constexpr T b3 = b2;
-        constexpr T b4 = b1;
-
-        // 4 stages of 2 equations (i.e., 2 dimensions of the manifold and the tangent vector space)
-
-        // stage 1
-        Eigen::Vector2d k1 = fieldFunction_u(odeStepStartPoint, t);
-
-        // stage 2
-        Eigen::Vector2d stagePoint = odeStepStartPoint + k1 * a21 * h;
-        Eigen::Vector2d k2 = fieldFunction_u(stagePoint, t + c2 * h);
-
-        // stage 3
-        stagePoint = odeStepStartPoint + (a31 * k1 + a32 * k2) * h;
-        Eigen::Vector2d k3 = fieldFunction_u(stagePoint, t + c3 * h);
-
-        // stage 4
-        stagePoint = odeStepStartPoint + (a41 * k1 + a42 * k2 + a43 * k3) * h;
-        Eigen::Vector2d k4 = fieldFunction_u(stagePoint, t + c4 * h);
-
-        Eigen::Vector2d result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
-
-        x_new = result_p(0);
-        y_new = result_p(1);
-    };
-
-    //// integrationStep integrates starting from x, y, t, to target_t arriving at point x_new, y_new.
-    //// the push_forward the matrix that does the transformation that a vector would undergo when going one step dt starting at t
-    //// the push_forward is computed by draging a frame (2 vectors) along the curve.
-    // auto integrationStep = [&integratePathlineStep, dx, dy](T x, T y, T t, T dt, T& x_new, T& y_new, Matrix22& push_forward) {
-    //     Eigen::Vector2d p_north;
-    //     Eigen::Vector2d p_south;
-    //     Eigen::Vector2d p_east;
-    //     Eigen::Vector2d p_west;
-
-    //    integratePathlineStep(x, y, t, dt, x_new, y_new);
-    //    integratePathlineStep(x, y + 0.5 * dy, t, dt, p_north(0), p_north(1));
-    //    integratePathlineStep(x, y - 0.5 * dy, t, dt, p_south(0), p_south(1));
-    //    integratePathlineStep(x + 0.5 * dx, y, t, dt, p_east(0), p_east(1));
-    //    integratePathlineStep(x - 0.5 * dx, y, t, dt, p_west(0), p_west(1));
-
-    //    push_forward.col(0) = (p_east - p_west) * (1. / dx); // TODO: check the divide by dx
-    //    push_forward.col(1) = (p_north - p_south) * (1. / dy); // TODO: check the divide by dy
-    //};
-
-    //// integrate starting from x, y, t, to target_t arriving at point x_new, y_new.
-    //// push_forward is the matrix that does the transformation that a vector would undergo when going from t to target_t.
-    //// internally it uses the composition of multiple integration steps.
-    //// if the estimation of the push_forward of one step becomes unreliable a shorter stepsize can be chosen.
-    // auto integrateFrame = [&integrationStep](T x, T y, T t, T target_t, int numberOfSteps, T& x_new, T& y_new, Matrix22& push_forward) {
-    //     T stepsize = (target_t - t) / numberOfSteps;
-
-    //    push_forward(0, 0) = 1;
-    //    push_forward(1, 1) = 1;
-    //    push_forward(0, 1) = 0;
-    //    push_forward(1, 0) = 0;
-
-    //    T x_running = x;
-    //    T y_running = y;
-
-    //    for (int i = 0; i < numberOfSteps; i++) {
-    //        T t_running = t + i * stepsize;
-    //        Matrix22 push_forward_step;
-    //        integrationStep(x_running, y_running, t_running, stepsize, x_running, y_running, push_forward_step);
-    //        push_forward *= push_forward_step; // TODO: check there is no times dt
-    //    }
-
-    //    x_new = x_running;
-    //    y_new = y_running;
-    //};
 }
 
 // function killingABCtransformation transform a SteadyVectorField2D& inputField to an unsteady field by observing it with respect to KillingAbcField& observerfield
@@ -583,7 +434,7 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
 
     for (size_t i = 1; i < validPathSize; i++) {
         const double t = observerfield.tmin + i * observerfield.dt;
-        const Eigen::Vector3d abc = observerfield.func_(t);
+        const Eigen::Vector3d abc = observerfield.killingABCfunc_(t);
         const auto c_ = abc(2);
         // this abs is important, otherwise flip sign of c_ will cause the spin tensor and rotation angle theta to be flipped simultaneously,
         // two flip sign cancel out the result stepInstanenousRotation never  change.
@@ -975,26 +826,8 @@ void testKillingTransformationForRFC()
 
     AnalyticalFlowCreator flowCreator(grid_size, time_steps, domainMinBoundary, domainMaxBoundary);
 
-    // Define a lambda function for rotating flow
-    auto rotatingFourCenter = [](Eigen::Vector2d p, double t) {
-        const double x = p(0);
-        const double y = p(1);
-        const double al_t = 1.0;
-        const double scale = 8.0;
-        const double maxVelocity = 1.0;
-
-        double u = exp(-y * y - x * x) * (al_t * y * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * y * y * y + (12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * y * y + (6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x + 6.0 * scale * cos(al_t * t) * sin(al_t * t)) * y + (3.0 * scale - 6.0 * scale * (cos(al_t * t) * cos(al_t * t))) * x);
-        double v = -exp(-y * y - x * x) * (al_t * x * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * y * y + ((12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * x - 6.0 * scale * (cos(al_t * t) * cos(al_t * t)) + 3.0 * scale) * y + 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x * x - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x);
-
-        double vecU = maxVelocity * u;
-        double vecV = maxVelocity * v;
-
-        Eigen::Vector2d components;
-        components << vecU, vecV;
-        return components;
-    };
     // Create the flow field
-    UnSteadyVectorField2D InputflowField = flowCreator.createFlowField(rotatingFourCenter);
+    UnSteadyVectorField2D InputflowField = flowCreator.createRFC();
 
     auto func_const_trans = KillingComponentFunctionFactory::constantRotation(-1.0);
 
@@ -1007,9 +840,9 @@ void testKillingTransformationForRFC()
     auto unsteady_field = killingABCtransformation(observerfield, StartPosition, InputflowField);
     auto resample_observerfield = observerfield.resample2UnsteadyField(grid_size, domainMinBoundary, domainMaxBoundary);
     // auto outputObserverFieldLic = LICAlgorithm_UnsteadyField(licNoisetexture, resample_observerfield, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
-    auto inputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, InputflowField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+    auto inputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, InputflowField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, VORTEX_CRITERION::NONE);
 
-    auto outputTexturesObservedField = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+    auto outputTexturesObservedField = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, VORTEX_CRITERION::NONE);
 
     for (size_t i = 0; i < unsteadyFieldTimeStep; i++) {
         string tag_name0 = "inputField_" + std::to_string(i);
@@ -1248,10 +1081,12 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                         printf("\n\n");
                     }
                 }
-                // #endif
+
+#ifdef RENDERING_LIC_SAVE_DATA
 
                 // rendering LIC
-                if (false) {
+
+                {
                     auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     // add segmentation visualization for steady lic
                     addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy);
@@ -1259,8 +1094,8 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
                     saveAsPNG(outputSteadyTexture, licFilename0);
 
-                    auto outputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
-                    auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(licNoisetexture, reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, false);
+                    auto outputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+                    auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(licNoisetexture, reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
 
                     for (size_t i = 0; i < outputTextures.size(); i += LicSaveFrequency) {
                         string tag_name = sample_tag_name + "killing_deformed_" + std::to_string(i);
@@ -1279,7 +1114,67 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     archive_Binary(rawUnsteadyFieldData);
                     outBin.close();
                 }
-            }
+#endif
+            } // for (size_t observerIndex = 0..)
         } // for sample
     });
+}
+
+void testCriterion()
+{
+    const int LicImageSize = 256;
+    const int unsteadyFieldTimeStep = 32;
+    const double stepSize = 0.01;
+    const int maxLICIteratioOneDirection = 256;
+    int numVelocityFields = 1; // num of fields per n, rc parameter setting
+    const int LicSaveFrequency = 2;
+    std::string root_folder = "../data/test_criterion_sj/";
+    if (!filesystem::exists(root_folder)) {
+        filesystem::create_directories(root_folder);
+    }
+    // Create an instance of AnalyticalFlowCreator
+    Eigen::Vector2i grid_size(Xdim, Ydim);
+    int time_steps = unsteadyFieldTimeStep;
+
+    AnalyticalFlowCreator flowCreator(grid_size, time_steps, domainMinBoundary, domainMaxBoundary);
+
+    // Create the flow field
+    UnSteadyVectorField2D RFC = flowCreator.createRFC();
+    auto beads = flowCreator.createBeadsFlow();
+
+    UnSteadyVectorField2D grye = flowCreator.createUnsteadyGyre();
+
+    const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
+
+    // add segmentation visualization for lic
+    std::vector<std::pair<VORTEX_CRITERION, std::string>> enumCriterion = {
+        /*  { VORTEX_CRITERION::Q_CRITERION, "Q_CRITERION" },
+          { VORTEX_CRITERION::CURL, "CURL" },
+          { VORTEX_CRITERION::IVD_CRITERION, "IVD_CRITERION" },
+          { VORTEX_CRITERION::LAMBDA2_CRITERION, "LAMBDA2_CRITERION" },
+          { VORTEX_CRITERION::DELTA_CRITERION, "DELTA_CRITERION" },*/
+        { VORTEX_CRITERION::SUJUDI_HAIMES_CRITERION, "SUJUDI_HAIMES" }
+    };
+
+    for (size_t i = 0; i < enumCriterion.size(); i++) {
+        auto criterion = enumCriterion[i].first;
+        auto name_criterion = enumCriterion[i].second;
+
+        auto outputTexturesRFC = LICAlgorithm_UnsteadyField(licNoisetexture, RFC, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
+        auto outputTexturesBeads = LICAlgorithm_UnsteadyField(licNoisetexture, beads, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
+        auto outputTexturesGype = LICAlgorithm_UnsteadyField(licNoisetexture, grye, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
+        for (size_t i = 0; i < unsteadyFieldTimeStep; i += LicSaveFrequency) {
+            string tag_name = "rfc_" + name_criterion + std::to_string(i);
+            string licFilename = root_folder + tag_name + "lic.png";
+            saveAsPNG(outputTexturesRFC[i], licFilename);
+
+            tag_name = "beads_" + name_criterion + std::to_string(i);
+            licFilename = root_folder + tag_name + "lic.png";
+            saveAsPNG(outputTexturesBeads[i], licFilename);
+
+            tag_name = "gyre_" + name_criterion + std::to_string(i);
+            licFilename = root_folder + tag_name + "lic.png";
+            saveAsPNG(outputTexturesGype[i], licFilename);
+        }
+    }
 }
