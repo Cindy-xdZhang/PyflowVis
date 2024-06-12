@@ -1,8 +1,8 @@
 import json
 import numpy as np
 import os
-# from typeguard import typechecked
-
+from .LicRenderer import LicRenderingUnsteady
+from .VectorField2d import UnsteadyVectorField2D
 
 
 
@@ -58,17 +58,15 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
 
     #check raw_Binary.size
     if raw_Binary.size!=time_steps*Ydim*Xdim* 2:
-        raise ValueError(f"Binary data size is not correct, expected {time_steps*Ydim*Xdim* 2}, got {raw_Binary.size}")
+        raise ValueError(f"Binary data size is not correct, expected {time_steps*
+                                                                      Ydim*Xdim* 2}, got {raw_Binary.size}")
+    if raw_Binary.min() !=metaINFo['minV'] or  raw_Binary.max() !=metaINFo['maxV']:
+        raise ValueError(f"Binary data min or max value is not correct, expected {metaINFo['minV']} or {metaINFo['maxV']}, got {fieldData.min()} or {fieldData.max()}")
+        
+
     fieldData = raw_Binary.reshape( time_steps,Ydim,Xdim, 2)
     vortexLableData= np.array([tx,ty,n,rc],dtype=np.float32) 
+    abc_t= np.array(abc_t,dtype=np.float32) 
     return fieldData, abc_t,vortexLableData
 
 
-def test_load_results(): 
-    Xdim,Ydim,time_steps,dominMinBoundary,dominMaxBoundary=read_rootMetaGridresolution('C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data\\unsteady\\64_64\\velocity_rc_1n_2\\meta.json')
-    directory_path = 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data\\unsteady\\64_64\\velocity_rc_1n_2\\rc_1_n_2_sample_0Si_1observer_0type_3.bin'
-    loadField, labelReferenceFrameABC,votexInfo=loadOneFlowEntryRawData(directory_path,Xdim,Ydim,time_steps)    
-    
-
-if __name__ == '__main__':
-   test_load_results()

@@ -24,6 +24,7 @@ enum class VORTEX_CRITERION {
     IVD_CRITERION,
     DELTA_CRITERION,
     SUJUDI_HAIMES_CRITERION,
+    SOBEL_EDGE_DETECTION,
     // LAVD wip
 };
 
@@ -246,6 +247,10 @@ public:
         }
         return false;
     }
+
+    // if this unsteady field is generated from another field u by reference frame transformation x*=Q(t)x+c(t), then we can save the Q(t) and c(t) for future use.
+    std::vector<Eigen::Matrix3d> Q_t;
+    std::vector<Eigen::Vector3d> c_t;
 };
 namespace cereal {
 
@@ -262,6 +267,7 @@ void save(Archive& ar, const Eigen::Vector3d& vec)
     ar(vec.x(), vec.y(), vec.z());
 }
 }
+
 class KillingAbcField : public IUnsteadField2D {
 public:
     KillingAbcField(std::function<Eigen::Vector3d(double)>& func, int n, double tmin, double tmax)
@@ -361,15 +367,14 @@ public:
     VastistasVelocityGenerator(int Xdim, int Ydim, Eigen::Vector2d minBondary, Eigen::Vector2d maxBondary, double rc, double n);
 
     // generate a deformed steady velocity slice  following the paper: Vortex Boundary Identification using Convolutional Neural Network
-    /*[[deprecated]] */ velocityFieldData generateSteady(double sx, double sy, double theta, int Si) const noexcept;
+    velocityFieldData generateSteadyVersionVortexBoundary(double sx, double sy, double theta, int Si) const noexcept;
 
+    // generate velocity following the paper: Robust Reference Frame Extraction from Unsteady 2D Vector
+    // Fields..,but fix M=1(only one Vastistas profile, no mixture of multiple profile)
     SteadyVectorField2D generateSteadyField(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept;
-    // generate a deformed Unsteady velocity slice  following the paper: Robust Reference Frame Extraction from Unsteady 2D Vector
-    // Fields with Convolutional Neural Networks
 
-    // tx,ty is the critial point,   c = (cx, cy) describes the vortical
-    // motion and d = (dx, dy)denotes the in - flow and out - flow
-    velocityFieldData generateSteadyV2(double cx, double cy, double dx, double dy, double tx, double ty) const noexcept;
+    // support mixture of multiple Vastistas profile
+    SteadyVectorField2D generateSteadyFieldMixture(int mixture) const noexcept;
 
     inline auto NormalizedVastistasV0(const double r) const noexcept
     {
@@ -424,7 +429,7 @@ private:
 /////////////// functional to compute criterion from vector field/////////////
 //////////////////////////////////////////////////////////////////////////////
 template <class T>
-std::pair<double, double> computeMinMax(const std::vector<T>& values)
+std::pair<T, T> computeMinMax(const std::vector<T>& values)
 {
     if (values.empty()) {
         throw std::invalid_argument("The input vector is empty.");
@@ -445,7 +450,7 @@ std::pair<double, double> computeMinMax(const std::vector<T>& values)
     return { minVal, maxVal };
 }
 template <class T>
-std::pair<double, double> computeMinMax(const std::vector<std::vector<T>>& values)
+std::pair<T, T> computeMinMax(const std::vector<std::vector<T>>& values)
 {
     if (values.empty() || values[0].empty()) {
         throw std::invalid_argument("The input vector is empty.");
@@ -611,25 +616,6 @@ inline std::vector<std::vector<double>> ComputeSujudiHaimes(const std::vector<st
     return sujudiHaimes;
 }
 
-inline auto computeTargetCrtierion(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY, VORTEX_CRITERION criterionENUM)
-{
-    switch (criterionENUM) {
-    case VORTEX_CRITERION::Q_CRITERION:
-        return ComputeQCriterion(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
-    case VORTEX_CRITERION::LAMBDA2_CRITERION:
-        return ComputeLambda2Criterion(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
-    case VORTEX_CRITERION::IVD_CRITERION:
-        return ComputeIVD(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
-    case VORTEX_CRITERION::DELTA_CRITERION:
-        return ComputeDeltaCriterion(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
-    case VORTEX_CRITERION::SUJUDI_HAIMES_CRITERION:
-        return ComputeSujudiHaimes(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
-    case VORTEX_CRITERION::CURL:
-    default:
-        return ComputeCurl(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
-    }
-}
-
 // Function to compute Lagrangian-Averaged Vorticity Deviation (LAVD) for a 2D unsteady vector field
 inline std::vector<std::vector<double>> ComputeLAVD(const std::vector<std::vector<std::vector<Eigen::Vector2d>>>& vecfieldData, int Xdim, int Ydim, int timeSteps, double SpatialGridIntervalX, double SpatialGridIntervalY, double tmin, double tmax)
 {
@@ -653,5 +639,72 @@ inline std::vector<std::vector<double>> ComputeLAVD(const std::vector<std::vecto
       }
       return LAVD;*/
     return {};
+}
+
+// Function to compute the Sobel edge detection for a 2D vector field slice
+inline std::vector<std::vector<double>> ComputeSobelEdge(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim)
+{
+    std::vector<std::vector<double>> edgeMagnitude(Ydim, std::vector<double>(Xdim, 0.0));
+
+    // Sobel kernels
+    Eigen::Matrix3d sobelX;
+    sobelX << -1, 0, 1,
+        -2, 0, 2,
+        -1, 0, 1;
+
+    Eigen::Matrix3d sobelY;
+    sobelY << -1, -2, -1,
+        0, 0, 0,
+        1, 2, 1;
+
+    for (int y = 1; y < Ydim - 1; ++y) {
+        for (int x = 1; x < Xdim - 1; ++x) {
+            double gx1 = 0.0;
+            double gy1 = 0.0;
+            double gx2 = 0.0;
+            double gy2 = 0.0;
+
+            // Apply Sobel kernels to both components of the vector field
+            for (int i = -1; i <= 1; ++i) {
+                for (int j = -1; j <= 1; ++j) {
+                    gx1 += sobelX(i + 1, j + 1) * vecfieldData[y + i][x + j](0);
+                    gy1 += sobelY(i + 1, j + 1) * vecfieldData[y + i][x + j](0);
+
+                    gx2 += sobelX(i + 1, j + 1) * vecfieldData[y + i][x + j](1);
+                    gy2 += sobelY(i + 1, j + 1) * vecfieldData[y + i][x + j](1);
+                }
+            }
+
+            // Compute the magnitude of the gradient
+            double gradientMagnitude1 = std::sqrt(gx1 * gx1 + gy1 * gy1);
+            double gradientMagnitude2 = std::sqrt(gx2 * gx2 + gy2 * gy2);
+
+            // Combine the magnitudes from both components
+            edgeMagnitude[y][x] = std::sqrt(gradientMagnitude1 * gradientMagnitude1 + gradientMagnitude2 * gradientMagnitude2);
+        }
+    }
+
+    return edgeMagnitude;
+}
+
+inline auto computeTargetCrtierion(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY, VORTEX_CRITERION criterionENUM)
+{
+    switch (criterionENUM) {
+    case VORTEX_CRITERION::Q_CRITERION:
+        return ComputeQCriterion(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+    case VORTEX_CRITERION::LAMBDA2_CRITERION:
+        return ComputeLambda2Criterion(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+    case VORTEX_CRITERION::IVD_CRITERION:
+        return ComputeIVD(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+    case VORTEX_CRITERION::DELTA_CRITERION:
+        return ComputeDeltaCriterion(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+    case VORTEX_CRITERION::SUJUDI_HAIMES_CRITERION:
+        return ComputeSujudiHaimes(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+    case VORTEX_CRITERION::SOBEL_EDGE_DETECTION:
+        return ComputeSobelEdge(vecfieldData, Xdim, Ydim);
+    case VORTEX_CRITERION::CURL:
+    default:
+        return ComputeCurl(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+    }
 }
 #endif

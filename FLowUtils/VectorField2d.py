@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
+# abstract base class work
+from abc import ABC, abstractmethod
+
 
 class VectorFieldLinearOperation():
     """ the VectorFieldLinearOperation class implements linear operations on vector fields.
@@ -80,99 +83,89 @@ class VectorFieldLinearOperation():
         # lie_derivative = dxL * v[..., 1] - dyL * v[..., 0]
         # return lie_derivative.unsqueeze(-1)
 
-class SteadyVectorField2D():
-    def __init__(self, Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0]):
-        """_summary_
+class IVectorFeild2D(ABC):
+    """IVectorFeild2D is an abstract base class for 2D vector fields, it provideds necessary api and grid information.
 
-        Args:
-            Xdim (_type_): _description_
-            Ydim (_type_): _description_
-            time_steps (_type_): _description_
-            domainMinBoundary (list, optional): [xmin, ymin]. Defaults to [-2.0,-2.0,].
-            domainMaxBoundary (list, optional): [xmax, ymax]. Defaults to [2.0,2.0].
-        """
-
+    Args:
+        Xdim (int): x  dimension of the vector field
+        Ydim (int):  y dimension of the vector field
+        time_steps (int): for steady vector field time_steps is -1/1
+        domainMinBoundary (list, optional): [xmin, ymin]. Defaults to [-2.0,-2.0,].
+        domainMaxBoundary (list, optional): [xmax, ymax]. Defaults to [2.0,2.0].
+    """        
+    def __init__(self,Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0],timsteps:int=-1,tmin=0.0,tmax=2*np.pi):
         self.Xdim= Xdim
         self.Ydim = Ydim
+        self.time_steps = timsteps
+        self.domainMinBoundary=domainMinBoundary
+        self.domainMaxBoundary=domainMaxBoundary
+        self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
+
+    @abstractmethod
+    def getSlice(self, timeSlice):
+        pass
+
+
+
+
+
+class SteadyVectorField2D(IVectorFeild2D):
+    def __init__(self, Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0]):
+        super(SteadyVectorField2D, self).__init__(Xdim, Ydim,domainMinBoundary,domainMaxBoundary)
         # Initialize the vector field parameters with random values, considering the time dimension
         self.field = np.zeros( (Ydim,Xdim,2),np.float32)
-        self.domainMinBoundary=domainMinBoundary
-        self.domainMaxBoundary=domainMaxBoundary
-        self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
+    def getSlice(self, timeSlice):
+        return  self.field
 
-class UnsteadyVectorField2DNp():
-    def __init__(self, Xdim:int, Ydim:int, time_steps,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2*np.pi]):
-        """_summary_
-
-        Args:
-            Xdim (_type_): _description_
-            Ydim (_type_): _description_
-            time_steps (_type_): _description_
-            domainMinBoundary (list, optional): [xmin, ymin,tmin]. Defaults to [-2.0,-2.0,0.0].
-            domainMaxBoundary (list, optional): [xmax, ymax,tmax]. Defaults to [2.0,2.0,2*np.pi].
-        """
-        # super(UnsteadyVectorField2DNp, self).__init__()
-        self.Xdim= Xdim
-        self.Ydim = Ydim
-        self.time_steps = time_steps
-        # Initialize the vector field parameters with random values, considering the time dimension
-        self.field = np.zeros( (time_steps,Ydim,Xdim,2),np.float32)
-        self.domainMinBoundary=domainMinBoundary
-        self.domainMaxBoundary=domainMaxBoundary
-        self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
-        self.timeInterval = (domainMaxBoundary[2]-domainMinBoundary[2])/(time_steps-1)
-
-    def getSlice(self, timeSlice) :
-        # steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary[0:2],self.domainMaxBoundary[0:2])
-        steadyVectorField2D=self.field[timeSlice,:,:,:]
-        return steadyVectorField2D
     
-    def getSlice(self,sliceStart,sliceEnd) :        
-        VectorField2Dfield=self.field[sliceStart:sliceEnd,:,:,:]
-        return VectorField2Dfield
 
-
-class UnsteadyVectorField2D(nn.Module):
-    def __init__(self, Xdim:int, Ydim:int, time_steps,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2*np.pi]):
-        """_summary_
-
-        Args:
-            Xdim (_type_): _description_
-            Ydim (_type_): _description_
-            time_steps (_type_): _description_
-            domainMinBoundary (list, optional): [xmin, ymin,tmin]. Defaults to [-2.0,-2.0,0.0].
-            domainMaxBoundary (list, optional): [xmax, ymax,tmax]. Defaults to [2.0,2.0,2*np.pi].
-        """
-        super(UnsteadyVectorField2D, self).__init__()
-        self.Xdim= Xdim
-        self.Ydim = Ydim
-        self.time_steps = time_steps
+class UnsteadyVectorField2D(nn.Module,IVectorFeild2D):
+    def __init__(self, Xdim:int, Ydim:int,time_steps:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0], tmin=0.0,tmax=2*np.pi):
+        nn.Module.__init__(self)
+        IVectorFeild2D.__init__(self,Xdim, Ydim,domainMinBoundary,domainMaxBoundary,time_steps,tmin,tmax)
         # Initialize the vector field parameters with random values, considering the time dimension
         self.field = nn.Parameter(torch.randn(time_steps, Ydim,Xdim, 2))
-        self.domainMinBoundary=domainMinBoundary
-        self.domainMaxBoundary=domainMaxBoundary
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
         self.timeInterval = (domainMaxBoundary[2]-domainMinBoundary[2])/(time_steps-1)
 
     def getSlice(self, timeSlice) -> SteadyVectorField2D:
-        steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary[0:2],self.domainMaxBoundary[0:2])
+        steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary,self.domainMaxBoundary)
         steadyVectorField2D.field=self.field.detach().cpu().numpy()[timeSlice,:,:,:]
         return steadyVectorField2D
 
-    def setInitialVectorField(self, vector_field):
-        self.field = nn.Parameter(torch.tensor(vector_field))
+
     
     def forward(self,inputFieldV):
         diff, magnitudeR=VectorFieldLinearOperation.difference(inputFieldV,self.field)
         killingEnergy=VectorFieldLinearOperation.compute_killing_energy(self)
         return killingEnergy+magnitudeR
     
-    # Cereal serialization and deserialization functions
-    # def serialize(self, archive):
-    #     archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
+    def getDataAsNumpy(self):
+        # if self.field is torch tensor
+        if isinstance(self.field, torch.Tensor) or  isinstance(self.field, nn.Parameter):
+            data= self.field.detach().cpu().numpy()
+            return data
+        elif isinstance(self.field, np.ndarray):
+            return self.field
+        
+    def getDataAsTensor(self):
+        if isinstance(self.field, torch.Tensor) or  isinstance(self.field, nn.Parameter):
+            return self.field
+        elif isinstance(self.field, np.ndarray):
+            return torch.tensor(self.field)
+        
+    def numpy2torch(self):
+        """Convert field data from  numpy array to torch tensor for the field parameter.
+        """
+        self.field = nn.Parameter(torch.tensor(self.field))
 
-    # def deserialize(self, archive):
-    #     archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
+    def torch2numpy(self):
+        """Convert field data from torch tensor to numpy array for the field parameter.
+        """
+        self.field = self.field.detach().cpu().numpy()
+        
+
+
         
 
 
@@ -222,9 +215,9 @@ class ScalarField2D(ClassWithName):
         return killingEnergy+magnitudeR
     
     # Cereal serialization and deserialization functions
-    def serialize(self, archive):
-        archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
+    # def serialize(self, archive):
+    #     archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
 
-    def deserialize(self, archive):
-        archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
+    # def deserialize(self, archive):
+    #     archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
 

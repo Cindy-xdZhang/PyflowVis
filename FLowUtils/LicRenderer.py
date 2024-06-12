@@ -1,5 +1,7 @@
 import numpy as np
 from .VectorField2d import *
+from typeguard import typechecked
+import os
 
 def bilinear_interpolate(vector_field, x, y):
     """
@@ -106,7 +108,7 @@ def LICAlgorithm(texture:np.ndarray, vecfield: SteadyVectorField2D, resultImageS
     return output_texture
 
 import matplotlib.pyplot as plt
-def LICImage_OFFLINE_RENDERING(vecfield: UnsteadyVectorField2DNp|UnsteadyVectorField2D, timeSlice=0,stepSize=0.01, MaxIntegrationSteps=128):
+def LICImage_OFFLINE_RENDERING(vecfield: UnsteadyVectorField2D, timeSlice=0,stepSize=0.01, MaxIntegrationSteps=128):
     """
     Render a steady 2D vector field as an LIC image and save to a PNG file.
     """
@@ -128,7 +130,7 @@ def LICImage_OFFLINE_RENDERING(vecfield: UnsteadyVectorField2DNp|UnsteadyVectorF
     plt.savefig("vector_field_lic.png", bbox_inches='tight', pad_inches=0)
 
 @typechecked
-def LicRenderingUnsteady(field:UnsteadyVectorField2DNp,licImageSize:int,timeStepSKip:int=2,saveFolder:str="./"):
+def LicRenderingUnsteady(field:UnsteadyVectorField2D,licImageSize:int,timeStepSKip:int=2,saveFolder:str="./"):
     #typecheck field type and field is not None    
     Xdim,Ydim,time_steps=field.Xdim,field.Ydim,field.time_steps
     texture = np.random.rand(Xdim, Ydim)    

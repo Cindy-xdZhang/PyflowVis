@@ -1,6 +1,7 @@
 #include "VastistasVelocityGenerator.h"
 #include <cmath>
 #include <corecrt_math_defines.h>
+#include <random>
 
 VastistasVelocityGenerator::VastistasVelocityGenerator(int Xdim, int Ydim, Eigen::Vector2d minBondary, Eigen::Vector2d maxBondary, double rc, double n)
     : mgridDim_x(Xdim)
@@ -32,46 +33,58 @@ VastistasVelocityGenerator::VastistasVelocityGenerator(int Xdim, int Ydim, Eigen
 }
 
 // resample VastistasVelocity to discrete grid
-velocityFieldData VastistasVelocityGenerator::generateSteady(double sx, double sy, double theta, int Si) const noexcept
+velocityFieldData VastistasVelocityGenerator::generateSteadyVersionVortexBoundary(double sx, double sy, double theta, int Si) const noexcept
 {
 
     std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d { 0.0, 0.0 }));
 
     /*  const auto SiMat22 = SiMatices_[Si];*/
     const auto SiMat22 = SiMatices_[Si];
-
+    Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
+    deformMat(0, 0) = sx * cos(theta);
+    deformMat(0, 1) = -sy * sin(theta);
+    deformMat(1, 0) = sx * sin(theta);
+    deformMat(1, 1) = sy * cos(theta);
+    auto lambdaFunc = [this, SiMat22, deformMat](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+        auto deformPos = deformMat.inverse() * pos;
+        Eigen::Vector2d xy_txy = deformPos;
+        const double vastis = NormalizedVastistasV0(xy_txy.norm());
+        auto vp = deformMat * SiMat22 * xy_txy * vastis;
+        return vp;
+    };
     for (size_t i = 0; i < mgridDim_y; i++)
         for (size_t j = 0; j < mgridDim_x; j++) {
-            auto xy = getPosition(j, i);
-
-            const double r = xy.norm();
-            const double vastis = NormalizedVastistasV0(r);
-
-            /*const double vp_row0 = SiMat22[0] * xy * v0;
-            const double vp_row1 = SiMat22[1] * xy * v0;*/
-            auto vp = SiMat22 * xy;
-            data_[i][j] = vp * vastis;
+            auto pos = getPosition(j, i);
+            data_[i][j] = lambdaFunc(pos, 0.0);
         }
+
     return data_;
 }
+
 SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept
 {
 
     std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d { 0.0, 0.0 }));
-
-    /*  const auto SiMat22 = SiMatices_[Si];*/
+    Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
+    deformMat(0, 0) = sx * cos(theta);
+    deformMat(0, 1) = -sy * sin(theta);
+    deformMat(1, 0) = sx * sin(theta);
+    deformMat(1, 1) = sy * cos(theta);
     const auto SiMat22 = SiMatices_[Si];
     const Eigen::Vector2d critial_point = { tx, ty };
+
+    auto lambdaFunc = [this, SiMat22, critial_point, deformMat](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+        auto deformPos = deformMat.inverse() * pos;
+        Eigen::Vector2d xy_txy = deformPos - critial_point;
+        const double vastis = NormalizedVastistasV0(xy_txy.norm());
+        auto vp = deformMat * SiMat22 * xy_txy * vastis;
+        return vp;
+    };
+
     for (size_t i = 0; i < mgridDim_y; i++)
         for (size_t j = 0; j < mgridDim_x; j++) {
-            auto xy = getPosition(j, i);
-            Eigen::Vector2d xy_txy = xy - critial_point;
-            const double vastis = NormalizedVastistasV0(xy_txy.norm());
-
-            /*const double vp_row0 = SiMat22[0] * xy * v0;
-            const double vp_row1 = SiMat22[1] * xy * v0;*/
-            auto vp = SiMat22 * xy_txy * vastis;
-            data_[i][j] = vp;
+            auto pos = getPosition(j, i);
+            data_[i][j] = lambdaFunc(pos, 0.0);
         }
     Eigen::Vector2i XdimYdim = { mgridDim_x, mgridDim_y };
     SteadyVectorField2D steadyField {
@@ -80,33 +93,72 @@ SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField(double tx, d
         this->domainBoundaryMax,
         XdimYdim
     };
-    steadyField.analyticalFlowfunc_ = [this, SiMat22, critial_point](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
-        Eigen::Vector2d xy_txy = pos - critial_point;
-        const double vastis = NormalizedVastistasV0(xy_txy.norm());
-        auto vp = SiMat22 * xy_txy * vastis;
-        return vp;
-    };
-
+    steadyField.analyticalFlowfunc_ = lambdaFunc;
     return steadyField;
 }
-velocityFieldData VastistasVelocityGenerator::generateSteadyV2(double cx, double cy, double dx, double dy, double tx, double ty) const noexcept
+
+SteadyVectorField2D VastistasVelocityGenerator::generateSteadyFieldMixture(int mixture) const noexcept
 {
     std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d { 0.0, 0.0 }));
+    std::mt19937 rng(static_cast<unsigned int>(std::time(0)));
+    std::normal_distribution<double> genTx(0.0, 0.59);
+    std::normal_distribution<double> genTy(0.0, 0.62);
+    std::normal_distribution<double> genCx(0.0, 0.49);
+    std::normal_distribution<double> genDx(0.0, 0.35);
+    std::normal_distribution<double> genCy(0.0, 0.47);
+    std::normal_distribution<double> genDy(0.0, 0.25);
 
-    const Eigen::Vector2d dx_cx = { dx, cx };
-    const Eigen::Vector2d mcy_dy = { -cy, dy };
+    // random generate mixture pairs of sx,sy, theta
+    std::vector<Eigen::Matrix2d> mixturesParams;
+    std::vector<Eigen::Vector2d> txyParams;
+    for (int i = 0; i < mixture; i++) {
+        double tx = genTx(rng);
+        double ty = genTy(rng);
+        double cx = genCx(rng);
+        double dx = genDx(rng);
+        double cy = genCy(rng);
+        double dy = genDy(rng);
 
-    const Eigen::Vector2d critial_point = { tx, ty };
+        Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
+        deformMat(0, 0) = dx;
+        deformMat(0, 1) = cx;
+        deformMat(1, 0) = -cy;
+        deformMat(1, 1) = dy;
+        mixturesParams.emplace_back(deformMat);
+        txyParams.emplace_back(Eigen::Vector2d(tx, ty));
+    }
+
+    auto lambdaFunc = [this, mixturesParams, txyParams](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+        const int mixtureCount = mixturesParams.size();
+        Eigen::Vector2d result = Eigen::Vector2d::Zero();
+
+        for (int i = 0; i < mixtureCount; i++) {
+            auto deformMat = mixturesParams[i];
+            auto deformPos = deformMat.inverse() * pos;
+            auto critial_point = txyParams[i];
+            Eigen::Vector2d xy_txy = deformPos - critial_point;
+            const double vastis = NormalizedVastistasV0(xy_txy.norm());
+            auto vp = deformMat * xy_txy * vastis; // eq (6) of paper Robust Reference Frame Extraction
+            result += vp;
+        }
+        return result;
+    };
+
+    Eigen::Vector2i XdimYdim = { mgridDim_x, mgridDim_y };
     for (size_t i = 0; i < mgridDim_y; i++)
         for (size_t j = 0; j < mgridDim_x; j++) {
-            auto xy = getPosition(j, i);
-            Eigen::Vector2d xy_txy = xy - critial_point;
-            const double v0 = NormalizedVastistasV0(xy_txy.norm());
-            const double vp_row0 = dx_cx.dot(xy_txy) * v0;
-            const double vp_row1 = mcy_dy.dot(xy_txy) * v0;
-            data_[i][j] = { vp_row0, vp_row1 };
+            auto pos = getPosition(j, i);
+            data_[i][j] = lambdaFunc(pos, 0.0);
         }
-    return data_;
+
+    SteadyVectorField2D steadyField {
+        std::move(data_),
+        this->domainBoundaryMin,
+        this->domainBoundaryMax,
+        XdimYdim
+    };
+    steadyField.analyticalFlowfunc_ = lambdaFunc;
+    return steadyField;
 }
 
 AnalyticalFlowCreator::AnalyticalFlowCreator(Eigen::Vector2i grid_size, int time_steps /*= 10*/, Eigen::Vector2d domainBoundaryMin /*= Eigen::Vector2d(-2.0, -2.0)*/, Eigen::Vector2d domainBoundaryMax /*= Eigen::Vector2d(2.0, 2.0)*/,

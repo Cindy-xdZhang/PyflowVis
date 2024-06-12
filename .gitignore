@@ -9,7 +9,7 @@ CppModules/Pyds/__pycache__/
 CppModules/Pyds/*.pyd
 CppModules/build/
 
-
+models/
 
 CppProjects/build/
 CppProjects/data/

@@ -24,14 +24,22 @@ auto policy = std::execution::par_unseq;
 std::mt19937 rng(static_cast<unsigned int>(std::time(0)));
 using namespace std;
 
-const double tmin = 0.0;
-const double tmax = 2.0 * M_PI;
-const int Xdim = 64, Ydim = 64;
-const int LicImageSize = 64;
+constexpr double tmin = 0.0;
+constexpr double tmax = 2.0 * M_PI;
+constexpr int Xdim = 64, Ydim = 64;
+constexpr int LicImageSize = 64;
 Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
-const int unsteadyFieldTimeStep = 32;
-const int LicSaveFrequency = 4; // every 2 time steps save one
+constexpr int unsteadyFieldTimeStep = 32;
+constexpr int LicSaveFrequency = 4; // every 2 time steps save one
+
+std::string trimNumString(const std::string& numString)
+{
+    std::string str = numString;
+    str.erase(str.find_last_not_of('0') + 1, std::string::npos);
+    str.erase(str.find_last_not_of('.') + 1, std::string::npos);
+    return str;
+}
 
 // Function to save the 2D vector as a PNG image
 void saveAsPNG(const std::vector<std::vector<Eigen::Vector3d>>& data, const std::string& filename)
@@ -226,7 +234,7 @@ LICAlgorithm_UnsteadyField(const std::vector<std::vector<double>>& texture,
     resultData.resize(vecfield.timeSteps);
 
     std::transform(policy, timeIndex.begin(), timeIndex.end(), resultData.begin(), [&](int time) {
-        std::cout << "parallel lic rendering.. timeIndex size: " << time << std::endl;
+        // std::cout << "parallel lic rendering.. timeIndex size: " << time << std::endl;
         auto slice = vecfield.getVectorfieldSliceAtTime(time);
         auto licPic = LICAlgorithm(texture, slice, licImageSizeX, licImageSizeY, stepSize, MaxIntegrationSteps, curlColorBlend);
         return std::move(licPic);
@@ -259,6 +267,11 @@ std::vector<std::pair<double, double>> generateNParamters(int n)
     std::mt19937 rng(rd());
     std::normal_distribution<double> dist_rc(1.87, 0.37); // mean = 1.87, stddev = 0.37
     std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
+    if (parameters.size() > n) {
+        // take the frist n parameters
+        parameters.resize(n);
+        return parameters;
+    }
 
     while (parameters.size() < n) {
         double rc = dist_rc(rng);
@@ -522,28 +535,35 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
 
     // if inputField has analytical expression v(x,t) then result field u  has transformatd analytical expression u(x,y)=   pushforward* v(x*,t) =Q(t)^T *v(x*,t)
     if (inputField.analyticalFlowfunc_) {
-        resultField.analyticalFlowfunc_ = [inputField, dt, observerfield, observerRotationMatrices, pathPositions](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+        const Eigen ::Vector3d Os = { pathPositions[0].x(), pathPositions[0].y(), 1.0 };
+        resultField.Q_t.resize(timestep);
+        resultField.c_t.resize(timestep);
+        for (size_t i = 0; i < timestep; i++) {
+            //  frame transformation is F(x):x*=Q(t)x+c(t)  or x*=T(Os) *Q*T(-Pt)*x
+            //  =>F(x):x* = Q(t)*(x-pt)+Os= Qx-Q*pt+Os -> c=-Q*pt+Os  // => F^(-1)(x)= Q^T (x-c)= Q^T *( x+Q*pt-Os)
+            resultField.Q_t[i] = observerRotationMatrices[i].transpose();
+            auto& Q_t = resultField.Q_t[i];
+            const Eigen ::Vector3d position_t = { pathPositions[i].x(), pathPositions[i].y(), 1.0 };
+            Eigen ::Vector3d c_t = Os - Q_t * position_t;
+            resultField.c_t[i] = c_t;
+        }
+
+        resultField.analyticalFlowfunc_ = [inputField, observerfield, resultField, dt, observerRotationMatrices, pathPositions](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
             double tmin = observerfield.tmin;
             const double floatingTimeStep = (t - tmin) / dt;
             const int timestep_floor = std::clamp((int)std::floor(floatingTimeStep), 0, observerfield.timeSteps - 1);
             const int timestep_ceil = std::clamp((int)std::floor(floatingTimeStep) + 1, 0, observerfield.timeSteps - 1);
             const double ratio = floatingTimeStep - timestep_floor;
 
-            // const auto transformationMat = observertransformationMatrices[timestep_floor] * (1 - ratio) + observertransformationMatrices[timestep_ceil] * ratio;
-            const auto tmp = pathPositions[timestep_floor] * (1 - ratio) + pathPositions[timestep_ceil] * ratio;
-
+            const Eigen ::Matrix3d Q_t = resultField.Q_t[timestep_floor] * (1 - ratio) + resultField.Q_t[timestep_ceil] * ratio;
             const Eigen ::Matrix3d Q_transpose = observerRotationMatrices[timestep_floor] * (1 - ratio) + observerRotationMatrices[timestep_ceil] * ratio;
-            const Eigen ::Matrix3d Q_t = Q_transpose.transpose();
+            const Eigen ::Vector3d c_t = resultField.c_t[timestep_floor] * (1 - ratio) + resultField.c_t[timestep_ceil] * ratio;
             const Eigen ::Vector3d pos_3d = { pos.x(), pos.y(), 1.0 };
-            const Eigen ::Vector3d position_t = { tmp.x(), tmp.y(), 1.0 };
-            // frame transformation is F(x):x*=Q(t)x+c(t)  or x*=T(Os) *Q*T(-Pt)*x
-            // =>F(x):x* = Q(t)*(x-pt)+Os= Qx-Q*pt+Os -> c=-Q*pt+Os
-            const Eigen ::Vector3d Os = { pathPositions[0].x(), pathPositions[0].y(), 1.0 };
-            auto c_t = Os - Q_t * position_t;
+
             // => F^(-1)(x)= Q^T (x-c)= Q^T *( x+Q*pt-Os)
             Eigen ::Vector3d F_inverse_x = Q_transpose * (pos_3d - c_t);
             F_inverse_x /= F_inverse_x(2);
-            // get 2d position from 4d x_star
+
             Eigen::Vector2d F_inverse_x_2d = { F_inverse_x(0), F_inverse_x(1) };
             Eigen::Vector2d v = inputField.getVectorAnalytical(F_inverse_x_2d, t);
             auto u = observerfield.getVector(F_inverse_x(0), F_inverse_x(1), t);
@@ -859,16 +879,19 @@ void testKillingTransformationForRFC()
     }
 }
 
-void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inputLicImage, const SteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn, const Eigen::Vector2d& txy)
+void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inputLicImage, const SteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn, const Eigen::Vector2d& txy, const Eigen::Matrix2d& deformMat)
 {
     // if si=0 then no vortex
     if (meta_n_rc_si.z() == 0.0) {
         return;
     }
     const auto rc = meta_n_rc_si(1);
-    auto judgeVortex = [rc, txy](const Eigen::Vector2d& pos) -> bool {
+    const auto deformInverse = deformMat.inverse();
+
+    auto judgeVortex = [rc, txy, deformInverse](const Eigen::Vector2d& pos) -> bool {
+        auto posdeform = deformInverse * pos;
         Eigen::Vector2d center = { txy(0), txy(1) };
-        auto radius = (pos - center).norm();
+        auto radius = (posdeform - center).norm();
         return radius < rc;
     };
     const int licImageSizeY = inputLicImage.size();
@@ -913,7 +936,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     const double stepSize = 0.01;
     const int maxLICIteratioOneDirection = 200;
     int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
-    std::string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
+    std::string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "_nomix/";
     if (!filesystem::exists(root_folder)) {
         filesystem::create_directories(root_folder);
     }
@@ -933,22 +956,18 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     std::normal_distribution<double> genTx(0.0, 0.59);
 
     // Distribution for selecting type
-    std::uniform_int_distribution<int> dist_Observer_type(0, (int)ObserverType::NumTypes);
+    std::uniform_int_distribution<int> dist_Observer_type(0, (int)magic_enum::enum_count<ObserverType>());
     std::uniform_int_distribution<int> dist_int(0, 4); // we prefer more si =1,2->generate 0,1,2,3,4->ceil(divide by two)
 
     for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
         const double rc = params.first;
         const double n = params.second;
-        std::string str_Rc = std::to_string(rc);
-        str_Rc.erase(str_Rc.find_last_not_of('0') + 1, std::string::npos);
-        str_Rc.erase(str_Rc.find_last_not_of('.') + 1, std::string::npos);
-        std::string str_n = std::to_string(n);
-        str_n.erase(str_n.find_last_not_of('0') + 1, std::string::npos);
-        str_n.erase(str_n.find_last_not_of('.') + 1, std::string::npos);
+        std::string str_Rc = trimNumString(std::to_string(rc));
+        std::string str_n = trimNumString(std::to_string(n));
 
         VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
-
-        printf("generate %d sample for rc=%f , n=%f \n", numVelocityFields, rc, n);
+        int totalSamples = numVelocityFields * observerPerSetting;
+        printf("generate %d sample for rc=%f , n=%f \n", totalSamples, rc, n);
 
         const string Major_task_foldername = "velocity_rc_" + str_Rc + "n_" + str_n + "/";
         const string Major_task_Licfoldername = Major_task_foldername + "/LIC/";
@@ -982,9 +1001,10 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
         for (size_t sample = 0; sample < numVelocityFields; sample++) {
 
             // generate steady field with vortex
+            int Si = std::clamp((int)std::ceil(dist_int(rng) / 2), 0, 2);
             const auto theta = genTheta(rng);
-            const auto sx = 0.5f * genSx(rng);
-            const auto sy = 0.5f * genSx(rng);
+            const auto sx = 0.5 * genSx(rng) + 0.5; // scaling range from 0.5-1.5
+            const auto sy = 0.5 * genSx(rng) + 0.5;
             auto tx = genTx(rng);
             auto ty = genTx(rng);
             // clamp tx ty to 0.5*domian
@@ -992,16 +1012,18 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             ty = std::clamp(ty, 0.5 * domainMinBoundary.y(), 0.5 * domainMaxBoundary.y());
             Eigen::Vector2d txy = { tx, ty };
 
-            int Si = std::clamp((int)std::ceil(dist_int(rng) / 2), 0, 2);
             Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
             const SteadyVectorField2D steadyField = generator.generateSteadyField(tx, ty, sx, sy, theta, Si);
-            const auto& resData = steadyField.field;
+            const auto& steadyFieldResData = steadyField.field;
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
-
+                printf(".");
                 // Randomly select a type
-                const int type = dist_Observer_type(rng);
+                int type
+                    = dist_Observer_type(rng);
 
-                const string sample_tag_name = "rc_" + str_Rc + "_n_" + str_n + "_sample_" + to_string(sample) + "Si_" + to_string(Si) + "observer_" + to_string(observerIndex) + "type_" + to_string(type);
+                const auto observer_name = std::string { magic_enum::enum_name((ObserverType)type) };
+                const int taskSampleId = sample * observerPerSetting + observerIndex;
+                const string sample_tag_name = "rc_" + str_Rc + "_n_" + str_n + "_sample_" + to_string(taskSampleId) + "Si_" + to_string(Si) + "observer_" + observer_name;
 
                 // printf("generating sample %s \n", sample_tag_name.c_str());
                 //  create folder for every n rc parameter setting.
@@ -1009,21 +1031,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 string metaFilename = task_folder + sample_tag_name + "meta.json";
                 string velocityFilename = task_folder + sample_tag_name + ".bin";
 
-                // save meta info:
-                std::ofstream jsonOut(metaFilename);
-                if (!jsonOut.good()) {
-                    printf("couldn't open file: %s", metaFilename.c_str());
-                    return;
-                }
-                std::ofstream outBin(velocityFilename, std::ios::binary);
-                if (!outBin.good()) {
-                    printf("couldn't open file: %s", velocityFilename.c_str());
-                    return;
-                }
-
-                cereal::BinaryOutputArchive archive_Binary(outBin);
-                const std::vector<float> rawData = flatten2DAs1Dfloat(resData);
-                auto [minV, maxV] = computeMinMax(rawData);
+                const std::vector<float> rawSteadyData = flatten2DAs1Dfloat(steadyFieldResData);
 
                 auto func = KillingComponentFunctionFactory::randomObserver(type);
 
@@ -1035,49 +1043,43 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 KillingAbcField observerfield(
                     inv_func, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
 
-                {
-                    cereal::JSONOutputArchive archive_o(jsonOut);
-                    /*     archive_o(CEREAL_NVP(Xdim));
-                         archive_o(CEREAL_NVP(Ydim));
-                         archive_o(CEREAL_NVP(domainMinBoundary));
-                         archive_o(CEREAL_NVP(domainMaxBoundary));*/
-
-                    Eigen::Vector3d deform = { theta, sx, sy };
-                    archive_o(cereal::make_nvp("n_rc_Si", n_rc_si));
-                    archive_o(cereal::make_nvp("deform_theta_sx_sy", deform));
-                    archive_o(cereal::make_nvp("txy", txy));
-                    // archive_o(CEREAL_NVP(theta));
-                    // archive_o(CEREAL_NVP(sx));
-                    // archive_o(CEREAL_NVP(sy));
-                    archive_o(CEREAL_NVP(minV));
-                    archive_o(CEREAL_NVP(maxV));
-                    // meta for observer field
-                    archive_o(cereal::make_nvp("Observer Type", type));
-                    archive_o(CEREAL_NVP(observerfieldDeform));
-                }
-
-                // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
-                jsonOut.close();
-
                 Eigen::Vector2d StartPosition = { 0.0, 0.0 };
                 auto unsteady_field = killingABCtransformation(observerfieldDeform, StartPosition, steadyField);
                 // reconstruct unsteady field from observer field
                 auto reconstruct_field = killingABCtransformation(observerfield, StartPosition, unsteady_field);
-                // #if _DEBUG
+
+                // validate reference transformation
+                auto& Q_t_deforming = unsteady_field.Q_t;
+                auto& c_t_deforming = unsteady_field.c_t;
+
+                auto& Q_t_rec = reconstruct_field.Q_t;
+                auto& c_t_rec = reconstruct_field.c_t;
+                for (size_t rec = 0; rec < reconstruct_field.field.size() - 1; rec++) {
+                    Eigen ::Matrix3d shouldbeI = (Q_t_deforming[rec] * Q_t_rec[rec]);
+                    auto shouldbe0 = c_t_deforming[rec] + c_t_rec[rec];
+                    if ((shouldbeI - Eigen::Matrix3d::Identity()).norm() > 1e-7 || shouldbe0.norm() > 1e-7) {
+                        printf("\n\n");
+                        printf("\n observer transformation not equal to inverse observer transformation at step %u,check observe type %s\n", (unsigned int)rec, observer_name.c_str());
+                        printf("\n\n");
+                    }
+                }
+
                 // //validate reconstruction result
-                for (size_t rec = 1; rec < reconstruct_field.field.size() - 1; rec++) {
+                for (size_t rec = 0; rec < reconstruct_field.field.size() - 1; rec++) {
                     auto reconstruct_slice = reconstruct_field.field[rec];
                     // compute reconstruct slice difference with steady field
                     double diffSum = 0.0;
                     for (size_t y = 1; y < Ydim - 1; y++)
                         for (size_t x = 1; x < Xdim - 1; x++) {
-                            auto diff = reconstruct_slice[y][x] - resData[y][x];
+                            auto diff = reconstruct_slice[y][x] - steadyFieldResData[y][x];
                             diffSum += diff.norm();
                         }
-                    // has debug, major reson for reconstruction failure is velocity too big make observer transformation query value from region out of boundary
-                    if (diffSum > (Xdim - 2) * (Ydim - 2) * 0.001) {
+                    double tolerance = (Xdim - 2) * (Ydim - 2) * 0.01;
+                    tolerance = (rec == 0) ? 1e-7 : tolerance;
+                    // has debug, major reason for reconstruction failure is velocity too big make observer transformation query value from region out of boundary
+                    if (diffSum > tolerance) {
                         printf("\n\n");
-                        printf("reconstruct field not equal to steady field at step %u,check observe type %d\n", (unsigned int)rec, type);
+                        printf("\n reconstruct field not equal to steady field at step %u,check observe type %s\n", (unsigned int)rec, observer_name.c_str());
                         printf("\n\n");
                     }
                 }
@@ -1089,7 +1091,12 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 {
                     auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     // add segmentation visualization for steady lic
-                    addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy);
+                    Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
+                    deformMat(0, 0) = sx * cos(theta);
+                    deformMat(0, 1) = -sy * sin(theta);
+                    deformMat(1, 0) = sx * sin(theta);
+                    deformMat(1, 1) = sy * cos(theta);
+                    addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy, deformMat);
                     string steadyField_name = "steady_beforeTransformation_";
                     string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
                     saveAsPNG(outputSteadyTexture, licFilename0);
@@ -1107,6 +1114,40 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                         saveAsPNG(outputTexturesReconstruct[i], licFilename_rec);
                     }
                     auto rawUnsteadyFieldData = flatten3DAs1Dfloat(unsteady_field.field);
+                    auto [minV, maxV] = computeMinMax(rawUnsteadyFieldData);
+                    // save meta info:
+                    std::ofstream jsonOut(metaFilename);
+                    if (!jsonOut.good()) {
+                        printf("couldn't open file: %s", metaFilename.c_str());
+                        return;
+                    }
+                    {
+                        cereal::JSONOutputArchive archive_o(jsonOut);
+                        /*     archive_o(CEREAL_NVP(Xdim));
+                             archive_o(CEREAL_NVP(Ydim));
+                             archive_o(CEREAL_NVP(domainMinBoundary));
+                             archive_o(CEREAL_NVP(domainMaxBoundary));*/
+
+                        Eigen::Vector3d deform = { theta, sx, sy };
+                        archive_o(cereal::make_nvp("n_rc_Si", n_rc_si));
+                        archive_o(cereal::make_nvp("deform_theta_sx_sy", deform));
+                        archive_o(cereal::make_nvp("txy", txy));
+
+                        archive_o(CEREAL_NVP(minV));
+                        archive_o(CEREAL_NVP(maxV));
+                        // meta for observer field
+                        archive_o(cereal::make_nvp("Observer Type", observer_name));
+                        archive_o(CEREAL_NVP(observerfieldDeform));
+                    }
+                    // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
+                    jsonOut.close();
+                    std::ofstream outBin(velocityFilename, std::ios::binary);
+                    if (!outBin.good()) {
+                        printf("couldn't open file: %s", velocityFilename.c_str());
+                        return;
+                    }
+
+                    cereal::BinaryOutputArchive archive_Binary(outBin);
                     // write raw data
                     // ar(make_size_tag(static_cast<size_type=uint64>(vector.size()))); // number of elements
                     // ar(binary_data(vector.data(), vector.size() * sizeof(T)));
@@ -1128,7 +1169,7 @@ void testCriterion()
     const int maxLICIteratioOneDirection = 256;
     int numVelocityFields = 1; // num of fields per n, rc parameter setting
     const int LicSaveFrequency = 2;
-    std::string root_folder = "../data/test_criterion_sj/";
+    std::string root_folder = "../data/test_criterion/";
     if (!filesystem::exists(root_folder)) {
         filesystem::create_directories(root_folder);
     }
@@ -1148,12 +1189,13 @@ void testCriterion()
 
     // add segmentation visualization for lic
     std::vector<std::pair<VORTEX_CRITERION, std::string>> enumCriterion = {
-        /*  { VORTEX_CRITERION::Q_CRITERION, "Q_CRITERION" },
-          { VORTEX_CRITERION::CURL, "CURL" },
-          { VORTEX_CRITERION::IVD_CRITERION, "IVD_CRITERION" },
-          { VORTEX_CRITERION::LAMBDA2_CRITERION, "LAMBDA2_CRITERION" },
-          { VORTEX_CRITERION::DELTA_CRITERION, "DELTA_CRITERION" },*/
-        { VORTEX_CRITERION::SUJUDI_HAIMES_CRITERION, "SUJUDI_HAIMES" }
+        //{ VORTEX_CRITERION::Q_CRITERION, "Q_CRITERION" },
+        //{ VORTEX_CRITERION::CURL, "CURL" },
+        //{ VORTEX_CRITERION::IVD_CRITERION, "IVD_CRITERION" },
+        //{ VORTEX_CRITERION::LAMBDA2_CRITERION, "LAMBDA2_CRITERION" },
+        //{ VORTEX_CRITERION::DELTA_CRITERION, "DELTA_CRITERION" },
+        //{ VORTEX_CRITERION::SUJUDI_HAIMES_CRITERION, "SUJUDI_HAIMES" },
+        { VORTEX_CRITERION::SOBEL_EDGE_DETECTION, "SOBEL_EDGE" }
     };
 
     for (size_t i = 0; i < enumCriterion.size(); i++) {
