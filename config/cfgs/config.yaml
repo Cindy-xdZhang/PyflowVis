@@ -13,7 +13,7 @@ network:
 dataset:
     # datasetname: 'mnist'has this area if there are multiple datasets to select from
     root: 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data'
-    time_steps: 7
+    time_steps: 16
     transform: 'ToTensor'
 
 training: 
@@ -21,7 +21,7 @@ training:
   # device: 'cpu'
   optimizer: Adam
   learning_rate: 0.001
-  epochs: 50
+  epochs: 100
   loss_function: MSELoss
   batch_size: 48
   shuffle: True

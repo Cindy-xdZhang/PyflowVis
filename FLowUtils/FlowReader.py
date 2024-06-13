@@ -46,11 +46,17 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
     # Ydim=metaINFo['Ydim']
     #observe and unsteady info 
     
-    labelReferenceFrameABC=metaINFo['observerfieldDeform']["abcs_"]
-    abc_t=[]
-    for abcDict_of_time_step_t in labelReferenceFrameABC:
-        abs_slice=[abcDict_of_time_step_t["value0"],abcDict_of_time_step_t["value1"],abcDict_of_time_step_t["value2"]] 
-        abc_t.append(abs_slice)
+    Q_tInfo=metaINFo['Q(t)']
+    c_tInfo=metaINFo['c(t)']
+    Q_t=[]
+    c_t=[]
+    for abcDict_of_time_step_t in Q_tInfo:
+        q_slice=[abcDict_of_time_step_t["value0"],abcDict_of_time_step_t["value1"],abcDict_of_time_step_t["value2"],abcDict_of_time_step_t["value3"] ]
+        Q_t.append(q_slice)
+    for abcDict_of_time_step_t in c_tInfo:
+        c_slice=[abcDict_of_time_step_t["value0"],abcDict_of_time_step_t["value1"]] 
+        c_t.append(c_slice)
+
         
                             
     n,rc,si=metaINFo['n_rc_Si']["value0"],metaINFo['n_rc_Si']["value1"],metaINFo['n_rc_Si']["value2"]
@@ -66,7 +72,13 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
 
     fieldData = raw_Binary.reshape( time_steps,Ydim,Xdim, 2)
     vortexLableData= np.array([tx,ty,n,rc],dtype=np.float32) 
-    abc_t= np.array(abc_t,dtype=np.float32) 
-    return fieldData, abc_t,vortexLableData
+    Q_t= np.array(Q_t,dtype=np.float32)
+    c_t= np.array(c_t,dtype=np.float32)
+    assert(fieldData.shape[0]==time_steps)
+    assert(Q_t.shape[0]==time_steps and Q_t.shape[1]==4) 
+    assert(c_t.shape[0]==time_steps and c_t.shape[1]==2)
+    # abc_t= np.array(abc_t,dtype=np.float32) 
+    # assert(abc_t.shape[0]==time_steps)
+    return fieldData, (Q_t,c_t),vortexLableData
 
 

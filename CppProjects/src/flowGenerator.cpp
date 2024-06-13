@@ -928,6 +928,66 @@ void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inp
         }
     }
 }
+void addSegmentationVisualization(std::vector<std::vector<std::vector<Eigen::Vector3d>>>& inputLicImages, const UnSteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn, const Eigen::Vector2d& txy, const Eigen::Matrix2d& deformMat)
+{
+    // if si=0 then no vortex
+    if (meta_n_rc_si.z() == 0.0) {
+        return;
+    }
+    const auto rc = meta_n_rc_si(1);
+    const auto deformInverse = deformMat.inverse();
+
+    auto judgeVortexInSteadyField = [rc, txy, deformInverse](const Eigen::Vector2d& pos) -> bool {
+        auto posdeform = deformInverse * pos;
+        Eigen::Vector2d center = { txy(0), txy(1) };
+        auto radius = (posdeform - center).norm();
+        return radius < rc;
+    };
+    const int licImageSizeY = inputLicImages[0].size();
+    const int licImageSizeX = inputLicImages[0][0].size();
+    const auto domainRange = domainMax - domainMIn;
+    const auto dx = domainRange(0) / licImageSizeX;
+    const auto dy = domainRange(1) / licImageSizeY;
+    const auto maxDistanceAnyPoint2gridPoints = sqrt((0.5 * dx) * (0.5 * dx) + (0.5 * dy) * (0.5 * dy));
+
+    assert(vectorField.Q_t.size() == vectorField.timeSteps);
+    assert(vectorField.c_t.size() == vectorField.timeSteps);
+    double dt = (vectorField.tmax - vectorField.tmin) / double(vectorField.timeSteps - 1);
+    for (size_t t = 0; t < vectorField.timeSteps; t++) {
+        auto& inputLicImage = inputLicImages[t];
+        auto Q_inverse = vectorField.Q_t[t].transpose();
+        auto c_t = vectorField.c_t[t];
+        double time = vectorField.tmin + t * dt;
+        for (size_t i = 0; i < licImageSizeX; i++) {
+            for (size_t j = 0; j < licImageSizeY; j++) {
+                // map position from texture image grid coordinate to vector field
+                double ratio_x = (double)((double)i / (double)licImageSizeX);
+                double ratio_y = (double)((double)j / (double)licImageSizeY);
+
+                Eigen::Vector3d posInObserverFrame = { ratio_x * domainRange(0) + domainMIn(0),
+                    ratio_y * domainRange(1) + domainMIn(1), 1.0 };
+
+                Eigen ::Vector3d F_inverse_x = Q_inverse * (posInObserverFrame - c_t);
+                F_inverse_x /= F_inverse_x(2);
+                Eigen::Vector2d posInOriginalFrame = { F_inverse_x(0), F_inverse_x(1) };
+
+                if (judgeVortexInSteadyField(posInOriginalFrame)) {
+                    auto preColor = inputLicImage[j][i];
+                    // red for critial point(coreline)
+                    auto velocity = vectorField.getVector(posInObserverFrame.x(), posInObserverFrame.y(), time);
+                    // !note: because txy is random core line center, then critical point==txy(velocity ==0.0) might not  lie on any grid points
+                    if (velocity.norm() < 1e-7 || (posInOriginalFrame - txy).norm() < maxDistanceAnyPoint2gridPoints)
+                        [[unlikely]] {
+                        inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 0.0, 0.0);
+                    } else {
+                        // yellow for vortex region
+                        inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 1.0, 0.0);
+                    }
+                }
+            }
+        }
+    }
+}
 
 // number of result traing data = Nparamters * samplePerParameters * observerPerSetting
 void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting)
@@ -956,7 +1016,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     std::normal_distribution<double> genTx(0.0, 0.59);
 
     // Distribution for selecting type
-    std::uniform_int_distribution<int> dist_Observer_type(0, (int)magic_enum::enum_count<ObserverType>());
+    std::uniform_int_distribution<int> dist_Observer_type(0, (int)(magic_enum::enum_count<ObserverType>() - 1));
     std::uniform_int_distribution<int> dist_int(0, 4); // we prefer more si =1,2->generate 0,1,2,3,4->ceil(divide by two)
 
     for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
@@ -1022,6 +1082,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     = dist_Observer_type(rng);
 
                 const auto observer_name = std::string { magic_enum::enum_name((ObserverType)type) };
+
                 const int taskSampleId = sample * observerPerSetting + observerIndex;
                 const string sample_tag_name = "rc_" + str_Rc + "_n_" + str_n + "_sample_" + to_string(taskSampleId) + "Si_" + to_string(Si) + "observer_" + observer_name;
 
@@ -1103,10 +1164,11 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
 
                     auto outputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(licNoisetexture, reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
-
+                    addSegmentationVisualization(outputTextures, unsteady_field, n_rc_si, domainMaxBoundary, domainMinBoundary, txy, deformMat);
                     for (size_t i = 0; i < outputTextures.size(); i += LicSaveFrequency) {
                         string tag_name = sample_tag_name + "killing_deformed_" + std::to_string(i);
                         string licFilename = task_licfolder + tag_name + "lic.png";
+
                         saveAsPNG(outputTextures[i], licFilename);
 
                         string tag_name_rec = sample_tag_name + "reconstruct_" + std::to_string(i);
@@ -1138,6 +1200,17 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                         // meta for observer field
                         archive_o(cereal::make_nvp("Observer Type", observer_name));
                         archive_o(CEREAL_NVP(observerfieldDeform));
+
+                        std::vector<Eigen::Matrix2d> Q_t2d;
+                        Q_t2d.reserve(unsteadyFieldTimeStep);
+                        for (size_t i = 0; i < unsteadyFieldTimeStep; i++) {
+                            // matix3d unsteady_field.Q_t[i] to matrix2d
+                            Eigen::Matrix2d Q_t2d_t = unsteady_field.Q_t[i].block<2, 2>(0, 0);
+                            Q_t2d.push_back(Q_t2d_t);
+                        }
+
+                        archive_o(cereal::make_nvp("Q(t)", Q_t2d));
+                        archive_o(cereal::make_nvp("c(t)", unsteady_field.c_t));
                     }
                     // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
                     jsonOut.close();

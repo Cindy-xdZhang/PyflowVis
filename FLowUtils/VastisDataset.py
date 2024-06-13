@@ -50,16 +50,19 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         for binFile in binFiles:
             binPath=os.path.join(sub_folder,binFile)
             #split according to slicePerData 
-            loadField, labelReferenceFrameABC,vortexlabel=loadOneFlowEntryRawData(binPath, Xdim,Ydim,time_steps)
+            loadField, labelReferenceFrame,vortexlabel=loadOneFlowEntryRawData(binPath, Xdim,Ydim,time_steps)
             timesteps=loadField.shape[0]
             TimeWindowCount=timesteps//self.slicePerData
+
             for i in range(0,TimeWindowCount):
                 sliceStart=i*self.slicePerData
                 sliceEnd=(i+1)*self.slicePerData
                 # dataSlice=loadField.getSlice(sliceStart,sliceEnd)
                 dataSlice=loadField[sliceStart:sliceEnd]
                 self.data.append(dataSlice)
-                self.labelReferenceFrame.append( labelReferenceFrameABC[sliceStart:sliceEnd,:] )
+                q_t,c_t=labelReferenceFrame
+                labelReferenceFrame_slice=(q_t[sliceStart:sliceEnd,:],c_t[sliceStart:sliceEnd,:])
+                self.labelReferenceFrame.append(labelReferenceFrame_slice )
                 self.labelVortex.append(vortexlabel)#vortexlabel=[tx,ty,n,rc] 
 
     def preLoading(self,mode):        

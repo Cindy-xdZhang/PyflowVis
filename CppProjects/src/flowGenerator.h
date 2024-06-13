@@ -61,9 +61,9 @@ struct KillingComponentFunctionFactory {
         case SinCurve:
             return SinCurveObserver(direction, scale, rot);
         case StepRotation:
-            return stepRotation(scale, 0.5 * acc * M_PI);
+            return stepRotation(scale, 0.1 * acc * M_PI);
         case StepTranslation:
-            return stepTranslation(direction, scale, 0.5 * acc * M_PI);
+            return stepTranslation(direction, scale, 0.1 * acc * M_PI);
         case ArbitraryTranslation:
             return ArbitraryDirectionTranslation(scaleA, scaleB);
         default:

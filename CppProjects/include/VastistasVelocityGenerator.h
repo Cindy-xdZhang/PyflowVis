@@ -129,6 +129,7 @@ public:
     Eigen::Vector2d spatialDomainMaxBoundary;
     Eigen::Vector2d spatialGridInterval;
     Eigen::Vector2i XdimYdim;
+
     // UnSteadyVectorField2D  might have analytical expression, then when query value from out of boundary is return valid value.
     AnalyticalFlowFunc2D analyticalFlowfunc_ = nullptr;
     Eigen::Vector2d getSpatialMinBoundary() const { return spatialDomainMinBoundary; }
@@ -265,6 +266,11 @@ template <class Archive>
 void save(Archive& ar, const Eigen::Vector3d& vec)
 {
     ar(vec.x(), vec.y(), vec.z());
+}
+template <class Archive>
+void save(Archive& ar, const Eigen::Matrix2d& vec)
+{
+    ar(vec(0, 0), vec(0, 1), vec(1, 0), vec(1, 1));
 }
 }
 

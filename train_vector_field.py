@@ -42,73 +42,99 @@ def load_checkpoint(checkpoint, model, optimizer):
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
 
+def init_weights(m):
+    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv3d):
+        torch.nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            torch.nn.init.zeros_(m.bias)
+
+
 
 class CNN3D(nn.Module):
-    def __init__(self,inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize=64):
+    def __init__(self, inputChannels, DataSizeX, DataSizeY, TimeSteps, outputDim, hiddenSize=64, dropout_prob=0.2):
         super(CNN3D, self).__init__()
-        #the input tensor of Conv3d should be in the shape of [batch_size, in_channel, depth, height, width]
+        # the input tensor of Conv3d should be in the shape of [batch_size, in_channel, depth, height, width]
         self.conv1_1 = nn.Conv3d(in_channels=inputChannels, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn1_1 = nn.BatchNorm3d(hiddenSize)
         self.conv1_2 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn1_2 = nn.BatchNorm3d(hiddenSize)
         self.conv1_3 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn1_3 = nn.BatchNorm3d(hiddenSize)
         self.pool1 = nn.MaxPool3d(kernel_size=2, stride=2)
+        self.dropout1 = nn.Dropout3d(dropout_prob)
 
         self.conv2_1 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn2_1 = nn.BatchNorm3d(hiddenSize)
         self.conv2_2 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn2_2 = nn.BatchNorm3d(hiddenSize)
         self.conv2_3 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn2_3 = nn.BatchNorm3d(hiddenSize)
 
         self.conv2b_1 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn2b_1 = nn.BatchNorm3d(hiddenSize)
         self.conv2b_2 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn2b_2 = nn.BatchNorm3d(hiddenSize)
         self.conv2b_3 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
-
+        self.bn2b_3 = nn.BatchNorm3d(hiddenSize)
 
         self.conv3_1 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn3_1 = nn.BatchNorm3d(hiddenSize)
         self.conv3_2 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn3_2 = nn.BatchNorm3d(hiddenSize)
         self.conv3_3 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
+        self.bn3_3 = nn.BatchNorm3d(hiddenSize)
         self.pool3 = nn.MaxPool3d(kernel_size=2, stride=2)
+        self.dropout3 = nn.Dropout3d(dropout_prob)
 
         # Flatten for fully connected layer
         self.flatten = nn.Flatten()
         
         # Fully connected layer
-        DataSizeX=DataSizeX//4
-        DataSizeY=DataSizeY//4
-        TimeSteps=TimeSteps//4
-        self.fc1 = nn.Linear(hiddenSize * DataSizeX* DataSizeY*TimeSteps, hiddenSize)
+        DataSizeX = DataSizeX // 4
+        DataSizeY = DataSizeY // 4
+        TimeSteps = TimeSteps // 4
+        self.fc1 = nn.Linear(hiddenSize * DataSizeX * DataSizeY * TimeSteps, hiddenSize)
         self.fc2 = nn.Linear(hiddenSize, hiddenSize)
-        self.fc3 = nn.Linear(hiddenSize, ouptputDim)
+        self.fc3 = nn.Linear(hiddenSize, outputDim)
+        self.dropout_fc = nn.Dropout(dropout_prob)
 
     def forward(self, x):
-        #  x: [batch_size, 64, 64, channel=2]
-        x = F.relu(self.conv1_1(x))
-        x =  F.relu(self.conv1_2(x))
-        x =  F.relu(self.conv1_3(x))        
-        x = self.pool1(x)  # Downsample 1
+        # Conv Block 1
+        x = F.relu(self.bn1_1(self.conv1_1(x)))
+        x = F.relu(self.bn1_2(self.conv1_2(x)))
+        x = F.relu(self.bn1_3(self.conv1_3(x)))
+        x = self.pool1(x)
+        x = self.dropout1(x)
 
+        # Conv Block 2
         residual0 = x
-        x = F.relu(self.conv2_1(x))
-        x = F.relu(self.conv2_2(x))
-        x = F.relu(self.conv2_3(x))
+        x = F.relu(self.bn2_1(self.conv2_1(x)))
+        x = F.relu(self.bn2_2(self.conv2_2(x)))
+        x = F.relu(self.bn2_3(self.conv2_3(x)))
         x = x + residual0
 
         residual0 = x
-        x = F.relu(self.conv2b_1(x))
-        x = F.relu(self.conv2b_2(x))
-        x = F.relu(self.conv2b_3(x))
+        x = F.relu(self.bn2b_1(self.conv2b_1(x)))
+        x = F.relu(self.bn2b_2(self.conv2b_2(x)))
+        x = F.relu(self.bn2b_3(self.conv2b_3(x)))
         x = x + residual0
 
-        #residual block
+        # Conv Block 3
         residual = x
-        x = F.relu(self.conv3_1(x))
-        x = F.relu(self.conv3_2(x))
-        x = F.relu(self.conv3_3(x))
+        x = F.relu(self.bn3_1(self.conv3_1(x)))
+        x = F.relu(self.bn3_2(self.conv3_2(x)))
+        x = F.relu(self.bn3_3(self.conv3_3(x)))
         x = x + residual
-        x = self.pool3(x)  # Downsample 2
+        x = self.pool3(x)
+        x = self.dropout3(x)
 
         # Flatten and fully connected layer
         x = self.flatten(x)
-        x = F.relu( self.fc1(x))
-        x = x+ F.relu( self.fc2(x))
-        x = F.relu( self.fc3(x))
+        x = F.relu(self.fc1(x))
+        x = self.dropout_fc(x)
+        x = F.relu(self.fc2(x))
+        x = self.dropout_fc(x)
+        x = self.fc3(x)
         return x
 
 #! todo: add vector field reconstruction loss into  ReferenceFrameExtractor
@@ -156,10 +182,11 @@ def train_pipeline():
     device=training_args['device']
     #initialize the model
     slicePerdata=config["dataset"]['time_steps']
-    model=ReferenceFrameExtractor(2, 64,64,slicePerdata,ouptputDim=3*slicePerdata, hiddenSize=64)
+    model=ReferenceFrameExtractor(2, 64,64,slicePerdata,ouptputDim=6*slicePerdata, hiddenSize=64)
+    model.apply(init_weights)
     model.to(device)
     #initialize the optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
     #training 
     for epoch in range(epochs):
         epochLoss=0
@@ -168,17 +195,22 @@ def train_pipeline():
             #transpose to [batch_size, chanel=2, depth(timsteps)=7,W=64, H=64]
             vectorFieldImage=vectorFieldImage.transpose(1,4)
             vectorFieldImage, label = vectorFieldImage.to(device),  labelVortex.to(device)
+
+            Qt,tc=labelferenceFrame
+            labelQtct=torch.concat((Qt,tc),dim=2)
+            labelQtct=labelQtct.to(device)
+
             # tx,ty,n,rc =labelVortex[0],labelVortex[1],labelVortex[2],labelVortex[3]
-            labelferenceFrame=labelferenceFrame.reshape(bacth_size,-1).to(device)
+            labelQtct=labelQtct.reshape(vectorFieldImage.shape[0],-1).to(device)
             optimizer.zero_grad()
             output = model(vectorFieldImage)    
 
-            loss = F.mse_loss(output, labelferenceFrame)
+            loss = F.mse_loss(output, labelQtct)
             loss.backward() 
             optimizer.step()
             epochLoss+=loss.item()
             #print loss in every 50 epoch
-            if batch_idx % 50 == 0:
+            if batch_idx % 20 == 0:
                 print(f'Epoch {epoch+1}, iter {batch_idx+1},  Loss: {loss.item()}')
 
         epochLoss/=len(data_loader)
@@ -259,8 +291,8 @@ def test_load_results():
 
     
 
-if __name__ == '__main__':
-   test_load_results()
-
 # if __name__ == '__main__':
-#     train_pipeline()
+#    test_load_results()
+
+if __name__ == '__main__':
+    train_pipeline()
