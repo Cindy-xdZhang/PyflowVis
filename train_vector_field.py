@@ -155,7 +155,7 @@ class ReferenceFrameExtractor(nn.Module):
             nn.BatchNorm3d(hiddenSize),
             nn.ReLU(inplace=True),
             nn.ConvTranspose3d(hiddenSize, inputChannels, kernel_size=2, stride=2),
-            nn.Sigmoid()  # Assuming the reconstructed field is normalized to [0, 1]
+            nn.ReLU()  # Assuming the reconstructed field is normalized to [0, 1]
         )
 
     def forward(self, image):

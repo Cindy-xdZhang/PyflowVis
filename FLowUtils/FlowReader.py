@@ -36,7 +36,7 @@ def read_binary_file(filepath, dtype=np.float32) -> np.ndarray:
 
 
 
-def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
+def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps,ForcePositiveNormalization=True):
     raw_Binary = read_binary_file(binPath)
 
     #get meta information
@@ -77,6 +77,13 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
     assert(fieldData.shape[0]==time_steps)
     assert(Q_t.shape[0]==time_steps and Q_t.shape[1]==4) 
     assert(c_t.shape[0]==time_steps and c_t.shape[1]==2)
+    if ForcePositiveNormalization:
+        #force to make every tensor positive
+        fieldData = (fieldData - metaINFo['minV']) / (metaINFo['maxV'] - metaINFo['minV'])
+        c_t=(c_t -(-2)) / (4)
+        Q_t=Q_t+1
+
+
     # abc_t= np.array(abc_t,dtype=np.float32) 
     # assert(abc_t.shape[0]==time_steps)
     return fieldData, (Q_t,c_t),vortexLableData
