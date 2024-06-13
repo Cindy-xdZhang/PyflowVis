@@ -53,7 +53,7 @@ def init_weights(m):
 class CNN3D(nn.Module):
     def __init__(self, inputChannels, DataSizeX, DataSizeY, TimeSteps, outputDim, hiddenSize=64, dropout_prob=0.2):
         super(CNN3D, self).__init__()
-        # the input tensor of Conv3d should be in the shape of [batch_size, in_channel, depth, height, width]
+        # the input tensor of Conv3d should be in the shape of[batch_size, chanel=2,W=64, H=64, depth(timsteps)=7]
         self.conv1_1 = nn.Conv3d(in_channels=inputChannels, out_channels=hiddenSize, kernel_size=3, padding=1)
         self.bn1_1 = nn.BatchNorm3d(hiddenSize)
         self.conv1_2 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize, kernel_size=3, padding=1)
@@ -142,13 +142,34 @@ class ReferenceFrameExtractor(nn.Module):
     def __init__(self,inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize=64):
         super(ReferenceFrameExtractor, self).__init__()
         self.cnn = CNN3D(inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize)
-
+        self.reconstructor = nn.Sequential(
+            nn.Conv3d(inputChannels+6, hiddenSize, kernel_size=3, padding=1),
+            nn.BatchNorm3d(hiddenSize),
+            nn.ReLU(inplace=True),
+            nn.MaxPool3d(kernel_size=2, stride=2),
+            nn.Conv3d(hiddenSize, hiddenSize * 2, kernel_size=3, padding=1),
+            nn.BatchNorm3d(hiddenSize * 2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool3d(kernel_size=2, stride=2),
+            nn.ConvTranspose3d(hiddenSize * 2, hiddenSize, kernel_size=2, stride=2),
+            nn.BatchNorm3d(hiddenSize),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose3d(hiddenSize, inputChannels, kernel_size=2, stride=2),
+            nn.Sigmoid()  # Assuming the reconstructed field is normalized to [0, 1]
+        )
 
     def forward(self, image):
+        #image [batch_size, chanel=2,W=64, H=64, depth(timsteps)=7]
+        bs,vecComponnetChannel,height,width,depth=image.shape
+        #abc_t [batchsize, self.ouptputDim*time_steps]
         abc_t = self.cnn(image)
         #generate reconstruct steady field
-        # predict_reconstruct=
-        return abc_t 
+        abc_t_reshape = abc_t.reshape(bs, 6, depth).unsqueeze(-2).unsqueeze(-2)
+        #abc_t_reshape [batchsize, 6,  height, width,time_steps]
+        abc_t_reshape_expanded = abc_t_reshape.repeat(1, 1, height,width,1)
+        vectorFieldwithTransforamtion=torch.concat((image, abc_t_reshape_expanded), dim=1)
+        rec = self.reconstructor(vectorFieldwithTransforamtion)
+        return abc_t, rec 
 
 
 
@@ -185,15 +206,17 @@ def train_pipeline():
     model=ReferenceFrameExtractor(2, 64,64,slicePerdata,ouptputDim=6*slicePerdata, hiddenSize=64)
     model.apply(init_weights)
     model.to(device)
-    #initialize the optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
+    #initialize the  optimizer with L2 regularization
+    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
     #training 
     for epoch in range(epochs):
         epochLoss=0
         for batch_idx,(vectorFieldImage, labelferenceFrame,labelVortex) in enumerate(data_loader):
             #vectorFieldImage shape is [batch_size, depth(timsteps)=7, W=64, H=64,chanel=2]
-            #transpose to [batch_size, chanel=2, depth(timsteps)=7,W=64, H=64]
+            #transpose to [batch_size, chanel=2,W=64, H=64, depth(timsteps)=7]
             vectorFieldImage=vectorFieldImage.transpose(1,4)
+            steadyField3D=vectorFieldImage[:,:,:,:,0]
+            steadyField3D=steadyField3D.unsqueeze(-1).repeat(1,1,1,1,slicePerdata).to(device)
             vectorFieldImage, label = vectorFieldImage.to(device),  labelVortex.to(device)
 
             Qt,tc=labelferenceFrame
@@ -203,9 +226,12 @@ def train_pipeline():
             # tx,ty,n,rc =labelVortex[0],labelVortex[1],labelVortex[2],labelVortex[3]
             labelQtct=labelQtct.reshape(vectorFieldImage.shape[0],-1).to(device)
             optimizer.zero_grad()
-            output = model(vectorFieldImage)    
+          
+            predictQtCt, rec  = model(vectorFieldImage) 
+            lossRec = F.mse_loss(rec, steadyField3D)
+            lossRef = F.mse_loss(predictQtCt, labelQtct)
+            loss=lossRec+lossRef
 
-            loss = F.mse_loss(output, labelQtct)
             loss.backward() 
             optimizer.step()
             epochLoss+=loss.item()

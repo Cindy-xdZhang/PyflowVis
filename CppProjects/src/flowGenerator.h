@@ -122,7 +122,7 @@ struct KillingComponentFunctionFactory {
 
             // If within the first half of the period, return validValue, otherwise return zero
             if (positionInPeriod < StopInterval) {
-                return Eigen::Vector3d(0, 0, 0);
+                return Eigen::Vector3d(0, 0, validValue);
             } else {
                 return Eigen::Vector3d(0, 0, 0);
             }
