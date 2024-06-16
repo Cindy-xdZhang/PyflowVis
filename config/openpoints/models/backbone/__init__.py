@@ -1,1 +1,0 @@
-from .dgcnn import DGCNN

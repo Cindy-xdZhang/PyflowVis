@@ -252,13 +252,13 @@ struct pair_hash {
 std::vector<std::pair<double, double>> generateNParamters(int n)
 {
     std::vector<std::pair<double, double>> parameters = {
-        { 1.0, 2.0 },
-        { 1.0, 3.0 },
-        { 1.0, 5.0 },
-        { 2.0, 1.0 },
-        { 2.0, 2.0 },
-        { 2.0, 3.0 },
-        { 2.0, 5.0 },
+        /*   { 1.0, 2.0 },
+           { 1.0, 3.0 },
+           { 1.0, 5.0 },
+           { 2.0, 1.0 },
+           { 2.0, 2.0 },
+           { 2.0, 3.0 },
+           { 2.0, 5.0 },*/
     };
 
     std::unordered_set<std::pair<double, double>, pair_hash> unique_params(parameters.begin(), parameters.end());
@@ -996,7 +996,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     const double stepSize = 0.01;
     const int maxLICIteratioOneDirection = 200;
     int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
-    std::string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "_nomix/";
+    std::string root_folder = "../data/test_split/" + to_string(Xdim) + "_" + to_string(Xdim) + "_nomix/";
     if (!filesystem::exists(root_folder)) {
         filesystem::create_directories(root_folder);
     }

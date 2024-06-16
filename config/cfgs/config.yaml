@@ -16,18 +16,29 @@ dataset:
     time_steps: 16
     transform: 'ToTensor'
 
+wandb: True 
+
 training: 
   device: 'cuda'
   # device: 'cpu'
-  optimizer: Adam
-  learning_rate: 0.001
   epochs: 100
-  loss_function: MSELoss
   batch_size: 48
   shuffle: True
   num_workers: 0
   pin_memory: False
-  log_interval: 100
+
+
+  optimizer: Adam
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  # loss_function: MSELoss
+
+
+  
+  print_frequency: 100
+
+
+  save_model_frequency: 10
   save_model: True
   save_model_path: 'models/'
   

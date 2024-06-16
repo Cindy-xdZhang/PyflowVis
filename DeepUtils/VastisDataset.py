@@ -1,7 +1,7 @@
 import numpy as np
 import os
-from .VectorField2d import *
-from .FlowReader import read_rootMetaGridresolution,loadOneFlowEntryRawData
+from FLowUtils.VectorField2d import *
+from FLowUtils.FlowReader import read_rootMetaGridresolution,loadOneFlowEntryRawData
 import torch,time,tqdm
 import torchvision.transforms as transforms
 class AddGaussianNoise(object):
@@ -65,8 +65,7 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
                 self.labelReferenceFrame.append(labelReferenceFrame_slice )
                 self.labelVortex.append(vortexlabel)#vortexlabel=[tx,ty,n,rc] 
 
-    def preLoading(self,mode):        
-
+    def preLoading(self,mode):                
         start = time.time()         
         if mode=="train":
             print("Preloading training data......")
@@ -74,8 +73,19 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
             for folder_name in tqdm.tqdm(rc_n_subfoders) :
                 sub_folder=os.path.join(self.directory_path,folder_name)
                 #if subfoder name doesnt have "test"
-                if "test" not in sub_folder:                
+                if "test" not in sub_folder and "val" not in sub_folder:                
                     self.loadOneTaskFolder(sub_folder)          
+                    
+        elif mode=="val" or mode=="validation": 
+            print("Preloading validation  data......")
+            rc_n_subfoders=os.listdir(self.directory_path)
+            for folder_name in tqdm.tqdm(rc_n_subfoders) :
+                if "val_split"  == folder_name:                
+                    test_splict_folder=os.path.join(self.directory_path,folder_name)
+                    test_sub_folders=os.listdir(test_splict_folder)
+                    for test_folder_name in test_sub_folders:
+                        test_sub_folder=os.path.join(test_splict_folder,test_folder_name)              
+                        self.loadOneTaskFolder(test_sub_folder)            
 
         elif mode=="test":
             print("Preloading test data......")

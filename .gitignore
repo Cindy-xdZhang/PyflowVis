@@ -14,3 +14,4 @@ models/
 CppProjects/build/
 CppProjects/data/
 CppProjects/external/
+wandb/
