@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from FLowUtils.LicRenderer import LicRenderingUnsteady
+from FLowUtils.LicRenderer import LicRenderingUnsteady,LicRenderingSteady
 from FLowUtils.FlowReader import read_rootMetaGridresolution,loadOneFlowEntryRawData
-from FLowUtils.VectorField2d import UnsteadyVectorField2D
+from FLowUtils.VectorField2d import UnsteadyVectorField2D,SteadyVectorField2D
 from DeepUtils.VastisDataset import buildDataset
 from config.LoadConfig import load_config
 from DeepUtils.ModelZoo import *
@@ -87,13 +87,15 @@ def test_model(model,config):
             test_loss_records.append(loss.item())
 
         #random select 10 samples to visualize
-        for i in range(3):
+        for i in range(5):
             sample=random.randint(0,len(test_data_loader))
             vectorFieldImage, labelQtct, labelVortex=testDataset[sample]
+            binaryName=testDataset.getBinaryName(sample)
+
             vectorFieldImage=vectorFieldImage.unsqueeze(0)
             #vectorFieldImage shape is [bs=1,  chanel=2,W=64, H=64, depth(timsteps)]
-            steadyField3D = vectorFieldImage[0, :, :, :, 0].transpose(0, 2)
-            steadyField3D = steadyField3D.unsqueeze(0).repeat(slicePerdata, 1, 1, 1).cpu()
+            steadyField3D = vectorFieldImage[0, :, :, :, 0].transpose(0, 2).cpu()
+ 
 
             vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
             predictQtCt, recField = model(vectorFieldImage)
@@ -102,10 +104,10 @@ def test_model(model,config):
             recField=recField.transpose(0,3)
             recUnsteadyField=  UnsteadyVectorField2D(64,64,slicePerdata)
             recUnsteadyField.field=recField
-            steadyField=  UnsteadyVectorField2D(64,64,slicePerdata)
-            steadyField.field=steadyField3D
-            LicRenderingUnsteady(recUnsteadyField,64,2,save_folder,f"rec_sample{i}")
-            LicRenderingUnsteady(steadyField,64,2,save_folder,f"rec_sample_gt{i}")
+            steadyField=  SteadyVectorField2D(64,64)
+            steadyField.field=steadyField3D.numpy()
+            LicRenderingUnsteady(recUnsteadyField,64,2,save_folder,f"sample{sample}_{binaryName}__rec")
+            LicRenderingSteady(steadyField,64,2,save_folder,f"sample{sample}_{binaryName}__gt")
 
 
 

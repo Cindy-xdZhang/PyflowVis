@@ -125,7 +125,10 @@ class UnsteadyVectorField2D(IVectorFeild2D):
         # Initialize the vector field parameters with random values, considering the time dimension
         self.field = torch.randn(time_steps, Ydim,Xdim, 2)
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
+        assert(time_steps>1)
         self.timeInterval = (tmax-tmin)/(time_steps-1)
+        
+           
 
     def getSlice(self, timeSlice) -> SteadyVectorField2D:
         steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary,self.domainMaxBoundary)

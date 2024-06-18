@@ -15,20 +15,38 @@ class AddGaussianNoise(object):
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
     
+def keep_last_n_levels(path,n):
+    """
+    Keep only the last two levels of the given path.
+    
+    :param path: Original path
+    :return: Path with only the last two levels
+    """
+    # Normalize the path to remove any redundant separators or up-level references
+    normalized_path = os.path.normpath(path)
+    
+    # Split the path into parts
+    path_parts = normalized_path.split(os.sep)
+    
+    # Keep only the last two levels
+    last_two_levels = os.sep.join(path_parts[-n:])
+    last_two_levels=last_two_levels.replace("/","_")
+    return last_two_levels
 
 # create torch dataset using the load result function:
 class UnsteadyVastisDataset(torch.utils.data.Dataset):
     def __init__(self, directory_path,mode,transform=None):
         fx_directory_path=self.FixDataFolder(directory_path)
         self.directory_path=os.path.join(fx_directory_path,"X64_Y64_T16_no_mixture")
-    
+        self.dataName=[]
         self.data=[]
         self.labelReferenceFrame=[]
         self.labelVortex=[]
         self.transform=transform
         self.dastasetMetaInfo={}
         self.preLoading(mode)
-
+    def getBinaryName(self,sampleIdx):        
+        return self.dataName[sampleIdx]
     def FixDataFolder(self,directory_path):
         """try directory_path, directory_path's parent, directory_path's grad parent to find the folder with name "unsteady"
         """
@@ -60,6 +78,7 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
             dataSlice=torch.tensor(loadField)
             vectorFieldDataSlice = dataSlice.transpose(0, 3)
             self.data.append(vectorFieldDataSlice)
+            self.dataName.append(keep_last_n_levels(binPath,3))
             Qt, tc=torch.tensor( labelReferenceFrame[0]),torch.tensor(labelReferenceFrame[1])
             #Qt shape is [ time_steps,4], ct shape is [ time_steps,2],concat to [time_steps,6]->reshape to [6*time_steps]
             labelQtctSlice = torch.concat((Qt, tc), dim=1).reshape(-1)
