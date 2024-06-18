@@ -200,5 +200,5 @@ struct KillingComponentFunctionFactory {
 
 void testKillingTransformationForRFC();
 // number of result traing data = Nparamters * samplePerParameters * observerPerSetting
-void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting);
+void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting, std::string dataSetSplitTag);
 void testCriterion();

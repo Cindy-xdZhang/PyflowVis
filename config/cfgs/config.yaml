@@ -1,9 +1,6 @@
 
-rendering:
-  restore: False
-  window_size: [1600, 1200]
-
 network:
+  family_name: 'CNN'
   input_size: 784
   hidden_layers: [128, 64]
   output_size: 10
@@ -11,9 +8,8 @@ network:
   
 
 dataset:
-    # datasetname: 'mnist'has this area if there are multiple datasets to select from
+    name: 'data_gen_Jun13'
     root: 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data'
-    time_steps: 16
     transform: 'ToTensor'
 
 wandb: True 
@@ -21,7 +17,7 @@ wandb: True
 training: 
   device: 'cuda'
   # device: 'cpu'
-  epochs: 100
+  epochs: 2
   batch_size: 48
   shuffle: True
   num_workers: 0
@@ -29,8 +25,8 @@ training:
 
 
   optimizer: Adam
-  learning_rate: 0.001
-  weight_decay: 0.0001
+  learning_rate: 0.0001
+  weight_decay: 0.00001
   # loss_function: MSELoss
 
 

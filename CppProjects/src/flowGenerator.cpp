@@ -13,8 +13,8 @@
 #include <fstream>
 #include <thread>
 #define RENDERING_LIC_SAVE_DATA
-// #define DISABLE_CPP_PARALLELISM
-//  define execute policy
+//  #define DISABLE_CPP_PARALLELISM
+//   define execute policy
 #if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
 auto policy = std::execution::seq;
 #else
@@ -25,12 +25,12 @@ std::mt19937 rng(static_cast<unsigned int>(std::time(0)));
 using namespace std;
 
 constexpr double tmin = 0.0;
-constexpr double tmax = 2.0 * M_PI;
+constexpr double tmax = M_PI;
 constexpr int Xdim = 64, Ydim = 64;
 constexpr int LicImageSize = 64;
 Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
-constexpr int unsteadyFieldTimeStep = 32;
+constexpr int unsteadyFieldTimeStep = 16;
 constexpr int LicSaveFrequency = 4; // every 2 time steps save one
 
 std::string trimNumString(const std::string& numString)
@@ -248,39 +248,46 @@ struct pair_hash {
         return std::hash<T1>()(pair.first) ^ std::hash<T2>()(pair.second);
     }
 };
+std::vector<std::pair<double, double>> presetNRCParameters = {
+    { 1.0, 2.0 },
+    { 1.0, 3.0 },
+    { 1.0, 5.0 },
+    { 2.0, 1.0 },
+    { 2.0, 2.0 },
+    { 2.0, 3.0 },
+    { 2.0, 5.0 },
+};
 
 std::vector<std::pair<double, double>> generateNParamters(int n)
 {
-    std::vector<std::pair<double, double>> parameters = {
-        /*   { 1.0, 2.0 },
-           { 1.0, 3.0 },
-           { 1.0, 5.0 },
-           { 2.0, 1.0 },
-           { 2.0, 2.0 },
-           { 2.0, 3.0 },
-           { 2.0, 5.0 },*/
-    };
+    static std::unordered_set<std::pair<double, double>, pair_hash> unique_params;
 
-    std::unordered_set<std::pair<double, double>, pair_hash> unique_params(parameters.begin(), parameters.end());
+    std::vector<std::pair<double, double>> parameters;
 
     std::random_device rd;
     std::mt19937 rng(rd());
     std::normal_distribution<double> dist_rc(1.87, 0.37); // mean = 1.87, stddev = 0.37
     std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
-    if (parameters.size() > n) {
-        // take the frist n parameters
-        parameters.resize(n);
-        return parameters;
-    }
 
+    int i = 0;
     while (parameters.size() < n) {
-        double rc = dist_rc(rng);
-        double n = static_cast<double>(dist_n(rng));
-        std::pair<double, double> new_pair = { rc, n };
 
-        if (unique_params.find(new_pair) == unique_params.end()) {
-            parameters.emplace_back(new_pair);
-            unique_params.insert(new_pair);
+        if (i < presetNRCParameters.size()) {
+            std::pair<double, double> preset_pair = presetNRCParameters.at(i++);
+            if (unique_params.find(preset_pair) == unique_params.end()) {
+                parameters.emplace_back(preset_pair);
+                unique_params.insert(preset_pair);
+            }
+        } else {
+
+            double rc = dist_rc(rng);
+            double n = static_cast<double>(dist_n(rng));
+            std::pair<double, double> new_pair = { rc, n };
+
+            if (unique_params.find(new_pair) == unique_params.end()) {
+                parameters.emplace_back(new_pair);
+                unique_params.insert(new_pair);
+            }
         }
     }
 
@@ -917,7 +924,7 @@ void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inp
                 // red for critial point(coreline)
                 auto velocity = vectorField.getVector(pos.x(), pos.y());
                 // !note: because txy is random core line center, then critical point==txy(velocity ==0.0) might not  lie on any grid points
-                if (velocity.norm() < 1e-7 || (pos - txy).norm() < maxDistanceAnyPoint2gridPoints)
+                if (velocity.norm() < 1e-12 || (pos - txy).norm() < maxDistanceAnyPoint2gridPoints)
                     [[unlikely]] {
                     inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 0.0, 0.0);
                 } else {
@@ -989,14 +996,19 @@ void addSegmentationVisualization(std::vector<std::vector<std::vector<Eigen::Vec
     }
 }
 
-// number of result traing data = Nparamters * samplePerParameters * observerPerSetting
-void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting)
+// number of result traing data = Nparamters * samplePerParameters * observerPerSetting;dataSetSplitTag should be "train"/"test"/"validation"
+void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting, std::string dataSetSplitTag)
 {
+    // check datasplittag is "train"/"test"/"validation"
+    if (dataSetSplitTag != "train" && dataSetSplitTag != "test" && dataSetSplitTag != "validation") {
+        printf("dataSetSplitTag should be \"train\"/\"test\"/\"validation\"");
+        return;
+    }
 
     const double stepSize = 0.01;
     const int maxLICIteratioOneDirection = 200;
     int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
-    std::string root_folder = "../data/test_split/" + to_string(Xdim) + "_" + to_string(Xdim) + "_nomix/";
+    std::string root_folder = "../data/X" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "_no_mixture/" + dataSetSplitTag + "/";
     if (!filesystem::exists(root_folder)) {
         filesystem::create_directories(root_folder);
     }
@@ -1076,6 +1088,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             const SteadyVectorField2D steadyField = generator.generateSteadyField(tx, ty, sx, sy, theta, Si);
             const auto& steadyFieldResData = steadyField.field;
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
+
                 printf(".");
                 // Randomly select a type
                 int type

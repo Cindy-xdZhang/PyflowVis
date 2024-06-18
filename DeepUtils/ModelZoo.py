@@ -10,7 +10,7 @@ def init_weights(m):
 
 
 class CNN3D(nn.Module):
-    def __init__(self, inputChannels, DataSizeX, DataSizeY, TimeSteps, outputDim, hiddenSize=64, dropout_prob=0.2):
+    def __init__(self, inputChannels, DataSizeX, DataSizeY, TimeSteps, outputDim, hiddenSize=64, dropout_prob=0.5):
         super(CNN3D, self).__init__()
         # the input tensor of Conv3d should be in the shape of[batch_size, chanel=2,W=64, H=64, depth(timsteps)=7]
         self.conv1_1 = nn.Conv3d(in_channels=inputChannels, out_channels=hiddenSize, kernel_size=3, padding=1)
@@ -129,6 +129,21 @@ class ReferenceFrameExtractor(nn.Module):
         vectorFieldwithTransforamtion=torch.concat((image, abc_t_reshape_expanded), dim=1)
         rec = self.reconstructor(vectorFieldwithTransforamtion)
         return abc_t, rec 
+    
+    
+    def  preForward(self, batchData):
+        """This is the interface to accept BatchData From Dataloader,
+         in most case it should be empty, but this funciton always call before forwarding , can do some preprocess here then handle the data to forward function
+        """
+        vectorFieldImage, labelferenceFrame, labelVortex=batchData
+        vectorFieldImage = vectorFieldImage.transpose(1, 4)
+        Qt, tc = labelferenceFrame
+        labelQtct = torch.concat((Qt, tc), dim=2)
+        labelQtct = labelQtct.reshape(vectorFieldImage.shape[0], -1).to(device)
+        return 
+
+        
+
 
 # class VortexClassifier(nn.Module):
 #     def __init__(self):

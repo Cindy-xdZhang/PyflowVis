@@ -2,7 +2,7 @@ import numpy as np
 from .VectorField2d import *
 from typeguard import typechecked
 import os
-
+from PIL import Image
 def bilinear_interpolate(vector_field, x, y):
     """
     Perform bilinear interpolation for a 2D vector field.
@@ -107,7 +107,7 @@ def LICAlgorithm(texture:np.ndarray, vecfield: SteadyVectorField2D, resultImageS
     
     return output_texture
 
-import matplotlib.pyplot as plt
+
 def LICImage_OFFLINE_RENDERING(vecfield: UnsteadyVectorField2D, timeSlice=0,stepSize=0.01, MaxIntegrationSteps=128):
     """
     Render a steady 2D vector field as an LIC image and save to a PNG file.
@@ -125,12 +125,15 @@ def LICImage_OFFLINE_RENDERING(vecfield: UnsteadyVectorField2D, timeSlice=0,step
     lic_normalized = (lic_result - np.min(lic_result)) / (np.max(lic_result) - np.min(lic_result))
     
     # Step 4: Convert to an image and save
-    plt.imshow(lic_normalized, cmap='gray')
-    plt.axis('off')  # Optional: Remove axis for a cleaner image
-    plt.savefig("vector_field_lic.png", bbox_inches='tight', pad_inches=0)
+    lic_normalized_img = (lic_normalized * 255).astype(np.uint8)  # Convert to 8-bit grayscale
+    img = Image.fromarray(lic_normalized_img, mode='L')
+    img.save("vector_field_lic.png")
+
 
 @typechecked
-def LicRenderingUnsteady(field:UnsteadyVectorField2D,licImageSize:int,timeStepSKip:int=2,saveFolder:str="./"):
+def LicRenderingUnsteady(field:UnsteadyVectorField2D,licImageSize:int,timeStepSKip:int=2,saveFolder:str="./",saveName:str="vector_field_lic"):
+    if not os.path.exists(saveFolder):
+        os.makedirs(saveFolder)
     #typecheck field type and field is not None    
     Xdim,Ydim,time_steps=field.Xdim,field.Ydim,field.time_steps
     texture = np.random.rand(Xdim, Ydim)    
@@ -139,10 +142,13 @@ def LicRenderingUnsteady(field:UnsteadyVectorField2D,licImageSize:int,timeStepSK
         steadyVectorField2D = field.getSlice(i)
         lic_result=LICAlgorithm(  texture  ,steadyVectorField2D ,licImageSize,licImageSize,0.005,256)
         lic_normalized =255* (lic_result - np.min(lic_result)) / (np.max(lic_result) - np.min(lic_result))
-        #  Convert to an image and save
-        plt.imshow(lic_normalized, cmap='gray')
-        plt.axis('off')  # Optional: Remove axis for a cleaner image
-        save_name=f"vector_field_lic_{i}.png"
+         # Step 4: Convert to an image and save
+        lic_normalized_img = (lic_normalized * 255).astype(np.uint8)  # Convert to 8-bit grayscale
+        img = Image.fromarray(lic_normalized_img, mode='L')
+        save_name=f"{saveName}_{i}.png"
         savePath=os.path.join(saveFolder,save_name)
-        plt.savefig(savePath, bbox_inches='tight', pad_inches=0)
+        img.save(savePath)
+
+        
+
 

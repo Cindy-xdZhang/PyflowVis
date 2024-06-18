@@ -18,85 +18,97 @@ class AddGaussianNoise(object):
 
 # create torch dataset using the load result function:
 class UnsteadyVastisDataset(torch.utils.data.Dataset):
-    def __init__(self, directory_path,slicePerdata,mode,transform=None):
-        directory_path=self.FixDataFolder(directory_path)
-        #directory_path should be  the direct parent folder of all "rc_xxxx_n_xxx"  folders
-        self.directory_path=os.path.join( os.path.join(directory_path,"unsteady"),"64_64_nomix")
+    def __init__(self, directory_path,mode,transform=None):
+        fx_directory_path=self.FixDataFolder(directory_path)
+        self.directory_path=os.path.join(fx_directory_path,"X64_Y64_T16_no_mixture")
+    
         self.data=[]
         self.labelReferenceFrame=[]
         self.labelVortex=[]
-        self.slicePerData=slicePerdata
         self.transform=transform
+        self.dastasetMetaInfo={}
         self.preLoading(mode)
 
     def FixDataFolder(self,directory_path):
         """try directory_path, directory_path's parent, directory_path's grad parent to find the folder with name "unsteady"
         """
-        if os.path.isdir(directory_path) and "unsteady" in os.listdir(directory_path):
+        if os.path.isdir(directory_path) and "X64_Y64_T16_no_mixture" in os.listdir(directory_path):
             return directory_path
         parent=os.path.dirname(directory_path)
-        if os.path.isdir(parent) and "unsteady" in os.listdir(parent):
+        if os.path.isdir(parent) and "X64_Y64_T16_no_mixture" in os.listdir(parent):
             return parent
         gradParent=os.path.dirname(parent)
-        if os.path.isdir(gradParent) and "unsteady" in os.listdir(gradParent):
+        if os.path.isdir(gradParent) and "X64_Y64_T16_no_mixture" in os.listdir(gradParent):
             return gradParent
         raise ValueError(f"Can't find the folder with name 'unsteady' in {directory_path}, {parent}, {gradParent}")
     
     def loadOneTaskFolder(self,sub_folder:str):
-        folder_meta_file = os.path.join(sub_folder, 'meta.json')
-        Xdim,Ydim,time_steps,dominMinBoundary,dominMaxBoundary=read_rootMetaGridresolution(folder_meta_file)
+        if self.dastasetMetaInfo=={}:
+            folder_meta_file = os.path.join(sub_folder, 'meta.json')
+            Xdim,Ydim,time_steps,dominMinBoundary,dominMaxBoundary,tmin,tmax=read_rootMetaGridresolution(folder_meta_file)
+            self.dastasetMetaInfo={"Xdim":Xdim,"Ydim":Ydim,"time_steps":time_steps,"dominMinBoundary":dominMinBoundary,"dominMaxBoundary":dominMaxBoundary,"tmin":tmin,"tmax":tmax}
+
+        Xdim,Ydim,time_steps=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"],self.dastasetMetaInfo["time_steps"]
         #find all *.bin data in this subfoder
         binFiles = [f for f in os.listdir(sub_folder) if f.endswith('.bin')]
         for binFile in binFiles:
             binPath=os.path.join(sub_folder,binFile)
-            #split according to slicePerData 
             loadField, labelReferenceFrame,vortexlabel=loadOneFlowEntryRawData(binPath, Xdim,Ydim,time_steps)
             timesteps=loadField.shape[0]
-            TimeWindowCount=timesteps//self.slicePerData
-
-            for i in range(0,TimeWindowCount):
-                sliceStart=i*self.slicePerData
-                sliceEnd=(i+1)*self.slicePerData
-                # dataSlice=loadField.getSlice(sliceStart,sliceEnd)
-                dataSlice=loadField[sliceStart:sliceEnd]
-                self.data.append(dataSlice)
-                q_t,c_t=labelReferenceFrame
-                labelReferenceFrame_slice=(q_t[sliceStart:sliceEnd,:],c_t[sliceStart:sliceEnd,:])
-                self.labelReferenceFrame.append(labelReferenceFrame_slice )
-                self.labelVortex.append(vortexlabel)#vortexlabel=[tx,ty,n,rc] 
+            # dataSlice shape is [(batch_size,) depth(timsteps)=7, W=64, H=64, chanel=2]
+            # need  transpose to [(batch_size,)  chanel=2, W=64, H=64, depth(timsteps)=7] to feed conv3D
+            dataSlice=torch.tensor(loadField)
+            vectorFieldDataSlice = dataSlice.transpose(0, 3)
+            self.data.append(vectorFieldDataSlice)
+            Qt, tc=torch.tensor( labelReferenceFrame[0]),torch.tensor(labelReferenceFrame[1])
+            #Qt shape is [ time_steps,4], ct shape is [ time_steps,2],concat to [time_steps,6]->reshape to [6*time_steps]
+            labelQtctSlice = torch.concat((Qt, tc), dim=1).reshape(-1)
+            self.labelReferenceFrame.append(labelQtctSlice)
+            self.labelVortex.append(torch.tensor(vortexlabel))#vortexlabel=[tx,ty,n,rc] 
+            
+            #uncomment code if you need  split vectorfield according to slicePerData             
+            # TimeWindowCount=timesteps//self.slicePerData
+            # for i in range(0,TimeWindowCount):
+            #     sliceStart=i*self.slicePerData
+            #     sliceEnd=(i+1)*self.slicePerData
+            #     dataSlice=torch.tensor(loadField[sliceStart:sliceEnd])
+            #     # dataSlice shape is [(batch_size,) depth(timsteps)=7, W=64, H=64, chanel=2]
+            #     # need  transpose to [(batch_size,)  chanel=2, W=64, H=64, depth(timsteps)=7] to feed conv3D
+            #     vectorFieldDataSlice = dataSlice.transpose(0, 3)
+            #     self.data.append(vectorFieldDataSlice)
+            #     Qt, tc=torch.tensor( labelReferenceFrame[0][sliceStart:sliceEnd,:]),torch.tensor(labelReferenceFrame[1][sliceStart:sliceEnd,:])
+            #     #Qt shape is [  time_steps,4], ct shape is [ time_steps,2],concat to [time_steps,6]->reshape to [6*time_steps]
+            #     labelQtctSlice = torch.concat((Qt, tc), dim=1).reshape(-1)
+            #     self.labelReferenceFrame.append(labelQtctSlice)
+            #     self.labelVortex.append(vortexlabel)#vortexlabel=[tx,ty,n,rc] 
 
     def preLoading(self,mode):                
         start = time.time()         
         if mode=="train":
             print("Preloading training data......")
-            rc_n_subfoders=os.listdir(self.directory_path)
-            for folder_name in tqdm.tqdm(rc_n_subfoders) :
-                sub_folder=os.path.join(self.directory_path,folder_name)
-                #if subfoder name doesnt have "test"
-                if "test" not in sub_folder and "val" not in sub_folder:                
+            #train_directory_path should be  the direct parent folder of all "rc_xxxx_n_xxx"  folders
+            train_directory_path=os.path.join(self.directory_path,"train")
+            rc_n_subfoders=os.listdir(train_directory_path)
+            for folder_name in tqdm.tqdm(rc_n_subfoders) :                
+                if "test" not in folder_name and "val" not in folder_name:                
+                    sub_folder=os.path.join(train_directory_path,folder_name)
                     self.loadOneTaskFolder(sub_folder)          
-                    
+
         elif mode=="val" or mode=="validation": 
             print("Preloading validation  data......")
-            rc_n_subfoders=os.listdir(self.directory_path)
+            val_directory_path=os.path.join(self.directory_path,"validation")
+            rc_n_subfoders=os.listdir(val_directory_path)
             for folder_name in tqdm.tqdm(rc_n_subfoders) :
-                if "val_split"  == folder_name:                
-                    test_splict_folder=os.path.join(self.directory_path,folder_name)
-                    test_sub_folders=os.listdir(test_splict_folder)
-                    for test_folder_name in test_sub_folders:
-                        test_sub_folder=os.path.join(test_splict_folder,test_folder_name)              
-                        self.loadOneTaskFolder(test_sub_folder)            
+                val_splict_sub_folder=os.path.join(val_directory_path,folder_name)    
+                self.loadOneTaskFolder(val_splict_sub_folder)            
 
         elif mode=="test":
             print("Preloading test data......")
-            rc_n_subfoders=os.listdir(self.directory_path)
+            test_directory_path=os.path.join(self.directory_path,"test")
+            rc_n_subfoders=os.listdir(test_directory_path)
             for folder_name in tqdm.tqdm(rc_n_subfoders) :
-                if "test_split"  == folder_name:                
-                    test_splict_folder=os.path.join(self.directory_path,folder_name)
-                    test_sub_folders=os.listdir(test_splict_folder)
-                    for test_folder_name in test_sub_folders:
-                        test_sub_folder=os.path.join(test_splict_folder,test_folder_name)              
-                        self.loadOneTaskFolder(test_sub_folder)            
+                test_splict_sub_folder=os.path.join(test_directory_path,folder_name)    
+                self.loadOneTaskFolder(test_splict_sub_folder)                  
 
 
         #logging dataset information    and time consuming of preloading data
@@ -114,7 +126,8 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         return sample, self.labelReferenceFrame[idx],self.labelVortex[idx]
 
 def buildDataset(args,mode="train"):
-    ds=UnsteadyVastisDataset(args['root'], args['time_steps'],mode)
+    ds=UnsteadyVastisDataset(args['root'],mode)
+    
     return ds
 
 

@@ -23,7 +23,8 @@ def read_rootMetaGridresolution(meta_file):
     tmax=metaINFo['tmax']    
     dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"],tmin] 
     dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"],tmax]
-    return Xdim,Ydim,time_steps,dominMinBoundary,dominMaxBoundary
+   
+    return Xdim,Ydim,time_steps,dominMinBoundary,dominMaxBoundary,tmin,tmax
 
 def read_binary_file(filepath, dtype=np.float32) -> np.ndarray:
     with open(filepath, 'rb') as file:
@@ -42,10 +43,8 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps,ForcePositiveNormalizat
     #get meta information
     meta_file = binPath.replace('.bin', 'meta.json')
     metaINFo=read_json_file(meta_file)
-    # Xdim=metaINFo['Xdim']
-    # Ydim=metaINFo['Ydim']
-    #observe and unsteady info 
-    
+
+    #observe and unsteady info  
     Q_tInfo=metaINFo['Q(t)']
     c_tInfo=metaINFo['c(t)']
     Q_t=[]

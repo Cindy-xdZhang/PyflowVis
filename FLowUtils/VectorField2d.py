@@ -119,30 +119,22 @@ class SteadyVectorField2D(IVectorFeild2D):
 
     
 
-class UnsteadyVectorField2D(nn.Module,IVectorFeild2D):
+class UnsteadyVectorField2D(IVectorFeild2D):
     def __init__(self, Xdim:int, Ydim:int,time_steps:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0], tmin=0.0,tmax=2*np.pi):
-        nn.Module.__init__(self)
         IVectorFeild2D.__init__(self,Xdim, Ydim,domainMinBoundary,domainMaxBoundary,time_steps,tmin,tmax)
         # Initialize the vector field parameters with random values, considering the time dimension
-        self.field = nn.Parameter(torch.randn(time_steps, Ydim,Xdim, 2))
+        self.field = torch.randn(time_steps, Ydim,Xdim, 2)
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
-        self.timeInterval = (domainMaxBoundary[2]-domainMinBoundary[2])/(time_steps-1)
+        self.timeInterval = (tmax-tmin)/(time_steps-1)
 
     def getSlice(self, timeSlice) -> SteadyVectorField2D:
         steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary,self.domainMaxBoundary)
-        steadyVectorField2D.field=self.field.detach().cpu().numpy()[timeSlice,:,:,:]
+        steadyVectorField2D.field=self.field.cpu().numpy()[timeSlice,:,:,:]
         return steadyVectorField2D
-
-
-    
-    def forward(self,inputFieldV):
-        diff, magnitudeR=VectorFieldLinearOperation.difference(inputFieldV,self.field)
-        killingEnergy=VectorFieldLinearOperation.compute_killing_energy(self)
-        return killingEnergy+magnitudeR
     
     def getDataAsNumpy(self):
         # if self.field is torch tensor
-        if isinstance(self.field, torch.Tensor) or  isinstance(self.field, nn.Parameter):
+        if isinstance(self.field, torch.Tensor) :
             data= self.field.detach().cpu().numpy()
             return data
         elif isinstance(self.field, np.ndarray):
@@ -150,14 +142,15 @@ class UnsteadyVectorField2D(nn.Module,IVectorFeild2D):
         
     def getDataAsTensor(self):
         if isinstance(self.field, torch.Tensor) or  isinstance(self.field, nn.Parameter):
-            return self.field
+            data= self.field.detach().cpu()
+            return data
         elif isinstance(self.field, np.ndarray):
             return torch.tensor(self.field)
         
     def numpy2torch(self):
         """Convert field data from  numpy array to torch tensor for the field parameter.
         """
-        self.field = nn.Parameter(torch.tensor(self.field))
+        self.field = torch.tensor(self.field)
 
     def torch2numpy(self):
         """Convert field data from torch tensor to numpy array for the field parameter.
@@ -165,7 +158,24 @@ class UnsteadyVectorField2D(nn.Module,IVectorFeild2D):
         self.field = self.field.detach().cpu().numpy()
         
 
+class UnsteadyVectorField2DTrainable(nn.Module,UnsteadyVectorField2D):
+    def __init__(self, Xdim:int, Ydim:int,time_steps:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0], tmin=0.0,tmax=2*np.pi):
+        nn.Module.__init__(self)
+        UnsteadyVectorField2D.__init__(self,Xdim, Ydim,domainMinBoundary,domainMaxBoundary,time_steps,tmin,tmax)
+        # Initialize the vector field parameters with random values, considering the time dimension
+        self.field = nn.Parameter(torch.randn(time_steps, Ydim,Xdim, 2))
+        self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
+        self.timeInterval = (tmax-tmin)/(time_steps-1)
 
+    def getSlice(self, timeSlice) -> SteadyVectorField2D:
+        steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary,self.domainMaxBoundary)
+        steadyVectorField2D.field=self.field.detach().cpu().numpy()[timeSlice,:,:,:]
+        return steadyVectorField2D
+
+    def forward(self,inputFieldV):
+        diff, magnitudeR=VectorFieldLinearOperation.difference(inputFieldV,self.field)
+        killingEnergy=VectorFieldLinearOperation.compute_killing_energy(self)
+        return killingEnergy+magnitudeR
         
 
 

@@ -10,7 +10,7 @@ from GuiObjcts  import *
 from EventRegistrar import EventRegistrar
 from GuiObjcts.Object import Scene, singleton
 from shaderManager import *
-
+from DeepUtils.MiscFunctions import initLogging
 def getEngine():
     return VisualizationEngine({})
 
@@ -33,9 +33,10 @@ class VisualizationEngine:
         imgui.get_io().fonts.get_tex_data_as_rgba32()
         self.impl=PygameRenderer()
         self.eventRegister=EventRegistrar(self.impl)
-        self.camera=None
-        self.initLoggingSetting()
+        self.camera=None        
         self.initTextures()
+        initLogging()
+
 
     def initTextures(self):
         textureIDarray, self.textuireimageNames= init_color_maps_texture_array()
@@ -50,32 +51,7 @@ class VisualizationEngine:
         # font_size = 50
         # self.font = pygame.font.SysFont("Arial", font_size)
 
-    def initLoggingSetting(self):
-        class CustomFormatter(logging.Formatter):
-            grey = "\x1b[38;21m"
-            yellow = "\x1b[33;21m"
-            red = "\x1b[31;21m"
-            bold_red = "\x1b[31;1m"
-            reset = "\x1b[0m"
-            format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
-
-            FORMATS = {
-                logging.DEBUG: grey + format + reset,
-                logging.INFO: grey + format + reset,
-                logging.WARNING: yellow + format + reset,
-                logging.ERROR: red + format + reset,
-                logging.CRITICAL: bold_red + format + reset
-            }
-            def format(self, record):
-                log_fmt = self.FORMATS.get(record.levelno)
-                formatter = logging.Formatter(log_fmt)
-                return formatter.format(record)
-
-        ch = logging.StreamHandler()
-        ch.setFormatter(CustomFormatter())
-        logger = logging.getLogger()
-        logger.setLevel(logging.DEBUG)
-        logger.addHandler(ch)
+ 
 
     def addObjects2Scene(self,ObjectList=None):
         # all the objects in the scene
