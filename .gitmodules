@@ -2,3 +2,12 @@
 	path = CppModules/pybind11
 	url = https://github.com/pybind/pybind11
 	branch = stable
+[submodule "CppProjects/PybindCppModules/pybind11"]
+	path = CppProjects/PybindCppModules/pybind11
+	url = git@github.com:pybind/pybind11.git
+[submodule "CppProjects/external/magic_enum"]
+	path = CppProjects/external/magic_enum
+	url = git@github.com:Neargye/magic_enum.git
+[submodule "CppProjects/external/cereal"]
+	path = CppProjects/external/cereal
+	url = git@github.com:USCiLab/cereal.git
