@@ -7,6 +7,9 @@ project(FlowGenerator LANGUAGES CXX)
 
 set(sources 
 src/VastistasVelocityGenerator.cpp 
+include/VastistasVelocityGenerator.h
+include/VectorFieldCompute.h
+src/VectorFieldCompute.cpp
 src/flowGenerator.cpp
 src/flowGenerator.h
 src/main.cpp
@@ -14,4 +17,7 @@ src/main.cpp
 
 add_executable(FlowGenerator ${sources})
 target_include_directories(FlowGenerator PUBLIC include/)
+target_include_directories(FlowGenerator PUBLIC external/)
+target_include_directories(FlowGenerator PUBLIC external/cereal/include)
 target_include_directories(FlowGenerator PUBLIC external/eigen-3.3.7)
+target_include_directories(FlowGenerator PUBLIC external/magic_enum/include)

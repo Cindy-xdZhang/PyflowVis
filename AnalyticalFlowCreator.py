@@ -3,7 +3,7 @@ import numexpr as ne
 import tqdm
 from numpy import pi
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
-from FLowUtils.FlowReader import LICImage_OFFLINE_RENDERING
+from FLowUtils.LicRenderer import *
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -53,7 +53,7 @@ class AnalyticalFlowCreator:
             data[i,:,:,1]=vy_time_slice_i
 
         vectorField2d=UnsteadyVectorField2D(self.Xdim, self.Ydim, self.time_steps,self.domainBoundaryMin,self.domainBoundaryMax)
-        vectorField2d.setInitialVectorField(data)
+        vectorField2d.field=data
         return vectorField2d
 
     def update_parameters(self, new_parameters):
@@ -115,9 +115,11 @@ def test_analytical_flow_creator():
 
 
 def LICAlgorithmTest():
-    vecfield=rotation_four_center((128,128),2)
-    LICImage_OFFLINE_RENDERING(vecfield, 0,0.002, 128)
-
+    vecfield=rotation_four_center((128,128),32)
+  
+    LicRenderingUnsteadyCpp(vecfield,licImageSize=128, timeStepSKip=1, saveFolder="./testPybindLicRendering",saveName="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128)
+    
+   
 
 
 

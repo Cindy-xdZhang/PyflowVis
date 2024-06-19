@@ -3,5 +3,17 @@
     // Hover to view descriptions of existing attributes.
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
-    "configurations": []
+    "configurations": [
+        {
+            "name": "Python: Train Pipeline",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/train_vector_field.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config",
+                "config/cfgs/config.yaml"
+            ]
+        }
+    ]
 }

@@ -2,11 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from FLowUtils.LicRenderer import LicRenderingUnsteady,LicRenderingSteady
+from FLowUtils.LicRenderer import LicRenderingUnsteadyCpp,LicRenderingSteadyCpp
 from FLowUtils.FlowReader import read_rootMetaGridresolution,loadOneFlowEntryRawData
 from FLowUtils.VectorField2d import UnsteadyVectorField2D,SteadyVectorField2D
 from DeepUtils.VastisDataset import buildDataset
-from config.LoadConfig import load_config
 from DeepUtils.ModelZoo import *
 from DeepUtils.MiscFunctions import *
 import logging,random,wandb
@@ -29,7 +28,8 @@ initLogging()
 
 def runNameTagGenerator(config, tagattach) ->(str,list[:str]):
     seed=config['training']['random_seed']
-    runName=f"{config['network']['family_name']}_{config['dataset']['name']}_{config['training']['epochs']}_{config['training']['learning_rate']}_seed_{seed}"
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    runName = f"{config['network']['family_name']}_{config['training']['epochs']}_{config['training']['learning_rate']}_{current_time}_seed_{seed}"
     runTags= [config['network']['family_name'],config['dataset']['name']]+tagattach
     return runName,runTags
     
@@ -106,8 +106,8 @@ def test_model(model,config):
             recUnsteadyField.field=recField
             steadyField=  SteadyVectorField2D(64,64)
             steadyField.field=steadyField3D.numpy()
-            LicRenderingUnsteady(recUnsteadyField,64,2,save_folder,f"sample{sample}_{binaryName}__rec")
-            LicRenderingSteady(steadyField,64,2,save_folder,f"sample{sample}_{binaryName}__gt")
+            LicRenderingUnsteadyCpp(recUnsteadyField,licImageSize=64,timeStepSKip=2,saveFolder=save_folder,saveName=f"sample{sample}_{binaryName}__rec")
+            LicRenderingSteadyCpp(vecfield=steadyField,licImageSize=64,saveFolder=save_folder,saveName=f"sample{sample}_{binaryName}__gt")
 
 
 
@@ -121,7 +121,8 @@ def test_model(model,config):
 
 
 def train_pipeline():
-    config=load_config("config\\cfgs\\config.yaml")
+    # config=load_config("config\\cfgs\\config.yaml")
+    config=argParse()
     training_args=config['training']
     # Initialize training parameters from args
     epochs = training_args['epochs']
@@ -130,7 +131,7 @@ def train_pipeline():
     config['training']['random_seed']=torch.seed()
     run_Name,runTags=runNameTagGenerator(config,tagattach=["Q(t)c(t)","referenceFrameReconstruct"])
 
-    config['wandb']=False
+
     # Initialize wandb
     if config['wandb']:
         try:

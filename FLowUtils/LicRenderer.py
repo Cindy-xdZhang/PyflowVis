@@ -108,6 +108,8 @@ def LICAlgorithm(texture:np.ndarray, vecfield: SteadyVectorField2D, resultImageS
     return output_texture
 
 
+
+@typechecked
 def LicRenderingSteady(vecfield: SteadyVectorField2D,licImageSize:int,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
     """
     Render a steady 2D vector field as an LIC image and save to a PNG file.
@@ -151,5 +153,45 @@ def LicRenderingUnsteady(field:UnsteadyVectorField2D,licImageSize:int,timeStepSK
         img.save(savePath)
 
         
+@typechecked
+def LicRenderingSteadyCpp(vecfield: SteadyVectorField2D,licImageSize:int,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
+    """
+    Render a steady 2D vector field as an LIC image and save to a PNG file.
+    """ 
+
+    from .Pyds import CppPlugins
+    modules =CppPlugins.initPyBindLibs()
+    assert(modules['CppLicRenderingModule'].licRenderingPybindCPP is not None)
+
+    lic_result = modules['CppLicRenderingModule'].licRenderingPybindCPP( vecfield.field, vecfield.Xdim, vecfield.Ydim, vecfield.domainMinBoundary[0], vecfield.domainMaxBoundary[0], vecfield.domainMinBoundary[1], vecfield.domainMaxBoundary[1],licImageSize,stepSize,MaxIntegrationSteps)
+    
+    # Step 3: Normalize the LIC result for visualization
+    lic_normalized = (lic_result - np.min(lic_result)) / (np.max(lic_result) - np.min(lic_result))
+    
+    # Step 4: Convert to an image and save
+    lic_normalized_img = (lic_normalized * 255).astype(np.uint8)  # Convert to 8-bit grayscale
+    img = Image.fromarray(lic_normalized_img, mode='RGB')
+
+    save_name=f"{saveName}.png"
+    if not os.path.exists(saveFolder):
+        os.makedirs(saveFolder)
+    savePath=os.path.join(saveFolder,save_name)
+    img.save(savePath)
 
 
+@typechecked
+def LicRenderingUnsteadyCpp(field:UnsteadyVectorField2D,licImageSize:int,timeStepSKip:int=2,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
+    if not os.path.exists(saveFolder):
+        os.makedirs(saveFolder)
+
+    #typecheck field type and field is not None    
+    Xdim,Ydim,time_steps=field.Xdim,field.Ydim,field.time_steps
+    texture = np.random.rand(Xdim, Ydim)    
+    for i in range(0, time_steps, timeStepSKip):
+        print(f"Processing time step {i}")
+        steadyVectorField2D = field.getSlice(i)
+        save_name=f"{saveName}_{i}.png"
+        LicRenderingSteadyCpp(steadyVectorField2D ,licImageSize, saveFolder=saveFolder,saveName =save_name,stepSize=stepSize,MaxIntegrationSteps=MaxIntegrationSteps)
+    
+        
+  

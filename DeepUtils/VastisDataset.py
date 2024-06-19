@@ -31,6 +31,7 @@ def keep_last_n_levels(path,n):
     # Keep only the last two levels
     last_two_levels = os.sep.join(path_parts[-n:])
     last_two_levels=last_two_levels.replace("/","_")
+    last_two_levels=last_two_levels.replace("\\","_")
     return last_two_levels
 
 # create torch dataset using the load result function:
@@ -44,6 +45,7 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         self.labelVortex=[]
         self.transform=transform
         self.dastasetMetaInfo={}
+        self.mode=mode
         self.preLoading(mode)
     def getBinaryName(self,sampleIdx):        
         return self.dataName[sampleIdx]
@@ -78,7 +80,8 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
             dataSlice=torch.tensor(loadField)
             vectorFieldDataSlice = dataSlice.transpose(0, 3)
             self.data.append(vectorFieldDataSlice)
-            self.dataName.append(keep_last_n_levels(binPath,3))
+            if self.mode=="test":
+                self.dataName.append(keep_last_n_levels(binPath,1))
             Qt, tc=torch.tensor( labelReferenceFrame[0]),torch.tensor(labelReferenceFrame[1])
             #Qt shape is [ time_steps,4], ct shape is [ time_steps,2],concat to [time_steps,6]->reshape to [6*time_steps]
             labelQtctSlice = torch.concat((Qt, tc), dim=1).reshape(-1)

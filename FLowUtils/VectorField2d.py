@@ -132,7 +132,10 @@ class UnsteadyVectorField2D(IVectorFeild2D):
 
     def getSlice(self, timeSlice) -> SteadyVectorField2D:
         steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary,self.domainMaxBoundary)
-        steadyVectorField2D.field=self.field.cpu().numpy()[timeSlice,:,:,:]
+        if isinstance(self.field, torch.Tensor):
+            steadyVectorField2D.field=self.field.cpu().numpy()[timeSlice,:,:,:]
+        elif isinstance(self.field, np.ndarray):
+            steadyVectorField2D.field=self.field[timeSlice,:,:,:]
         return steadyVectorField2D
     
     def getDataAsNumpy(self):

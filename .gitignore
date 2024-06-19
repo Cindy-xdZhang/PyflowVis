@@ -4,15 +4,15 @@ config/config.yaml
 autosave/
 profile/profile.txt
 
-CppModules/__pycache__/
-CppModules/Pyds/__pycache__/
-CppModules/Pyds/*.pyd
-CppModules/build/
+CppProjects/PybindCppModules/__pycache__/
+CppProjects/PybindCppModules/Pyds/__pycache__/
+CppProjects/PybindCppModules/Pyds/*.pyd
+CppProjects/PybindCppModules/build/
 
 
 CppProjects/build/
 CppProjects/data/
-CppProjects/external/
+
 
 
 models/

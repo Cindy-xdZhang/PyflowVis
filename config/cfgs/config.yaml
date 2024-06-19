@@ -17,8 +17,8 @@ wandb: True
 training: 
   device: 'cuda'
   # device: 'cpu'
-  epochs: 2
-  batch_size: 48
+  epochs: 1
+  batch_size: 64
   shuffle: True
   num_workers: 0
   pin_memory: False

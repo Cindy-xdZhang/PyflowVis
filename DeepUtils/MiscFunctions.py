@@ -2,6 +2,25 @@ import torch
 from datetime import datetime
 import os
 import logging
+import argparse
+import yaml
+
+
+def load_config(path):
+    with open(path, 'r') as file:
+        args = yaml.safe_load(file)
+    # ==> Device
+    num_gpus = torch.cuda.device_count()
+    args['num_gpus'] = num_gpus
+    device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
+    args['device'] = device
+     # ==> Logger
+    # set_logger(result_dir)
+    # logging.info(args)
+    # if  args['wandb']==True:
+        # wandb init
+        # pass
+    return args
 
 def initLogging():
     class CustomFormatter(logging.Formatter):
@@ -50,3 +69,37 @@ def load_checkpoint(checkpoint, model, optimizer):
     print("=> Loading checkpoint")
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
+
+
+# Function to parse command line arguments and update config
+def argParse():
+    parser = argparse.ArgumentParser(description="Train pipeline parameters")
+    parser.add_argument("--config", type=str, required=True, help="Path to the config file")
+    parser.add_argument("--epochs", type=int, help="Number of training epochs")
+    parser.add_argument("--device", type=str, help="Device to be used for training (e.g., 'cpu', 'cuda')")
+    parser.add_argument("--batch_size", type=int, help="Batch size for training")
+    parser.add_argument("--learning_rate", type=float, help="Learning rate for the optimizer")
+    parser.add_argument("--wandb", action='store_true', help="Enable wandb logging")
+    parser.add_argument("--num_workers", type=int, help="Number of data loading workers")
+    parser.add_argument("--pin_memory", action='store_true', help="Pin memory for data loading")
+
+    args = parser.parse_args()
+    config = load_config(args.config)
+
+    # Update config with command line arguments
+    if args.epochs is not None:
+        config['training']['epochs'] = args.epochs
+    if args.device is not None:
+        config['training']['device'] = args.device
+    if args.batch_size is not None:
+        config['training']['batch_size'] = args.batch_size
+    if args.learning_rate is not None:
+        config['training']['learning_rate'] = args.learning_rate
+    if args.wandb:
+        config['wandb'] = True
+    if args.num_workers is not None:
+        config['training']['num_workers'] = args.num_workers
+    if args.pin_memory:
+        config['training']['pin_memory'] = True
+
+    return config
