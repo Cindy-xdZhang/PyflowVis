@@ -152,18 +152,19 @@ def LicRenderingUnsteady(field:UnsteadyVectorField2D,licImageSize:int,timeStepSK
         savePath=os.path.join(saveFolder,save_name)
         img.save(savePath)
 
-        
+
+
+
+from .Pyds.CppPlugins import cppMoudules        
 @typechecked
 def LicRenderingSteadyCpp(vecfield: SteadyVectorField2D,licImageSize:int,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
     """
     Render a steady 2D vector field as an LIC image and save to a PNG file.
     """ 
 
-    from .Pyds import CppPlugins
-    modules =CppPlugins.initPyBindLibs()
-    assert(modules['CppLicRenderingModule'].licRenderingPybindCPP is not None)
+    assert(cppMoudules['CppLicRenderingModule'].licRenderingPybindCPP is not None)
 
-    lic_result = modules['CppLicRenderingModule'].licRenderingPybindCPP( vecfield.field, vecfield.Xdim, vecfield.Ydim, vecfield.domainMinBoundary[0], vecfield.domainMaxBoundary[0], vecfield.domainMinBoundary[1], vecfield.domainMaxBoundary[1],licImageSize,stepSize,MaxIntegrationSteps)
+    lic_result = cppMoudules['CppLicRenderingModule'].licRenderingPybindCPP( vecfield.field, vecfield.Xdim, vecfield.Ydim, vecfield.domainMinBoundary[0], vecfield.domainMaxBoundary[0], vecfield.domainMinBoundary[1], vecfield.domainMaxBoundary[1],licImageSize,stepSize,MaxIntegrationSteps)
     
     # Step 3: Normalize the LIC result for visualization
     lic_normalized = (lic_result - np.min(lic_result)) / (np.max(lic_result) - np.min(lic_result))

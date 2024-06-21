@@ -3,6 +3,7 @@
 #include "VastistasVelocityGenerator.h"
 #include <Eigen/Dense>
 #include <execution>
+#include <fstream>
 #include <random>
 //  #define DISABLE_CPP_PARALLELISM
 //   define execute policy
@@ -34,7 +35,28 @@ std::vector<std::vector<double>> randomNoiseTexture(int width, int height)
 
     return texture;
 }
+std::vector<std::vector<double>> loadNoiseTexture(const std::string& filename, int width, int height)
+{
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file for reading: " << filename << std::endl;
+        return {};
+    }
 
+    std::vector<std::vector<double>> texture(height, std::vector<double>(width));
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            double value;
+            file >> value;
+            texture[y][x] = value;
+        }
+    }
+
+    file.close();
+
+    return texture;
+}
 // The result image size is the same as the input texture.
 std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(
     const std::vector<std::vector<double>>& texture,

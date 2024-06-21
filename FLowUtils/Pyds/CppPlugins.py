@@ -68,6 +68,8 @@ def initPyBindLibs(ExcludingList=[]):
     return modules
 
 
+cppMoudules=initPyBindLibs()
+
 if __name__ == '__main__':
     initPyBindLibs()
  

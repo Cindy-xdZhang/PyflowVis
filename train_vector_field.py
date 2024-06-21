@@ -9,9 +9,20 @@ from DeepUtils.VastisDataset import buildDataset
 from DeepUtils.ModelZoo import *
 from DeepUtils.MiscFunctions import *
 import logging,random,wandb
+import subprocess
 
 GLOBAL_WANDB_PROJECT_NAME="DeepVortexExtraction"
 initLogging()
+def get_git_commit_id():
+    try:
+        commit_id = subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode("utf-8")
+        is_dirty = subprocess.check_output(["git", "diff"]).decode("utf-8")
+        dirty_suffix = "-dirty" if is_dirty else ""
+        return f"GitCommit-{commit_id}{dirty_suffix}"
+    except subprocess.CalledProcessError:
+        return "Not a git repository"
+
+
 
 #! TODO (s) of PyFLowVis
 #! todo: load unsteady data from cpp generated binary file [DONE]
@@ -90,6 +101,7 @@ def test_model(model,config):
         for i in range(5):
             sample=random.randint(0,len(test_data_loader))
             vectorFieldImage, labelQtct, labelVortex=testDataset[sample]
+            minv,maxv=labelVortex[4],labelVortex[5]
             binaryName=testDataset.getBinaryName(sample)
 
             vectorFieldImage=vectorFieldImage.unsqueeze(0)
@@ -102,12 +114,17 @@ def test_model(model,config):
             #recField [batch_size, chanel=2,W=64, H=64, depth(timsteps)]
             recField=recField[0,:,:,:,:] .cpu()
             recField=recField.transpose(0,3)
-            recUnsteadyField=  UnsteadyVectorField2D(64,64,slicePerdata)
+            recField=recField*(maxv-minv)+minv
+            recUnsteadyField=  UnsteadyVectorField2D(64,64,slicePerdata)            
             recUnsteadyField.field=recField
+
             steadyField=  SteadyVectorField2D(64,64)
+            steadyField3D=steadyField3D*(maxv-minv)+minv
             steadyField.field=steadyField3D.numpy()
-            LicRenderingUnsteadyCpp(recUnsteadyField,licImageSize=64,timeStepSKip=2,saveFolder=save_folder,saveName=f"sample{sample}_{binaryName}__rec")
-            LicRenderingSteadyCpp(vecfield=steadyField,licImageSize=64,saveFolder=save_folder,saveName=f"sample{sample}_{binaryName}__gt")
+            predictTransformation=predictQtCt[0].cpu().numpy()
+            logging.info(f"testSample{sample}_predict Q(t)c(t){predictTransformation}, vs labelQtct{  labelQtct.cpu()}__rec")
+            LicRenderingUnsteadyCpp(recUnsteadyField,licImageSize=256,timeStepSKip=2,saveFolder=save_folder,saveName=f"testSample{sample}_{binaryName}__rec",stepSize=0.05,MaxIntegrationSteps=256)
+            LicRenderingSteadyCpp(vecfield=steadyField,licImageSize=256,saveFolder=save_folder,saveName=f"testSample{sample}_{binaryName}__gt",stepSize=0.05,MaxIntegrationSteps=256)
 
 
 
@@ -123,6 +140,7 @@ def test_model(model,config):
 def train_pipeline():
     # config=load_config("config\\cfgs\\config.yaml")
     config=argParse()
+    config["gitInfo"]=get_git_commit_id()
     training_args=config['training']
     # Initialize training parameters from args
     epochs = training_args['epochs']
@@ -148,6 +166,7 @@ def train_pipeline():
     config['run_name']=run_Name
 
     #build data loader using the dataset and args
+    #don't forget there is a built-in "force positive" transformation defined in the datset load function
     train_VastisDataset=buildDataset(config["dataset"],mode="train")   
     config["dataset"].update(train_VastisDataset.dastasetMetaInfo)  
     xdim, ydim,timesteps= config["dataset"]["Xdim"],config["dataset"]["Ydim"],config["dataset"]["time_steps"]
@@ -265,21 +284,43 @@ def test(checkpoint_path):
 
 
 
-def test_load_results(): 
-    Xdim,Ydim,time_steps,dominMinBoundary,dominMaxBoundary=read_rootMetaGridresolution('C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data\\unsteady\\64_64_nomix\\velocity_rc_1n_2\\meta.json')
-    directory_path = 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data\\unsteady\\64_64_nomix\\velocity_rc_1n_2\\rc_1_n_2_sample_0Si_1observer_1type_4.bin'
-    loadField, labelReferenceFrameABC,votexInfo=loadOneFlowEntryRawData(directory_path,Xdim,Ydim,time_steps)
-    dataSlice=loadField[0:7]    
-    unsteadyField=UnsteadyVectorField2D(Xdim,Ydim,7,dominMinBoundary,dominMaxBoundary) 
-    LicRenderingUnsteady(unsteadyField,128,1)
 
 
 def testVastisDataset():
     config=load_config("config\\cfgs\\config.yaml")
-    train_VastisDataset=buildDataset(config["dataset"],mode="train")   
-    validationDataset=buildDataset(config["dataset"],mode="val")   
     testDataset=buildDataset(config["dataset"],mode="test")
-    print(train_VastisDataset[0])    
+    model = ReferenceFrameExtractor(2,  64, 64, 16, ouptputDim=6*16, hiddenSize=64)
+    slicePerdata=16
+    sample=0
+    binaryName=testDataset.getBinaryName(sample)
+    save_folder="./testOutput/"
+    #vectorFieldImage shape is [bs=1,  chanel=2,W=64, H=64, depth(timsteps)]
+    device='cpu'
+    with torch.no_grad():
+        vectorFieldImage, labelQtct, labelVortex=testDataset[sample]
+        vectorFieldImage=vectorFieldImage.unsqueeze(0)
+        steadyField3D = vectorFieldImage[0, :, :, :, 0].transpose(0, 2).cpu()
+        vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
+        predictQtCt, recField = model(vectorFieldImage)
+        #recField [batch_size, chanel=2,W=64, H=64, depth(timsteps)]
+        recField=recField[0,:,:,:,:] .cpu()
+        recField=recField.transpose(0,3)
+        minv,maxv=labelVortex[4],labelVortex[5]
+        #revert "force positive" transformation
+        recField=recField*(maxv-minv)+minv
+        recUnsteadyField=  UnsteadyVectorField2D(64,64,slicePerdata)
+        recUnsteadyField.field=recField
+        steadyField=  SteadyVectorField2D(64,64)
+
+        #revert "force positive" transformation
+        steadyField3D=steadyField3D*(maxv-minv)+minv
+        steadyField.field=steadyField3D.numpy()
+
+
+
+        LicRenderingUnsteadyCpp(recUnsteadyField,licImageSize=128,timeStepSKip=2,saveFolder=save_folder,saveName=f"testSample{sample}_{binaryName}__rec",stepSize=0.01,MaxIntegrationSteps=200)
+        LicRenderingSteadyCpp(vecfield=steadyField,licImageSize=128,saveFolder=save_folder,saveName=f"testSample{sample}_{binaryName}__gt",stepSize=0.01,MaxIntegrationSteps=200)
+
 
 # if __name__ == '__main__':
 #    test_load_results()

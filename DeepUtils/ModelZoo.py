@@ -130,17 +130,7 @@ class ReferenceFrameExtractor(nn.Module):
         rec = self.reconstructor(vectorFieldwithTransforamtion)
         return abc_t, rec 
     
-    
-    def  preForward(self, batchData):
-        """This is the interface to accept BatchData From Dataloader,
-         in most case it should be empty, but this funciton always call before forwarding , can do some preprocess here then handle the data to forward function
-        """
-        vectorFieldImage, labelferenceFrame, labelVortex=batchData
-        vectorFieldImage = vectorFieldImage.transpose(1, 4)
-        Qt, tc = labelferenceFrame
-        labelQtct = torch.concat((Qt, tc), dim=2)
-        labelQtct = labelQtct.reshape(vectorFieldImage.shape[0], -1).to(device)
-        return 
+
 
         
 

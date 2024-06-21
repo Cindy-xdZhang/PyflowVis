@@ -36,17 +36,19 @@ def keep_last_n_levels(path,n):
 
 # create torch dataset using the load result function:
 class UnsteadyVastisDataset(torch.utils.data.Dataset):
-    def __init__(self, directory_path,mode,transform=None):
+    def __init__(self, directory_path,mode):
         fx_directory_path=self.FixDataFolder(directory_path)
         self.directory_path=os.path.join(fx_directory_path,"X64_Y64_T16_no_mixture")
         self.dataName=[]
         self.data=[]
         self.labelReferenceFrame=[]
         self.labelVortex=[]
-        self.transform=transform
+        self.transform=[]
         self.dastasetMetaInfo={}
         self.mode=mode
         self.preLoading(mode)
+    def setTransform(self,transform):
+        self.transform=transform
     def getBinaryName(self,sampleIdx):        
         return self.dataName[sampleIdx]
     def FixDataFolder(self,directory_path):

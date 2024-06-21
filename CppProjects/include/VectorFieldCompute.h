@@ -532,6 +532,7 @@ inline auto computeTargetCrtierion(const std::vector<std::vector<Eigen::Vector2d
 
 // lic LICAlgorithms
 std::vector<std::vector<double>> randomNoiseTexture(int width, int height);
+std::vector<std::vector<double>> loadNoiseTexture(const std::string& filename, int width, int height);
 std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(const std::vector<std::vector<double>>& texture, const SteadyVectorField2D& vecfield, const int licImageSizeX, const int licImageSizeY, double stepSize, int MaxIntegrationSteps, VORTEX_CRITERION criterionlColorBlend = VORTEX_CRITERION::NONE);
 std::vector<std::vector<std::vector<Eigen::Vector3d>>> LICAlgorithm_UnsteadyField(const std::vector<std::vector<double>>& texture, const UnSteadyVectorField2D& vecfield, const int licImageSizeX, const int licImageSizeY, double stepSize, int MaxIntegrationSteps, VORTEX_CRITERION curlColorBlend = VORTEX_CRITERION::NONE);
 #endif
