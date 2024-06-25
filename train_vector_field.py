@@ -99,7 +99,7 @@ def test_model(model,config):
 
         #random select 10 samples to visualize
         for i in range(5):
-            sample=random.randint(0,len(test_data_loader))
+            sample=random.randint(0,len(testDataset))
             vectorFieldImage, labelQtct, labelVortex=testDataset[sample]
             minv,maxv=labelVortex[4],labelVortex[5]
             binaryName=testDataset.getBinaryName(sample)
@@ -224,7 +224,7 @@ def train_pipeline():
         if config['wandb']:
             wandb.log({"epoch": epoch+1,  "epoch_Loss": {epoch_loss}, "val_loss": val_loss, "val_rec_error": val_rec_error})
 
-        #save best model
+        #save best model 
         if val_loss < best_val_loss and training_args['save_model'] and epoch % training_args["save_model_frequency"]== 0:
             best_val_loss = val_loss
             saving_path= os.path.join(training_args['save_model_path'],run_Name) 

@@ -463,6 +463,45 @@ inline std::vector<std::vector<double>> ComputeLAVD(const std::vector<std::vecto
     return {};
 }
 
+inline std::vector<std::vector<T>> ComputeFTLE(
+    const std::vector<std::vector<Eigen::Vector2d>>& vecfieldDataStart,
+    const std::vector<std::vector<Eigen::Vector2d>>& vecfieldDataEnd,
+    int Xdim, int Ydim,
+    double SpatialGridIntervalX, double SpatialGridIntervalY,
+    double deltaT)
+{
+    std::vector<std::vector<double>> FTLE(Ydim, std::vector<double>(Xdim, 0.0));
+    const double inverse_grid_interval_x = 1.0 / SpatialGridIntervalX;
+    const double inverse_grid_interval_y = 1.0 / SpatialGridIntervalY;
+
+    for (int y = 1; y < Ydim - 1; ++y) {
+        for (int x = 1; x < Xdim - 1; ++x) {
+            // Compute flow map gradient
+            Eigen::Matrix2d flowMapGradient;
+
+            // dx/dx0
+            flowMapGradient(0, 0) = (vecfieldDataEnd[y][x + 1](0) - vecfieldDataEnd[y][x - 1](0)) * 0.5 * inverse_grid_interval_x;
+            // dy/dx0
+            flowMapGradient(1, 0) = (vecfieldDataEnd[y][x + 1](1) - vecfieldDataEnd[y][x - 1](1)) * 0.5 * inverse_grid_interval_x;
+            // dx/dy0
+            flowMapGradient(0, 1) = (vecfieldDataEnd[y + 1][x](0) - vecfieldDataEnd[y - 1][x](0)) * 0.5 * inverse_grid_interval_y;
+            // dy/dy0
+            flowMapGradient(1, 1) = (vecfieldDataEnd[y + 1][x](1) - vecfieldDataEnd[y - 1][x](1)) * 0.5 * inverse_grid_interval_y;
+
+            // Compute Cauchy-Green strain tensor
+            Eigen::Matrix2d cauchyGreen = flowMapGradient.transpose() * flowMapGradient;
+
+            // Compute eigenvalues
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> eigensolver(cauchyGreen);
+            double maxEigenvalue = eigensolver.eigenvalues().maxCoeff();
+
+            // Compute FTLE
+            FTLE[y][x] = std::log(std::sqrt(maxEigenvalue)) / std::abs(deltaT);
+        }
+    }
+
+    return FTLE;
+}
 // Function to compute the Sobel edge detection for a 2D vector field slice
 inline std::vector<std::vector<double>> ComputeSobelEdge(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim)
 {
