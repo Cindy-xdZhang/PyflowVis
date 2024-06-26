@@ -43,7 +43,29 @@ T bilinear_interpolate(const std::vector<std::vector<T>>& vector_field, double x
     T b = v10 * (1 - tx) + v11 * tx;
     return a * (1 - ty) + b * ty;
 }
+template <typename T, int N>
+T bilinear_interpolate(const std::array<std::array<T, N>, N>& vector_field, double x, double y)
+{
+    x = std::clamp(x, double(0), double(N - 1));
+    y = std::clamp(y, double(0), double(N - 1));
 
+    int x0 = static_cast<int>(x);
+    int y0 = static_cast<int>(y);
+
+    int x1 = std::min(x0 + 1, static_cast<int>(N - 1));
+    int y1 = std::min(y0 + 1, static_cast<int>(N - 1));
+
+    double tx = x - x0;
+    double ty = y - y0;
+
+    T v00 = vector_field[y0][x0];
+    T v01 = vector_field[y0][x1];
+    T v10 = vector_field[y1][x0];
+    T v11 = vector_field[y1][x1];
+    T a = v00 * (1 - tx) + v01 * tx;
+    T b = v10 * (1 - tx) + v11 * tx;
+    return a * (1 - ty) + b * ty;
+}
 struct IUnsteadField2D {
 public:
     virtual Eigen::Vector2d getVector(int x, int y, int t) const = 0;
@@ -463,7 +485,7 @@ inline std::vector<std::vector<double>> ComputeLAVD(const std::vector<std::vecto
     return {};
 }
 
-inline std::vector<std::vector<T>> ComputeFTLE(
+inline std::vector<std::vector<double>> ComputeFTLE(
     const std::vector<std::vector<Eigen::Vector2d>>& vecfieldDataStart,
     const std::vector<std::vector<Eigen::Vector2d>>& vecfieldDataEnd,
     int Xdim, int Ydim,
@@ -571,7 +593,6 @@ inline auto computeTargetCrtierion(const std::vector<std::vector<Eigen::Vector2d
 
 // lic LICAlgorithms
 std::vector<std::vector<double>> randomNoiseTexture(int width, int height);
-std::vector<std::vector<double>> loadNoiseTexture(const std::string& filename, int width, int height);
-std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(const std::vector<std::vector<double>>& texture, const SteadyVectorField2D& vecfield, const int licImageSizeX, const int licImageSizeY, double stepSize, int MaxIntegrationSteps, VORTEX_CRITERION criterionlColorBlend = VORTEX_CRITERION::NONE);
-std::vector<std::vector<std::vector<Eigen::Vector3d>>> LICAlgorithm_UnsteadyField(const std::vector<std::vector<double>>& texture, const UnSteadyVectorField2D& vecfield, const int licImageSizeX, const int licImageSizeY, double stepSize, int MaxIntegrationSteps, VORTEX_CRITERION curlColorBlend = VORTEX_CRITERION::NONE);
+std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(const SteadyVectorField2D& vecfield, const int licImageSizeX, const int licImageSizeY, double stepSize, int MaxIntegrationSteps, VORTEX_CRITERION criterionlColorBlend = VORTEX_CRITERION::NONE);
+std::vector<std::vector<std::vector<Eigen::Vector3d>>> LICAlgorithm_UnsteadyField(const UnSteadyVectorField2D& vecfield, const int licImageSizeX, const int licImageSizeY, double stepSize, int MaxIntegrationSteps, VORTEX_CRITERION curlColorBlend = VORTEX_CRITERION::NONE);
 #endif

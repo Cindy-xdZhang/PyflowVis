@@ -20,11 +20,13 @@ using namespace std;
 constexpr double tmin = 0.0;
 constexpr double tmax = M_PI;
 constexpr int Xdim = 64, Ydim = 64;
-constexpr int LicImageSize = 64;
+constexpr int LicImageSize = 128;
 Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
 constexpr int unsteadyFieldTimeStep = 16;
 constexpr int LicSaveFrequency = 4; // every 2 time steps save one
+const double stepSize = 0.05;
+const int maxLICIteratioOneDirection = 256;
 
 std::string trimNumString(const std::string& numString)
 {
@@ -713,14 +715,12 @@ void testKillingTransformationForRFC()
         func_const_trans, unsteadyFieldTimeStep, tmin, tmax);
     Eigen::Vector2d StartPosition = { 0.0, 0.0 };
 
-    const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
-
     auto unsteady_field = killingABCtransformation(observerfield, StartPosition, InputflowField);
     auto resample_observerfield = observerfield.resample2UnsteadyField(grid_size, domainMinBoundary, domainMaxBoundary);
     // auto outputObserverFieldLic = LICAlgorithm_UnsteadyField(licNoisetexture, resample_observerfield, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
-    auto inputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, InputflowField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, VORTEX_CRITERION::NONE);
+    auto inputTextures = LICAlgorithm_UnsteadyField(InputflowField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, VORTEX_CRITERION::NONE);
 
-    auto outputTexturesObservedField = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, VORTEX_CRITERION::NONE);
+    auto outputTexturesObservedField = LICAlgorithm_UnsteadyField(unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, VORTEX_CRITERION::NONE);
 
     for (size_t i = 0; i < unsteadyFieldTimeStep; i++) {
         string tag_name0 = "inputField_" + std::to_string(i);
@@ -861,8 +861,6 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
         return;
     }
 
-    const double stepSize = 0.01;
-    const int maxLICIteratioOneDirection = 200;
     int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
     std::string root_folder = "../data/X" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "_no_mixture/" + dataSetSplitTag + "/";
     if (!filesystem::exists(root_folder)) {
@@ -875,12 +873,12 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     };
 
     const auto paramters = generateNParamters(Nparamters);
-    const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
+    // const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
 
-    std::normal_distribution<double> genTheta(0.0, 1.0);
-    std::normal_distribution<double> genSx(0.0, 2.0);
+    std::normal_distribution<double> genTheta(0.0, 0.50); // rotation angle's distribution
+    std::normal_distribution<double> genSx(1.0, 0.667); // scaling factor's distribution
 
-    // this generate coreline's point(critial point) for vortex region
+    // this generate coreline's point(critical point) for vortex region
     std::normal_distribution<double> genTx(0.0, 0.59);
 
     // Distribution for selecting type
@@ -928,13 +926,14 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
 
         for (size_t sample = 0; sample < numVelocityFields; sample++) {
 
+            std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
             // generate steady field with vortex
-            int Si = std::clamp((int)std::ceil(dist_int(rng) / 2), 0, 2);
-            const auto theta = genTheta(rng);
-            const auto sx = 0.5 * genSx(rng) + 0.5; // scaling range from 0.5-1.5
-            const auto sy = 0.5 * genSx(rng) + 0.5;
-            auto tx = genTx(rng);
-            auto ty = genTx(rng);
+            int Si = std::clamp((int)std::ceil(dist_int(rngSample) / 2), 0, 2);
+            const auto theta = genTheta(rngSample);
+            const auto sx = genSx(rngSample);
+            const auto sy = genSx(rngSample);
+            auto tx = genTx(rngSample);
+            auto ty = genTx(rngSample);
             // clamp tx ty to 0.5*domian
             tx = std::clamp(tx, 0.5 * domainMinBoundary.x(), 0.5 * domainMaxBoundary.x());
             ty = std::clamp(ty, 0.5 * domainMinBoundary.y(), 0.5 * domainMaxBoundary.y());
@@ -944,7 +943,6 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             const SteadyVectorField2D steadyField = generator.generateSteadyField(tx, ty, sx, sy, theta, Si);
             const auto& steadyFieldResData = steadyField.field;
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
-
                 printf(".");
                 // Randomly select a type
                 int type
@@ -1019,7 +1017,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 // rendering LIC
 
                 {
-                    auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+                    auto outputSteadyTexture = LICAlgorithm(steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     // add segmentation visualization for steady lic
                     Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
                     deformMat(0, 0) = sx * cos(theta);
@@ -1031,8 +1029,8 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
                     saveAsPNG(outputSteadyTexture, licFilename0);
 
-                    auto outputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
-                    auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(licNoisetexture, reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+                    auto outputTextures = LICAlgorithm_UnsteadyField(unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+                    auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     addSegmentationVisualization(outputTextures, unsteady_field, n_rc_si, domainMaxBoundary, domainMinBoundary, txy, deformMat);
                     for (size_t i = 0; i < outputTextures.size(); i += LicSaveFrequency) {
                         string tag_name = sample_tag_name + "killing_deformed_" + std::to_string(i);
@@ -1127,8 +1125,6 @@ void testCriterion()
 
     UnSteadyVectorField2D grye = flowCreator.createUnsteadyGyre();
 
-    const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
-
     // add segmentation visualization for lic
     std::vector<std::pair<VORTEX_CRITERION, std::string>> enumCriterion = {
         //{ VORTEX_CRITERION::Q_CRITERION, "Q_CRITERION" },
@@ -1144,9 +1140,9 @@ void testCriterion()
         auto criterion = enumCriterion[i].first;
         auto name_criterion = enumCriterion[i].second;
 
-        auto outputTexturesRFC = LICAlgorithm_UnsteadyField(licNoisetexture, RFC, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
-        auto outputTexturesBeads = LICAlgorithm_UnsteadyField(licNoisetexture, beads, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
-        auto outputTexturesGype = LICAlgorithm_UnsteadyField(licNoisetexture, grye, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
+        auto outputTexturesRFC = LICAlgorithm_UnsteadyField(RFC, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
+        auto outputTexturesBeads = LICAlgorithm_UnsteadyField(beads, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
+        auto outputTexturesGype = LICAlgorithm_UnsteadyField(grye, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
         for (size_t i = 0; i < unsteadyFieldTimeStep; i += LicSaveFrequency) {
             string tag_name = "rfc_" + name_criterion + std::to_string(i);
             string licFilename = root_folder + tag_name + "lic.png";

@@ -20,8 +20,6 @@ py::array_t<double> licRenderingPybindCPP(
     int MaxIntegrationSteps)
 {
 
-    const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
-
     // Convert numpy array to SteadyVectorField2D for vecfield
     py::buffer_info vector_field_info = vector_field_np.request();
     int YdimData = vector_field_info.shape[0];
@@ -43,7 +41,7 @@ py::array_t<double> licRenderingPybindCPP(
         vecfield.spatialGridInterval = Eigen::Vector2d((xMax - xMin) / (Xdim - 1), (yMax - yMin) / (Ydim - 1));
 
         // Call LICAlgorithm
-        std::vector<std::vector<Eigen::Vector3d>> result = LICAlgorithm(licNoisetexture, vecfield, licImageSize, licImageSize, stepSize, MaxIntegrationSteps, static_cast<VORTEX_CRITERION>(0));
+        std::vector<std::vector<Eigen::Vector3d>> result = LICAlgorithm(vecfield, licImageSize, licImageSize, stepSize, MaxIntegrationSteps, static_cast<VORTEX_CRITERION>(0));
 
         // Convert result to numpy array
         py::array_t<double> result_np({ licImageSize, licImageSize, 3 }); // 3 for R, G, B

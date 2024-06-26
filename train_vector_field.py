@@ -9,18 +9,11 @@ from DeepUtils.VastisDataset import buildDataset
 from DeepUtils.ModelZoo import *
 from DeepUtils.MiscFunctions import *
 import logging,random,wandb
-import subprocess
+import fnmatch
+import torchsummary
 
 GLOBAL_WANDB_PROJECT_NAME="DeepVortexExtraction"
 initLogging()
-def get_git_commit_id():
-    try:
-        commit_id = subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode("utf-8")
-        is_dirty = subprocess.check_output(["git", "diff"]).decode("utf-8")
-        dirty_suffix = "-dirty" if is_dirty else ""
-        return f"GitCommit-{commit_id}{dirty_suffix}"
-    except subprocess.CalledProcessError:
-        return "Not a git repository"
 
 
 
@@ -136,6 +129,23 @@ def test_model(model,config):
     model.train()
     return test_loss,min_loss,max_loss,reconstruction_error
 
+def CollectWandbLogfiles(arti_code):
+    def match_file(path):    
+        return path.endswith(".py") 
+    saveFolder="./DeepUtils/"
+    fileList0=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]
+    saveFolder="./FlowUtils/"
+    fileList1=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]    
+    fileList0.append("train_vector_field.py")
+
+    for file in fileList0:
+        arti_code.add_file(file, name= file)
+    for file in fileList1:
+        arti_code.add_file(file, name=file)
+    return arti_code
+
+
+    
 
 def train_pipeline():
     # config=load_config("config\\cfgs\\config.yaml")
@@ -152,15 +162,15 @@ def train_pipeline():
 
     # Initialize wandb
     if config['wandb']:
-        try:
-            wandb.init(project=GLOBAL_WANDB_PROJECT_NAME,
-                       name=run_Name,
-                       tags=runTags,
-                       config=config)
-        except:
-            config['wandb'] = False
-            logging.error("wandb init failed, reset config to disable wandb")        
-            
+        run=wandb.init(project=GLOBAL_WANDB_PROJECT_NAME,
+                    name=run_Name,
+                    tags=runTags,
+                    config=config)
+        arti_code=wandb.Artifact("code", type="code")
+        arti_code=CollectWandbLogfiles(arti_code)
+        wandb.log_artifact(arti_code) 
+
+                
     logging.info(config)
     logging.info(f"run name: {run_Name}, run tags: {runTags}")
     config['run_name']=run_Name
@@ -179,9 +189,10 @@ def train_pipeline():
  
 
     # Initialize the model
-    model = ReferenceFrameExtractor(2,  xdim, ydim, timesteps, ouptputDim=6*timesteps, hiddenSize=64)
+    model = ReferenceFrameExtractor(2,  xdim, ydim, timesteps, ouptputDim=6*timesteps, hiddenSize=config['network']['hidden_size'])
     model.apply(init_weights)
     model.to(device)
+    torchsummary.summary(model, (2, xdim, ydim, timesteps))
 
     # Initialize the optimizer with L2 regularization
     optimizer = optim.Adam(model.parameters(), lr= training_args['learning_rate'], weight_decay=training_args['weight_decay'])
@@ -189,50 +200,61 @@ def train_pipeline():
 
     # Training
     total_iterations = 0
+    oom_time=0
     for epoch in range(epochs):
         epoch_loss = 0
-        
-        for batch_idx, (vectorFieldImage, labelQtct, labelVortex) in enumerate(data_loader):
+        try:
+            for batch_idx, (vectorFieldImage, labelQtct, labelVortex) in enumerate(data_loader):
 
-            # tx, ty, n, rc = labelVortex[0], labelVortex[1], labelVortex[2], labelVortex[3]
-            steadyField3D = vectorFieldImage[:, :, :, :, 0]
-            steadyField3D = steadyField3D.unsqueeze(-1).repeat(1, 1, 1, 1, timesteps).to(device)
-            vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
-            predictQtCt, rec = model(vectorFieldImage)
+                # tx, ty, n, rc = labelVortex[0], labelVortex[1], labelVortex[2], labelVortex[3]
+                steadyField3D = vectorFieldImage[:, :, :, :, 0]
+                steadyField3D = steadyField3D.unsqueeze(-1).repeat(1, 1, 1, 1, timesteps).to(device)
+                vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
+                predictQtCt, rec = model(vectorFieldImage)
 
-            lossRec = F.mse_loss(rec, steadyField3D)
-            lossRef = F.mse_loss(predictQtCt, labelQtct)
-            loss = lossRec + lossRef
+                lossRec = F.mse_loss(rec, steadyField3D)
+                lossRef = F.mse_loss(predictQtCt, labelQtct)
+                loss = lossRec + lossRef
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+                
+                total_iterations += 1
+                if batch_idx % training_args['print_frequency'] == 0:
+                    stepRecError = lossRec.item()
+                    logging.info(f'Epoch {epoch+1}, iter {batch_idx+1}, total_iterations: {total_iterations}. Loss: {loss.item()}.RecLoss: {stepRecError}')
+                    if config['wandb']:
+                        wandb.log({"train_loss": loss.item(),  "step_rec_error":stepRecError,"total_iterations": total_iterations})
+                
+            epoch_loss /= len(data_loader)
             
-            total_iterations += 1
-            if batch_idx % training_args['print_frequency'] == 0:
-                stepRecError = lossRec.item()
-                logging.info(f'Epoch {epoch+1}, iter {batch_idx+1}, total_iterations: {total_iterations}. Loss: {loss.item()}.RecLoss: {stepRecError}')
-                if config['wandb']:
-                    wandb.log({"train_loss": loss.item(),  "step_rec_error":stepRecError,"total_iterations": total_iterations})
-            
-        epoch_loss /= len(data_loader)
-        
-        # Validate the model
-        val_loss,val_rec_error = validate(model, validation_data_loader, device,config=config)  
-        logging.info(f'Epoch {epoch+1}, Loss: {epoch_loss}, Val Loss: {val_loss}, Val Rec Error: {val_rec_error}')
-        if config['wandb']:
-            wandb.log({"epoch": epoch+1,  "epoch_Loss": {epoch_loss}, "val_loss": val_loss, "val_rec_error": val_rec_error})
+            # Validate the model
+            val_loss,val_rec_error = validate(model, validation_data_loader, device,config=config)  
+            logging.info(f'Epoch {epoch+1}, epoch_Loss: {epoch_loss}, Val Loss: {val_loss}, Val Rec Error: {val_rec_error}')
+            if config['wandb']:
+                wandb.log({"epoch": epoch+1,  "epoch_Loss": {epoch_loss}, "val_loss": val_loss, "val_rec_error": val_rec_error})
 
-        #save best model 
-        if val_loss < best_val_loss and training_args['save_model'] and epoch % training_args["save_model_frequency"]== 0:
-            best_val_loss = val_loss
-            saving_path= os.path.join(training_args['save_model_path'],run_Name) 
-            save_checkpoint({
-                'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
-                'optimizer': optimizer.state_dict(),
-            }, folder_name=saving_path, checkpoint_name= f'best_checkpoint.pth.tar')
+            #save best model 
+            if val_loss < best_val_loss and training_args['save_model'] and epoch % training_args["save_model_frequency"]== 0:
+                best_val_loss = val_loss
+                saving_path= os.path.join(training_args['save_model_path'],run_Name) 
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'state_dict': model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                }, folder_name=saving_path, checkpoint_name= f'best_checkpoint.pth.tar')
+        except RuntimeError as exception:
+            if "out of memory" in str(exception):
+                oom_time += 1
+                logging.info("WARNING: ran out of memory,times: {}".format(oom_time))
+                if hasattr(torch.cuda, 'empty_cache'):
+                    torch.cuda.empty_cache()
+                bs= config['training']['batch_size']=2
+            else:
+                logging.error(str(exception))
+                raise exception
 
     #test 
     avgtest_loss,mintest_error,maxtest_error,reconstruction_error=test_model(model,config=config)

@@ -1,7 +1,7 @@
 
 network:
   family_name: 'CNN'
-  input_size: 784
+  hidden_size: 128
   hidden_layers: [128, 64]
   output_size: 10
   activation: 'relu'
@@ -17,11 +17,11 @@ wandb: True
 training: 
   device: 'cuda'
   # device: 'cpu'
-  epochs: 120
-  batch_size: 100
+  epochs: 2
+  batch_size: 32
   shuffle: True
   num_workers: 0
-  pin_memory: False
+  pin_memory: True
 
 
   optimizer: Adam
