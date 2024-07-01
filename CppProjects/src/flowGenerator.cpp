@@ -862,7 +862,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     }
 
     int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
-    std::string root_folder = "../data/X" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "_no_mixture/" + dataSetSplitTag + "/";
+    std::string root_folder = "../data/debugX" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "_no_mixture/" + dataSetSplitTag + "/";
     if (!filesystem::exists(root_folder)) {
         filesystem::create_directories(root_folder);
     }

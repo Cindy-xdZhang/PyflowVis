@@ -316,7 +316,30 @@ std::pair<T, T> computeMinMax(const std::vector<std::vector<T>>& values)
 
     return { minVal, maxVal };
 }
+template <class T, int N>
+std::pair<T, T> computeMinMax(const std::array<std::array<T, N>, N>& values)
+{
+    if (values.empty() || values[0].empty()) {
+        throw std::invalid_argument("The input vector is empty.");
+    }
 
+    T minVal = std::numeric_limits<T>::infinity();
+    T maxVal = -std::numeric_limits<T>::infinity();
+    int rowid = 0;
+    for (const auto& row : values) {
+        for (T val : row) {
+            if (val < minVal) {
+                minVal = val;
+            }
+            if (val > maxVal) {
+                maxVal = val;
+            }
+        }
+        rowid += 1;
+    }
+
+    return { minVal, maxVal };
+}
 inline std::vector<std::vector<double>> ComputeCurl(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
 {
     std::vector<std::vector<double>> curl(Ydim, std::vector<double>(Xdim, 0.0f));
