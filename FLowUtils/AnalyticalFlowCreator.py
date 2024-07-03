@@ -2,10 +2,10 @@ import numpy as np
 import numexpr as ne
 import tqdm
 from numpy import pi
-from FLowUtils.VectorField2d import UnsteadyVectorField2D
-from FLowUtils.LicRenderer import *
+from .VectorField2d import UnsteadyVectorField2D
+from .LicRenderer import *
 import numpy as np
-import matplotlib.pyplot as plt
+
 
 class AnalyticalFlowCreator:
     def __init__(self, grid_size, time_steps=10,domainBoundaryMin=(-2.0,-2.0,0.0),domainBoundaryMax=(2.0,2.0,2*np.pi), parameters=None):
@@ -124,8 +124,5 @@ def LICAlgorithmTest():
 
 
 
-
-if __name__ == '__main__':
-    LICAlgorithmTest()
 
     

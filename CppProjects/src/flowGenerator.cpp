@@ -6,8 +6,9 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/types/vector.hpp"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
 #include "stb/stb_image_write.h"
-
 #include <execution>
 #include <filesystem>
 #include <fstream>
@@ -20,12 +21,12 @@ using namespace std;
 constexpr double tmin = 0.0;
 constexpr double tmax = M_PI;
 constexpr int Xdim = 64, Ydim = 64;
-constexpr int LicImageSize = 128;
+constexpr int LicImageSize = 256;
 Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
 constexpr int unsteadyFieldTimeStep = 16;
 constexpr int LicSaveFrequency = 4; // every 2 time steps save one
-const double stepSize = 0.05;
+const double stepSize = 0.02;
 const int maxLICIteratioOneDirection = 256;
 
 std::string trimNumString(const std::string& numString)
@@ -34,6 +35,54 @@ std::string trimNumString(const std::string& numString)
     str.erase(str.find_last_not_of('0') + 1, std::string::npos);
     str.erase(str.find_last_not_of('.') + 1, std::string::npos);
     return str;
+}
+std::vector<std::vector<double>> loadPngFile(const std::string& filename, int& width, int& height)
+{
+    int n;
+    unsigned char* data = stbi_load(filename.c_str(), &width, &height, &n, 1); // Load image in grayscale
+    if (!data) {
+        std::cerr << "Failed to load image: " << filename << std::endl;
+        return {};
+    }
+
+    std::vector<std::vector<double>> texture(height, std::vector<double>(width));
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            texture[y][x] = data[y * width + x] / 255.0; // Normalize to [0, 1]
+        }
+    }
+
+    stbi_image_free(data); // Free the image memory
+
+    return texture;
+}
+
+#include <iomanip>
+void ConvertNoiseTextureImage2Text(const std::string& infilename, const std::string& outFile, int width, int height)
+{
+    auto texture = loadPngFile(infilename, width, height);
+
+    std::ofstream out(outFile);
+    if (!out.is_open()) {
+        std::cerr << "Failed to open file for writing: " << outFile << std::endl;
+        return;
+    }
+    constexpr int precision = 6;
+    out << "constexpr std::array<std::array<double, 64>, 64> noiseTexture = {\n";
+    for (const auto& row : texture) {
+        std::string beginer_string = "    std::array<double," + std::to_string(width) + ">{";
+        out << beginer_string;
+        for (size_t x = 0; x < row.size(); ++x) {
+            out << std::fixed << std::setprecision(precision) << row[x];
+            if (x < row.size() - 1)
+                out << ", ";
+        }
+        out << " },\n";
+    }
+    out << "};\n";
+
+    out.close();
 }
 
 // Function to save the 2D vector as a PNG image
@@ -439,80 +488,38 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
         resultField.resampleFromAnalyticalExpression();
 
     } else { // if no analytical expression
-        if constexpr (std::is_same_v<InputFieldTYPE, UnSteadyVectorField2D>) {
-            for (size_t i = 0; i < timestep; i++) {
-                resultField.field[i].resize(inputField.field[i].size());
-                const double physical_t_this_slice = tmin + i * dt; // time slice i
-                for (size_t j = 0; j < inputField.field[i].size(); j++) {
-                    // y slice
-                    resultField.field[i][j].resize(inputField.field[i][j].size());
-                    for (size_t k = 0; k < inputField.field[i][j].size(); k++) {
-                        Eigen::Vector4d pos = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
-                            j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f }; // get position of this grid point
-                        const Eigen ::Matrix3d Q_transpose = observerRotationMatrices[i];
-                        const Eigen ::Matrix3d Q_t = Q_transpose.transpose();
-                        const Eigen ::Vector3d pos_3d = { pos.x(), pos.y(), 1.0 };
-                        const Eigen ::Vector3d position_t = { pathPositions[i].x(), pathPositions[i].y(), 1.0 };
-                        // frame transformation is F(x):x*=Q(t)x+c(t)  or x*=T(Os) *Q*T(-Pt)*x
-                        // =>F(x):x* = Q(t)*(x-pt)+Os= Qx-Q*pt+Os -> c=-Q*pt+Os
-                        const Eigen ::Vector3d Os = { pathPositions[0].x(), pathPositions[0].y(), 1.0 };
-                        auto c_t = Os - Q_t * position_t;
-                        // => F^(-1)(x)= Q^T (x-c)= Q^T *( x+Q*pt-Os)
-                        Eigen ::Vector3d F_inverse_x = Q_transpose * (pos_3d - c_t);
-                        F_inverse_x /= F_inverse_x(2);
+        for (size_t i = 0; i < timestep; i++) {
+            resultField.field[i].resize(inputField.field[i].size());
+            const double physical_t_this_slice = tmin + i * dt; // time slice i
+            for (size_t j = 0; j < inputField.field[i].size(); j++) {
+                // y slice
+                resultField.field[i][j].resize(inputField.field[i][j].size());
+                for (size_t k = 0; k < inputField.field[i][j].size(); k++) {
+                    Eigen::Vector4d pos = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
+                        j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f }; // get position of this grid point
+                    const Eigen ::Matrix3d Q_transpose = observerRotationMatrices[i];
+                    const Eigen ::Matrix3d Q_t = Q_transpose.transpose();
+                    const Eigen ::Vector3d pos_3d = { pos.x(), pos.y(), 1.0 };
+                    const Eigen ::Vector3d position_t = { pathPositions[i].x(), pathPositions[i].y(), 1.0 };
+                    // frame transformation is F(x):x*=Q(t)x+c(t)  or x*=T(Os) *Q*T(-Pt)*x
+                    // =>F(x):x* = Q(t)*(x-pt)+Os= Qx-Q*pt+Os -> c=-Q*pt+Os
+                    const Eigen ::Vector3d Os = { pathPositions[0].x(), pathPositions[0].y(), 1.0 };
+                    auto c_t = Os - Q_t * position_t;
+                    // => F^(-1)(x)= Q^T (x-c)= Q^T *( x+Q*pt-Os)
+                    Eigen ::Vector3d F_inverse_x = Q_transpose * (pos_3d - c_t);
+                    F_inverse_x /= F_inverse_x(2);
 
-                        Eigen::Vector2d F_inverse_x_2d = { F_inverse_x(0), F_inverse_x(1) };
+                    Eigen::Vector2d F_inverse_x_2d = { F_inverse_x(0), F_inverse_x(1) };
 
-                        Eigen::Vector2d v = inputField.getVector(F_inverse_x_2d, physical_t_this_slice);
-                        auto u = observerfield.getVector(F_inverse_x(0), F_inverse_x(1), physical_t_this_slice);
+                    Eigen::Vector2d v = inputField.getVector(F_inverse_x_2d, physical_t_this_slice);
+                    auto u = observerfield.getVector(F_inverse_x(0), F_inverse_x(1), physical_t_this_slice);
 
-                        Eigen::Vector3d vminus_lab_frame;
-                        vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
+                    Eigen::Vector3d vminus_lab_frame;
+                    vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
 
-                        // (v-u)*(x,t)=  push forward(  (v-u)(F^-1(x),t) )= Q(t)^T *(v-u)(F^-1(x),t)
-                        Eigen::Vector3d vminus_observer_frame = Q_t * vminus_lab_frame;
-                        resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
-                    }
-                }
-            }
-        } else {
-            for (size_t i = 0; i < timestep; i++) {
-                // time slice i
-                resultField.field[i].resize(inputField.field.size());
-                const double physical_t_this_slice = tmin + i * dt;
-                for (size_t j = 0; j < inputField.field.size(); j++) {
-                    // y slice
-                    resultField.field[i][j].resize(inputField.field[j].size());
-                    for (size_t k = 0; k < inputField.field[j].size(); k++) {
-
-                        // get position of this grid point
-                        Eigen::Vector4d pos = { k * inputField.spatialGridInterval(0) + inputField.spatialDomainMinBoundary(0),
-                            j * inputField.spatialGridInterval(1) + inputField.spatialDomainMinBoundary(1), 0.0f, 1.0f };
-
-                        const auto tmp = pathPositions[i];
-                        const Eigen ::Matrix3d Q_transpose = observerRotationMatrices[i];
-                        const Eigen ::Matrix3d Q_t = Q_transpose.transpose();
-                        const Eigen ::Vector3d pos_3d = { pos.x(), pos.y(), 1.0 };
-                        const Eigen ::Vector3d position_t = { tmp.x(), tmp.y(), 1.0 };
-                        // frame transformation is F(x):x*=Q(t)x+c(t)  or x*=T(Os) *Q*T(-Pt)*x
-                        // =>F(x):x* = Q(t)*(x-pt)+Os= Qx-Q*pt+Os -> c=-Q*pt+Os
-                        const Eigen ::Vector3d Os = { pathPositions[0].x(), pathPositions[0].y(), 1.0 };
-                        auto c_t = Os - Q_t * position_t;
-                        // => F^(-1)(x)= Q^T (x-c)= Q^T *( x+Q*pt-Os)
-                        Eigen ::Vector3d F_inverse_x = Q_transpose * (pos_3d - c_t);
-                        F_inverse_x /= F_inverse_x(2);
-
-                        Eigen::Vector2d F_inverse_x_2d = { F_inverse_x(0), F_inverse_x(1) };
-
-                        Eigen::Vector2d v = inputField.getVector(F_inverse_x_2d, physical_t_this_slice);
-                        auto u = observerfield.getVector(F_inverse_x(0), F_inverse_x(1), physical_t_this_slice);
-
-                        Eigen::Vector3d vminus_lab_frame;
-                        vminus_lab_frame << v(0) - u(0), v(1) - u(1), 0;
-
-                        Eigen::Vector3d vminus_observer_frame = Q_t * vminus_lab_frame;
-                        resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
-                    }
+                    // (v-u)*(x,t)=  push forward(  (v-u)(F^-1(x),t) )= Q(t)^T *(v-u)(F^-1(x),t)
+                    Eigen::Vector3d vminus_observer_frame = Q_t * vminus_lab_frame;
+                    resultField.field[i][j][k] = { vminus_observer_frame(0), vminus_observer_frame(1) };
                 }
             }
         }
@@ -520,175 +527,6 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
 
     return resultField;
 }
-//
-// void generateSteadyField()
-//{
-//
-//    const double stepSize = 0.01;
-//    const int maxIteratioOneDirection = 256;
-//    int numVelocityFields = 1; // num of fields per n, rc parameter setting
-//
-//    Eigen::Vector2d gridInterval = {
-//        (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
-//        (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
-//    };
-//
-//    const std::vector<std::pair<double, double>> paramters = generateNParamters(1);
-//    const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
-//
-//    uniform_real_distribution<double> genTheta(-1.0, 1.0);
-//    uniform_real_distribution<double> genSx(-2.0, 2.0);
-//
-//    string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
-//    if (!filesystem::exists(root_folder)) {
-//        filesystem::create_directories(root_folder);
-//    }
-//
-//    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
-//        const double rc = params.first;
-//        const double n = params.second;
-//        const string task_name = "velocity_field_rc_" + to_string(rc) + "n_" + to_string(n);
-//        printf("generate data for %s\n", task_name.c_str());
-//
-//        VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
-//
-//        for (size_t sample = 0; sample < numVelocityFields; sample++) {
-//
-//            const auto theta = genTheta(rng);
-//            const auto sx = 1 - 0.5 * genSx(rng);
-//            const auto sy = 1 - 0.5 * genSx(rng);
-//            for (size_t j = 0; j < 3; j++) { // j denotes selection of si matix
-//
-//                auto resData = generator.generateSteady(sx, sy, theta, j);
-//                const string tag_name = "velocity_field_ " + std::to_string(sample) + "rc_" + to_string(rc) + "n_" + to_string(n) + "S[" + to_string(j) + "]_";
-//
-//                string metaFilename = root_folder + tag_name + "meta.json";
-//                string velocityFilename = root_folder + tag_name + "velocity.bin";
-//                string licFilename = root_folder + tag_name + "lic.png";
-//
-//                // save meta info:
-//                std::ofstream out(metaFilename);
-//                if (!out.good()) {
-//                    printf("couldn't open file: %s", metaFilename.c_str());
-//                    return;
-//                }
-//                std::ofstream outBin(velocityFilename, std::ios::binary);
-//                if (!outBin.good()) {
-//                    printf("couldn't open file: %s", velocityFilename.c_str());
-//                    return;
-//                }
-//
-//                cereal::BinaryOutputArchive archive_Binary(outBin);
-//                const auto rawData = flatten2DAs1Dfloat(resData);
-//                auto [minV, maxV] = computeMinMax(rawData);
-//
-//                {
-//
-//                    cereal::JSONOutputArchive archive_o(out);
-//                    archive_o(CEREAL_NVP(Xdim));
-//                    archive_o(CEREAL_NVP(Ydim));
-//                    std::vector<double> domainMininumBoundary = { domainMinBoundary(0), domainMinBoundary(1) };
-//                    std::vector<double> domainMaxinumBoundary = { domainMaxBoundary(0), domainMaxBoundary(1) };
-//                    archive_o(CEREAL_NVP(domainMininumBoundary));
-//                    archive_o(CEREAL_NVP(domainMaxinumBoundary));
-//
-//                    archive_o(CEREAL_NVP(n));
-//                    archive_o(CEREAL_NVP(rc));
-//
-//                    archive_o(CEREAL_NVP(theta));
-//                    archive_o(CEREAL_NVP(sx));
-//                    archive_o(CEREAL_NVP(sy));
-//                    archive_o(CEREAL_NVP(minV));
-//                    archive_o(CEREAL_NVP(maxV));
-//                }
-//
-//                // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
-//                out.close();
-//
-//                // write raw data
-//
-//                // ar(make_size_tag(static_cast<size_type=uint64>(vector.size()))); // number of elements
-//                // ar(binary_data(vector.data(), vector.size() * sizeof(T)));
-//                //  when using other library to read, need to discard the first uint64 (8bytes.)
-//                archive_Binary(rawData);
-//
-//                outBin.close();
-//
-//                SteadyVectorField2D outField {
-//                    resData,
-//                    domainMinBoundary,
-//                    domainMaxBoundary,
-//                    gridInterval
-//                };
-//                auto outputTexture = LICAlgorithm(licNoisetexture, outField, LicImageSize, LicImageSize, stepSize, maxIteratioOneDirection);
-//
-//                saveAsPNG(outputTexture, licFilename);
-//
-//            } // for j
-//        }
-//    });
-//}
-
-// void testKillingTransformASteadyField()
-//{
-//
-//     const int unsteadyFieldTimeStep = 32;
-//
-//     const double stepSize = 0.01;
-//     const int maxLICIteratioOneDirection = 256;
-//     int numVelocityFields = 1; // num of fields per n, rc parameter setting
-//     std::string root_folder = "../data/unsteady/" + to_string(Xdim) + "_" + to_string(Xdim) + "/";
-//
-//     Eigen::Vector2d gridInterval = {
-//         (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
-//         (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
-//     };
-//     const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
-//
-//     double rc = 1.0;
-//     double n = 2;
-//     std::uniform_real_distribution<double> genSx(-2.0, 2.0);
-//     const auto tx = 1 - 0.45 * genSx(rng);
-//     const auto ty = 1 - 0.45 * genSx(rng);
-//
-//     const auto cx = 1;
-//     const auto cy = 1;
-//     const auto dx = 0;
-//     const auto dy = 0;
-//     VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
-//     auto resData = generator.generateSteadyV2(cx, cy, dx, dy, tx, ty);
-//
-//     SteadyVectorField2D steadyField {
-//         resData,
-//         domainMinBoundary,
-//         domainMaxBoundary,
-//         gridInterval
-//     };
-//     auto outputSteadyTexture = LICAlgorithm(licNoisetexture, steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
-//     string tag_name = "steady_beforeTransformation";
-//     string licFilename0 = root_folder + tag_name + "lic.png";
-//
-//     auto func_const_trans = KillingComponentFunctionFactory::constantTranslation(0, 0.1);
-//
-//     std::function<Eigen::Vector3d(double)> func_decreasespeedTranslate = [=](double t) {
-//         return Eigen::Vector3d(0.1 * (1 - t / 2 * M_PI), 0, 0) * 0.1;
-//     };
-//
-//     KillingAbcField observerfield(
-//         func_decreasespeedTranslate, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
-//     Eigen::Vector2d StartPosition = { 0.0, 0.0 };
-//     auto unsteady_field = killingABCtransformation(observerfield, StartPosition, steadyField);
-//
-//     saveAsPNG(outputSteadyTexture, licFilename0);
-//     auto outputTextures = LICAlgorithm_UnsteadyField(licNoisetexture, unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
-//
-//     for (size_t i = 0; i < outputTextures.size(); i++) {
-//         string tag_name = "killing_transformation_" + std::to_string(i);
-//         string licFilename = root_folder + tag_name + "lic.png";
-//         saveAsPNG(outputTextures[i], licFilename);
-//     }
-// }
-////
 void testKillingTransformationForRFC()
 {
     const int LicImageSize = 128;
@@ -966,10 +804,10 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 auto inv_func = KillingComponentFunctionFactory::getInverseObserver(func);
 
                 KillingAbcField observerfieldDeform(
-                    func, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
+                    func, unsteadyFieldTimeStep, tmin, tmax);
 
                 KillingAbcField observerfield(
-                    inv_func, unsteadyFieldTimeStep, 0.0f, 2 * M_PI);
+                    inv_func, unsteadyFieldTimeStep, tmin, tmax);
 
                 Eigen::Vector2d StartPosition = { 0.0, 0.0 };
                 auto unsteady_field = killingABCtransformation(observerfieldDeform, StartPosition, steadyField);
@@ -1120,19 +958,19 @@ void testCriterion()
     AnalyticalFlowCreator flowCreator(grid_size, time_steps, domainMinBoundary, domainMaxBoundary);
 
     // Create the flow field
-    UnSteadyVectorField2D RFC = flowCreator.createRFC();
-    auto beads = flowCreator.createBeadsFlow();
-
-    UnSteadyVectorField2D grye = flowCreator.createUnsteadyGyre();
+    const auto rfc = flowCreator.createRFC();
+    const auto breads = flowCreator.createBeadsFlow();
+    const auto beadsNC = flowCreator.createBeadsFlowNoContraction();
+    const UnSteadyVectorField2D grye = flowCreator.createUnsteadyGyre();
 
     // add segmentation visualization for lic
     std::vector<std::pair<VORTEX_CRITERION, std::string>> enumCriterion = {
-        //{ VORTEX_CRITERION::Q_CRITERION, "Q_CRITERION" },
-        //{ VORTEX_CRITERION::CURL, "CURL" },
-        //{ VORTEX_CRITERION::IVD_CRITERION, "IVD_CRITERION" },
-        //{ VORTEX_CRITERION::LAMBDA2_CRITERION, "LAMBDA2_CRITERION" },
-        //{ VORTEX_CRITERION::DELTA_CRITERION, "DELTA_CRITERION" },
-        //{ VORTEX_CRITERION::SUJUDI_HAIMES_CRITERION, "SUJUDI_HAIMES" },
+        { VORTEX_CRITERION::Q_CRITERION, "Q_CRITERION" },
+        { VORTEX_CRITERION::CURL, "CURL" },
+        { VORTEX_CRITERION::IVD_CRITERION, "IVD_CRITERION" },
+        { VORTEX_CRITERION::LAMBDA2_CRITERION, "LAMBDA2_CRITERION" },
+        { VORTEX_CRITERION::DELTA_CRITERION, "DELTA_CRITERION" },
+        { VORTEX_CRITERION::SUJUDI_HAIMES_CRITERION, "SUJUDI_HAIMES" },
         { VORTEX_CRITERION::SOBEL_EDGE_DETECTION, "SOBEL_EDGE" }
     };
 
@@ -1140,17 +978,23 @@ void testCriterion()
         auto criterion = enumCriterion[i].first;
         auto name_criterion = enumCriterion[i].second;
 
-        auto outputTexturesRFC = LICAlgorithm_UnsteadyField(RFC, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
-        auto outputTexturesBeads = LICAlgorithm_UnsteadyField(beads, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
+        auto outputTexturesRfc = LICAlgorithm_UnsteadyField(rfc, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
+        auto outputTexturesBeads = LICAlgorithm_UnsteadyField(breads, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
+        auto outputTexturesBeadsNc = LICAlgorithm_UnsteadyField(beadsNC, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
         auto outputTexturesGype = LICAlgorithm_UnsteadyField(grye, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, criterion);
-        for (size_t i = 0; i < unsteadyFieldTimeStep; i += LicSaveFrequency) {
-            string tag_name = "rfc_" + name_criterion + std::to_string(i);
-            string licFilename = root_folder + tag_name + "lic.png";
-            saveAsPNG(outputTexturesRFC[i], licFilename);
 
-            tag_name = "beads_" + name_criterion + std::to_string(i);
-            licFilename = root_folder + tag_name + "lic.png";
+        for (size_t i = 0; i < unsteadyFieldTimeStep; i += LicSaveFrequency) {
+            string tag_name0 = "rfc_" + name_criterion + std::to_string(i);
+            string licFilename0 = root_folder + tag_name0 + "lic.png";
+            saveAsPNG(outputTexturesRfc[i], licFilename0);
+
+            string tag_name = "beads_" + name_criterion + std::to_string(i);
+            string licFilename = root_folder + tag_name + "lic.png";
             saveAsPNG(outputTexturesBeads[i], licFilename);
+
+            tag_name = "beadsNc_" + name_criterion + std::to_string(i);
+            licFilename = root_folder + tag_name + "lic.png";
+            saveAsPNG(outputTexturesBeadsNc[i], licFilename);
 
             tag_name = "gyre_" + name_criterion + std::to_string(i);
             licFilename = root_folder + tag_name + "lic.png";

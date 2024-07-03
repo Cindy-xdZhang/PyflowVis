@@ -1,15 +1,13 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from FLowUtils.LicRenderer import LicRenderingUnsteadyCpp,LicRenderingSteadyCpp
-from FLowUtils.FlowReader import read_rootMetaGridresolution,loadOneFlowEntryRawData
+from FLowUtils.LicRenderer import *
 from FLowUtils.VectorField2d import UnsteadyVectorField2D,SteadyVectorField2D
+from FLowUtils.GlyphRenderer import *
 from DeepUtils.VastisDataset import buildDataset
 from DeepUtils.ModelZoo import *
 from DeepUtils.MiscFunctions import *
 import logging,random,wandb
-import fnmatch
 import torchsummary
 
 GLOBAL_WANDB_PROJECT_NAME="DeepVortexExtraction"
@@ -52,7 +50,7 @@ def validate(model, data_loader, device,config) -> float:
             predictQtCt, rec = model(vectorFieldImage)
 
             lossRec = F.mse_loss(rec, steadyField3D)
-            lossRef = F.mse_loss(predictQtCt, labelQtct)
+            lossRef = F.mse_loss(predictQtCt, labelQtct) 
             loss = lossRec + lossRef
             val_loss += loss.item()
             val_rec_loss += lossRec.item()
@@ -65,9 +63,11 @@ def validate(model, data_loader, device,config) -> float:
  
 
 
-def test_model(model,config):
+def test_model(model,config,testDataset=None):
     device = config['training']['device']
-    testDataset=buildDataset(config["dataset"],mode="test")
+    if testDataset is None:
+        testDataset=buildDataset(config["dataset"],mode="test")
+
     test_data_loader= torch.utils.data.DataLoader(testDataset, batch_size=config['training']['batch_size'], shuffle=False)
     slicePerdata = config["dataset"]["time_steps"]
     model.eval()
@@ -90,16 +90,18 @@ def test_model(model,config):
             test_loss += loss.item()
             test_loss_records.append(loss.item())
 
-        #random select 10 samples to visualize
-        for i in range(5):
+        #random select  samples to visualize
+        for i in range(2):
             sample=random.randint(0,len(testDataset))
             vectorFieldImage, labelQtct, labelVortex=testDataset[sample]
             minv,maxv=labelVortex[4],labelVortex[5]
             binaryName=testDataset.getBinaryName(sample)
 
             vectorFieldImage=vectorFieldImage.unsqueeze(0)
-            #vectorFieldImage shape is [bs=1,  chanel=2,W=64, H=64, depth(timsteps)]
-            steadyField3D = vectorFieldImage[0, :, :, :, 0].transpose(0, 2).cpu()
+            #vectorFieldImage shape is [bs=1,  chanel=2,W=Ydim, Xdim, depth(timsteps)]
+            tmp =vectorFieldImage
+            tmp =tmp.transpose(1, 4).cpu()
+            steadyField3D = tmp[0, 0, :, :, :].cpu()
  
 
             vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
@@ -116,8 +118,14 @@ def test_model(model,config):
             steadyField.field=steadyField3D.numpy()
             predictTransformation=predictQtCt[0].cpu().numpy()
             logging.info(f"testSample{sample}_predict Q(t)c(t){predictTransformation}, vs labelQtct{  labelQtct.cpu()}__rec")
-            LicRenderingUnsteadyCpp(recUnsteadyField,licImageSize=256,timeStepSKip=2,saveFolder=save_folder,saveName=f"testSample{sample}_{binaryName}__rec",stepSize=0.05,MaxIntegrationSteps=256)
-            LicRenderingSteadyCpp(vecfield=steadyField,licImageSize=256,saveFolder=save_folder,saveName=f"testSample{sample}_{binaryName}__gt",stepSize=0.05,MaxIntegrationSteps=256)
+            # LicRenderingUnsteadyCpp(recUnsteadyField,licImageSize=800,timeStepSKip=10,saveFolder=save_folder,saveName=f"testSample_{binaryName}__rec",stepSize=0.005,MaxIntegrationSteps=128)
+            # glyphsRenderUnsteadyField(recUnsteadyField,ImageSize=800,timeStepSKip=10,saveFolder=save_folder,saveName=f"testSample_{binaryName}__rec_glyph",ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v))
+            LicGlyphMixRenderingUnsteady(recUnsteadyField,licImageSize=800,timeStepSKip=10,saveFolder=save_folder,saveName=f"testSample_{binaryName}_rec__licglyph",stepSize=0.005,MaxIntegrationSteps=128)
+
+            LicRenderingSteadyCpp(steadyField,licImageSize=800,saveFolder=save_folder,saveName=f"testSample_{binaryName}__gt",stepSize=0.005,MaxIntegrationSteps=256)
+            ouputSteadyPath=os.path.join(save_folder,f"testSample_{binaryName}__gt_glyph.png")
+            glyphsRenderSteadyField(steadyField,ouputSteadyPath,(800,800),ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v),gridSkip=1)
+
 
 
 
@@ -207,6 +215,7 @@ def train_pipeline():
             for batch_idx, (vectorFieldImage, labelQtct, labelVortex) in enumerate(data_loader):
 
                 # tx, ty, n, rc = labelVortex[0], labelVortex[1], labelVortex[2], labelVortex[3]
+                #vectorFieldImage'shape is [bs,chanel=2,W, H, depth(timsteps)]
                 steadyField3D = vectorFieldImage[:, :, :, :, 0]
                 steadyField3D = steadyField3D.unsqueeze(-1).repeat(1, 1, 1, 1, timesteps).to(device)
                 vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
@@ -271,81 +280,63 @@ def train_pipeline():
 
 
 def test(checkpoint_path):
-    # config = load_config("config\\cfgs\\config.yaml")
-    # test_args = config['testing']
-    # unsteadyVastisDataset = buildDataset(test_args["dataset"])
+    config = load_config("config\\cfgs\\config.yaml")
+    device = config['training']['device']
+    test_dataset=buildDataset(config["dataset"],mode="test")   
+    config["dataset"].update(test_dataset.dastasetMetaInfo)  
+    config['run_name']=checkpoint_path.split(".pth.tar")[0]
 
-    # data_loader = torch.utils.data.DataLoader(unsteadyVastisDataset, batch_size=test_args['batch_size'], shuffle=False, num_workers=test_args['num_workers'], pin_memory=test_args['pin_memory'])
+    xdim, ydim,timesteps= config["dataset"]["Xdim"],config["dataset"]["Ydim"],config["dataset"]["time_steps"]
+    model = ReferenceFrameExtractor(2,  xdim, ydim, timesteps, ouptputDim=6*timesteps, hiddenSize=config['network']['hidden_size'])
+    model.to(device)
 
-    # device = test_args['device']
-    # model = VortexClassifier()
-    # model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    # Load the last checkpoint
+    load_checkpoint(torch.load(checkpoint_path), model, optimizer)
 
-    # optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-    # # Load the last checkpoint
-    # load_checkpoint(torch.load(checkpoint_path), model, optimizer)
-
-    # model.eval()
-    # test_loss = 0
-    # correct = 0
-
-    # with torch.no_grad():
-    #     for batch_idx, (vectorFieldImage, labelferenceFrame, labelVortex) in enumerate(data_loader):
-    #         vectorFieldImage = vectorFieldImage[:,0,:,:]
-    #         vectorFieldImage = vectorFieldImage.transpose(1, 3)
-    #         vectorFieldImage, label = vectorFieldImage.to(device), labelVortex.to(device)
-    #         output = model(vectorFieldImage)
-    #         test_loss += F.mse_loss(output, labelVortex, reduction='sum').item()  # sum up batch loss
-
-    # test_loss /= len(data_loader.dataset)
-    # print(f'\nTest set: Average loss: {test_loss:.4f}\n')
-
-    return None
+    model.eval()
+    test_model(model,config,test_dataset)
 
 
 
 
 
 
-def testVastisDataset():
-    config=load_config("config\\cfgs\\config.yaml")
-    testDataset=buildDataset(config["dataset"],mode="test")
-    model = ReferenceFrameExtractor(2,  64, 64, 16, ouptputDim=6*16, hiddenSize=64)
-    slicePerdata=16
-    sample=0
-    binaryName=testDataset.getBinaryName(sample)
-    save_folder="./testOutput/"
-    #vectorFieldImage shape is [bs=1,  chanel=2,W=64, H=64, depth(timsteps)]
-    device='cpu'
-    with torch.no_grad():
-        vectorFieldImage, labelQtct, labelVortex=testDataset[sample]
-        vectorFieldImage=vectorFieldImage.unsqueeze(0)
-        steadyField3D = vectorFieldImage[0, :, :, :, 0].transpose(0, 2).cpu()
-        vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
-        predictQtCt, recField = model(vectorFieldImage)
-        #recField [batch_size, chanel=2,W=64, H=64, depth(timsteps)]
-        recField=recField[0,:,:,:,:] .cpu()
-        recField=recField.transpose(0,3)
-        minv,maxv=labelVortex[4],labelVortex[5]
-        #revert "force positive" transformation
-        recField=recField*(maxv-minv)+minv
-        recUnsteadyField=  UnsteadyVectorField2D(64,64,slicePerdata)
-        recUnsteadyField.field=recField
-        steadyField=  SteadyVectorField2D(64,64)
-
-        #revert "force positive" transformation
-        steadyField3D=steadyField3D*(maxv-minv)+minv
-        steadyField.field=steadyField3D.numpy()
 
 
 
-        LicRenderingUnsteadyCpp(recUnsteadyField,licImageSize=128,timeStepSKip=2,saveFolder=save_folder,saveName=f"testSample{sample}_{binaryName}__rec",stepSize=0.01,MaxIntegrationSteps=200)
-        LicRenderingSteadyCpp(vecfield=steadyField,licImageSize=128,saveFolder=save_folder,saveName=f"testSample{sample}_{binaryName}__gt",stepSize=0.01,MaxIntegrationSteps=200)
 
 
-# if __name__ == '__main__':
-#    test_load_results()
+
 
 if __name__ == '__main__':
-    train_pipeline()
+   test("models\\CNN_200_0.001_20240629_013617_seed_623621614793900\\20240629_153130_best_checkpoint.pth.tar")
+
+# if __name__ == '__main__':
+#     train_pipeline()
+
+  
+# if __name__ == "__main__":
+#     # Define the vector field dimensions and boundaries
+#     Xdim, Ydim = 20, 20
+#     from FLowUtils.AnalyticalFlowCreator import rotation_four_center
+#     vecfield=rotation_four_center((64,64),16)
+#     # LicRenderingUnsteadyCpp(vecfield,licImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc0.000001",stepSize=0.000001,MaxIntegrationSteps=128)
+#     # LicRenderingUnsteadyCpp(vecfield,licImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc0.0005",stepSize=0.0005,MaxIntegrationSteps=128)
+#     # LicRenderingUnsteadyCpp(vecfield,licImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc0.005",stepSize=0.005,MaxIntegrationSteps=128)
+#     # LicRenderingUnsteadyCpp(vecfield,licImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc0.01",stepSize=0.01,MaxIntegrationSteps=128)
+#     # LicRenderingUnsteadyCpp(vecfield,licImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc0.1",stepSize=0.1,MaxIntegrationSteps=128)
+#     # LicRenderingUnsteadyCpp(vecfield,licImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc0.2",stepSize=0.2,MaxIntegrationSteps=128)
+
+
+#     # LicRenderingUnsteadyCpp(vecfield,licImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc256",stepSize=0.005,MaxIntegrationSteps=256)
+#     # LicRenderingUnsteadyCpp(vecfield,licImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc512",stepSize=0.005,MaxIntegrationSteps=32)
+#     # glyphsRenderUnsteadyField(vecfield,ImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc_glyph")
+#     # LicRenderingUnsteadyCpp(vecfield,licImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc",stepSize=0.0005,MaxIntegrationSteps=128)
+#     LicGlyphMixRenderingUnsteady(vecfield,licImageSize=800,timeStepSKip=10,saveFolder="./testOutput",saveName=f"test__rfc_licglyph",stepSize=0.0005,MaxIntegrationSteps=128)
+
+
+
+
+ 
+

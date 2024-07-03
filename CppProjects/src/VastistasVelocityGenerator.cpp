@@ -1,4 +1,5 @@
 #include "VastistasVelocityGenerator.h"
+#include "flowGenerator.h"
 #include <cmath>
 #include <corecrt_math_defines.h>
 #include <random>
@@ -178,7 +179,7 @@ AnalyticalFlowCreator::AnalyticalFlowCreator(Eigen::Vector2i grid_size, int time
     y_values = Eigen::VectorXd::LinSpaced(grid_size.y(), domainBoundaryMin.y(), domainBoundaryMax.y());
 }
 
-UnSteadyVectorField2D AnalyticalFlowCreator::createFlowField(AnalyticalFlowFunc2D lambda_func)
+UnSteadyVectorField2D AnalyticalFlowCreator::sampleAnalyticalFunctionAsFlowField(AnalyticalFlowFunc2D lambda_func)
 {
     UnSteadyVectorField2D vectorField2d;
     vectorField2d.spatialDomainMinBoundary = domainBoundaryMin;
@@ -225,19 +226,31 @@ UnSteadyVectorField2D AnalyticalFlowCreator::createRFC(double alt /*= 1.0*/, dou
         components << vecU, vecV;
         return components;
     };
-    return createFlowField(rotatingFourCenter);
+    return sampleAnalyticalFunctionAsFlowField(rotatingFourCenter);
 }
 
 UnSteadyVectorField2D AnalyticalFlowCreator::createBeadsFlow()
 {
     auto lambda = getAnalyticalFlowFieldFunction("beads (Weinkauf and Theisel 2010)", tmin, tmax, time_steps);
-    return createFlowField(lambda);
+    return sampleAnalyticalFunctionAsFlowField(lambda);
 }
+UnSteadyVectorField2D AnalyticalFlowCreator::createBeadsFlowNoContraction()
+{
+    AnalyticalFlowFunc2D lambda = [this](const Eigen::Vector2d& p, double t) {
+        double x = p(0);
+        double y = p(1);
+        double u = -2 * y + (2 / 3) * sin(t);
+        double v = 2 * x - (2 / 3) * cos(t);
+        const Eigen::Vector2d result({ u, v });
+        return result;
+    };
 
+    return sampleAnalyticalFunctionAsFlowField(lambda);
+}
 UnSteadyVectorField2D AnalyticalFlowCreator::createUnsteadyGyre()
 {
     auto lambda = getAnalyticalFlowFieldFunction("unsteady gyre (Haller2023)", tmin, tmax, time_steps);
-    return createFlowField(lambda);
+    return sampleAnalyticalFunctionAsFlowField(lambda);
 }
 
 AnalyticalFlowFunc2D AnalyticalFlowCreator::getAnalyticalFlowFieldFunction(const std::string& name, double tMin, double tMax, int numberOfTimeSteps)

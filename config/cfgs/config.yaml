@@ -12,12 +12,12 @@ dataset:
     root: 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data'
     transform: 'ToTensor'
 
-wandb: True
+wandb: False
 
 training: 
   device: 'cuda'
   # device: 'cpu'
-  epochs: 2
+  epochs: 1
   batch_size: 32
   shuffle: True
   num_workers: 0

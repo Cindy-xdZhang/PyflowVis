@@ -2,8 +2,8 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 import OpenGL.GL as gl
 import pygame
-from FLowUtils.fileMonitor import FileMonitor
-from FLowUtils.ImageLoader import ImageLoader
+from misc.fileMonitor import FileMonitor
+from misc.ImageLoader import ImageLoader
 from GuiObjcts.Object import Object,singleton
 import glm
 import logging

@@ -1,8 +1,9 @@
 import numpy as np
 from .VectorField2d import *
 from typeguard import typechecked
-import os
+import os,math
 from PIL import Image
+from .GlyphRenderer import glyphsRenderSteadyFieldAlgorthim
 def bilinear_interpolate(vector_field, x, y):
     """
     Perform bilinear interpolation for a 2D vector field.
@@ -128,7 +129,7 @@ def LicRenderingSteady(vecfield: SteadyVectorField2D,licImageSize:int,saveFolder
     lic_normalized_img = (lic_normalized * 255).astype(np.uint8)  # Convert to 8-bit grayscale
     img = Image.fromarray(lic_normalized_img, mode='L')
 
-    save_name=f"{saveName}.png"
+    save_name=saveName if saveName.endswith("png") else f"{saveName}.png"
     savePath=os.path.join(saveFolder,save_name)
     img.save(savePath)
 
@@ -165,16 +166,13 @@ def LicRenderingSteadyCpp(vecfield: SteadyVectorField2D,licImageSize:int,saveFol
     assert(cppMoudules['CppLicRenderingModule'].licRenderingPybindCPP is not None)
 
     lic_result = cppMoudules['CppLicRenderingModule'].licRenderingPybindCPP( vecfield.field, vecfield.Xdim, vecfield.Ydim, vecfield.domainMinBoundary[0], vecfield.domainMaxBoundary[0], vecfield.domainMinBoundary[1], vecfield.domainMaxBoundary[1],licImageSize,stepSize,MaxIntegrationSteps)
-    
-    # Step 3: Normalize the LIC result for visualization
-    # lic_normalized = (lic_result - np.min(lic_result)) / (np.max(lic_result) - np.min(lic_result))
+
     lic_normalized = np.clip(lic_result, 0, np.max(lic_result))  # Clip negative values to 0
-    
     # Step 4: Convert to an image and save
     lic_normalized_img = (lic_normalized * 255).astype(np.uint8)  # Convert to 8-bit grayscale
     img = Image.fromarray(lic_normalized_img, mode='RGB')
 
-    save_name=f"{saveName}.png"
+    save_name=saveName if saveName.endswith("png") else f"{saveName}.png"
     if not os.path.exists(saveFolder):
         os.makedirs(saveFolder)
     savePath=os.path.join(saveFolder,save_name)
@@ -182,18 +180,44 @@ def LicRenderingSteadyCpp(vecfield: SteadyVectorField2D,licImageSize:int,saveFol
 
 
 @typechecked
-def LicRenderingUnsteadyCpp(field:UnsteadyVectorField2D,licImageSize:int,timeStepSKip:int=2,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
+def LicRenderingUnsteadyCpp(vecfield:UnsteadyVectorField2D,licImageSize:int,timeStepSKip:int=2,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
     if not os.path.exists(saveFolder):
         os.makedirs(saveFolder)
 
     #typecheck field type and field is not None    
-    Xdim,Ydim,time_steps=field.Xdim,field.Ydim,field.time_steps
+    Xdim,Ydim,time_steps=vecfield.Xdim,vecfield.Ydim,vecfield.time_steps
+    for i in range(0, time_steps, timeStepSKip):
+        # print(f"Processing time step {i}")
+        steadyVectorField2D = vecfield.getSlice(i)
+        save_name=f"{saveName}_{i}"
+        LicRenderingSteadyCpp(steadyVectorField2D ,licImageSize, saveFolder=saveFolder,saveName =save_name,stepSize=stepSize,MaxIntegrationSteps=MaxIntegrationSteps)
+    
+@typechecked        
+def LicGlyphMixRenderingSteady(vecfield: SteadyVectorField2D,licImageSize:int,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128,ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v)):
+    assert(cppMoudules['CppLicRenderingModule'].licRenderingPybindCPP is not None)
+    lic_normalized_array = cppMoudules['CppLicRenderingModule'].licRenderingPybindCPP( vecfield.field, vecfield.Xdim, vecfield.Ydim, vecfield.domainMinBoundary[0], vecfield.domainMaxBoundary[0], vecfield.domainMinBoundary[1], vecfield.domainMaxBoundary[1],licImageSize,stepSize,MaxIntegrationSteps)
+    lic_normalized_array=(np.clip(lic_normalized_array, 0, np.max(lic_normalized_array)) *255).astype(np.uint8)
+    glyImage:Image.Image=glyphsRenderSteadyFieldAlgorthim(vecfield,(licImageSize,licImageSize),ColorCodingFn=ColorCodingFn,gridSkip=1)
+    glyImage_array = np.array(glyImage)
+    white_mask = np.all(glyImage_array == [255, 255, 255], axis=-1)
+    mix_image_array = np.where(white_mask[..., None], lic_normalized_array, glyImage_array)
+    mix_image:Image.Image =  Image.fromarray(mix_image_array,mode='RGB') # Clip negative values to 0
+    save_name=saveName if saveName.endswith("png") else f"{saveName}.png"
+    savePath=os.path.join(saveFolder,save_name)
+    mix_image.save(savePath)
+
+@typechecked
+def LicGlyphMixRenderingUnsteady(vecfield:UnsteadyVectorField2D,licImageSize:int,timeStepSKip:int=2,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128, ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v)):
+    if not os.path.exists(saveFolder):
+        os.makedirs(saveFolder)
+
+    #typecheck field type and field is not None    
+    Xdim,Ydim,time_steps=vecfield.Xdim,vecfield.Ydim,vecfield.time_steps
     texture = np.random.rand(Xdim, Ydim)    
     for i in range(0, time_steps, timeStepSKip):
         # print(f"Processing time step {i}")
-        steadyVectorField2D = field.getSlice(i)
-        save_name=f"{saveName}_{i}.png"
-        LicRenderingSteadyCpp(steadyVectorField2D ,licImageSize, saveFolder=saveFolder,saveName =save_name,stepSize=stepSize,MaxIntegrationSteps=MaxIntegrationSteps)
-    
-        
-  
+        steadyVectorField2D = vecfield.getSlice(i)
+        f_save_name=f"{saveName}_{i}"
+        LicGlyphMixRenderingSteady(steadyVectorField2D ,licImageSize, saveFolder=saveFolder,saveName =f_save_name,stepSize=stepSize,MaxIntegrationSteps=MaxIntegrationSteps,ColorCodingFn=ColorCodingFn)
+
+

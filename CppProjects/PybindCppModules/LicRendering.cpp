@@ -66,8 +66,8 @@ py::array_t<double> licRenderingPybindCPP(
 PYBIND11_MODULE(CppLicRenderingModule, m)
 {
     // module metadata
-    m.doc() = "pybind11 lic rending module";
-    m.attr("__version__") = "0.0.1";
+    m.doc() = "pybind11  module expose c++ lic rendering to python.";
+    m.attr("__version__") = "0.0.2-stable_noise_lic";
     m.def("licRenderingPybindCPP", &licRenderingPybindCPP, "Render a steady vector field using LIC.\
      @params:\
     py::array_t<float> vector_field_np->feed with numpy 3d tensor(xdim,ydim,vectorComponnet=2),\

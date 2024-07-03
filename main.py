@@ -1,6 +1,6 @@
 from VisualizationEngine import *
 from train_vector_field import *
-from AnalyticalFlowCreator import *
+from FLowUtils.AnalyticalFlowCreator import *
 from config.LoadConfig import load_config
 from VertexArrayObject import *
 from shaderManager import *

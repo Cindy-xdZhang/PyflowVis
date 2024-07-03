@@ -77,8 +77,8 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
             binPath=os.path.join(sub_folder,binFile)
             loadField, labelReferenceFrame,vortexlabel=loadOneFlowEntryRawData(binPath, Xdim,Ydim,time_steps)
             timesteps=loadField.shape[0]
-            # dataSlice shape is [(batch_size,) depth(timsteps)=7, W=64, H=64, chanel=2]
-            # need  transpose to [(batch_size,)  chanel=2, W=64, H=64, depth(timsteps)=7] to feed conv3D
+            # dataSlice shape is [ depth(timsteps)=7, W=64, H=64, chanel=2]
+            # need  transpose to [ chanel=2, W=64, H=64, depth(timsteps)=7] to feed conv3D
             dataSlice=torch.tensor(loadField)
             vectorFieldDataSlice = dataSlice.transpose(0, 3)
             self.data.append(vectorFieldDataSlice)

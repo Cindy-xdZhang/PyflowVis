@@ -17,6 +17,7 @@ enum ObserverType {
     ArbitraryTranslation,
     StepRotation,
     StepTranslation,
+    SpiralMotion
 };
 struct KillingComponentFunctionFactory {
 
@@ -66,6 +67,8 @@ struct KillingComponentFunctionFactory {
             return stepTranslation(direction, scale, 0.1 * acc * M_PI);
         case ArbitraryTranslation:
             return ArbitraryDirectionTranslation(scaleA, scaleB);
+        case SpiralMotion:
+            return spiralMotion(scale, rot);
         default:
             return constantTranslation(0, scale); // default case
         }
@@ -196,8 +199,24 @@ struct KillingComponentFunctionFactory {
             return Eigen::Vector3d(0, 0, velocity);
         };
     }
+    static std::function<Eigen::Vector3d(double)> spiralMotion(double radialSpeed, double angularSpeed)
+    {
+        return [=](double t) {
+            double tbiggerthanZero = t > 0 ? t : 0;
+            // r increases linearly with t
+            double r = radialSpeed * tbiggerthanZero;
+            // theta increases linearly with t
+            double theta = angularSpeed * tbiggerthanZero;
+            // Convert polar coordinates to Cartesian coordinates
+            double x = r * std::cos(theta);
+            double y = r * std::sin(theta);
+            // Assuming spiral motion in the XY-plane with a constant Z-component
+            return Eigen::Vector3d(x, y, 0);
+        };
+    }
 };
 
+void ConvertNoiseTextureImage2Text(const std::string& infilename, const std::string& outFile, int width, int height);
 void testKillingTransformationForRFC();
 // number of result traing data = Nparamters * samplePerParameters * observerPerSetting
 void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting, std::string dataSetSplitTag);

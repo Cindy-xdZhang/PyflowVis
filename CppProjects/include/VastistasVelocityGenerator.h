@@ -174,9 +174,10 @@ public:
         Eigen::Vector2d domainBoundaryMax = Eigen::Vector2d(2.0, 2.0), double tmin = 0.0f, double tmax = 2 * M_PI);
 
     // Method to create the flow field using a lambda function
-    UnSteadyVectorField2D createFlowField(AnalyticalFlowFunc2D lambda_func);
+    UnSteadyVectorField2D sampleAnalyticalFunctionAsFlowField(AnalyticalFlowFunc2D lambda_func);
     UnSteadyVectorField2D createRFC(double alt = 1.0, double maxV = 1.0, double scale = 8.0);
     UnSteadyVectorField2D createBeadsFlow();
+    UnSteadyVectorField2D createBeadsFlowNoContraction();
     UnSteadyVectorField2D createUnsteadyGyre();
     AnalyticalFlowFunc2D getAnalyticalFlowFieldFunction(const std::string& name, double tMin, double tMax, int numberOfTimeSteps);
 

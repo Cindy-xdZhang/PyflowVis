@@ -2,20 +2,18 @@
 #include <pybind11/pybind11.h>
 #include <string>
 
-std::string greet2(const std::string &name)
+std::string greet2(const std::string& name)
 {
     return "Date 2024 05 07 Hello22332xxxxxxxxxx, " + name + "!";
 }
 
-class Animal
-{
+class Animal {
 public:
-    virtual ~Animal() {}
+    virtual ~Animal() { }
     virtual std::string go(int n_times) = 0;
 };
 
-class Dog : public Animal
-{
+class Dog : public Animal {
 public:
     std::string go(int n_times) override
     {
@@ -26,7 +24,7 @@ public:
         return result;
     }
 };
-std::string call_go(Animal *animal)
+std::string call_go(Animal* animal)
 {
     return animal->go(3);
 }
@@ -35,8 +33,8 @@ namespace py = pybind11;
 PYBIND11_MODULE(example, m)
 {
     // module metadata
-    m.doc() = "pybind11 example module";
-    m.attr("__version__") = "0.0.1";
+    m.doc() = "pybind11  module expose c++ lic rendering to python.";
+    m.attr("__version__") = "0.0.2-stable_noise_lic";
 
     // module export symbols
     m.def("greet2", &greet2, "A function that greets a person");

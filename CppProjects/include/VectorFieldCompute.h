@@ -76,7 +76,7 @@ public:
     int timeSteps = -1;
 };
 
-struct SteadyVectorField2D {
+struct SteadyVectorField2D : public IUnsteadField2D {
     SteadyVectorField2D() = default;
     SteadyVectorField2D(const std::vector<std::vector<Eigen::Vector2d>>& ifield, const Eigen::Vector2d& ispatialmin, const Eigen::Vector2d& ispatialMax, const Eigen::Vector2i& ixdimydim)
         : field(ifield)
@@ -106,6 +106,14 @@ struct SteadyVectorField2D {
         double doubleIndicesX = (x - spatialDomainMinBoundary(0)) * inverse_grid_interval_x;
         double doubleIndicesY = (y - spatialDomainMinBoundary(1)) * inverse_grid_interval_y;
         return bilinear_interpolate(field, doubleIndicesX, doubleIndicesY);
+    }
+    Eigen::Vector2d getVector(int x, int y, int t) const override
+    {
+        return getVector(x, y);
+    }
+    Eigen::Vector2d getVector(double x, double y, double t) const override
+    {
+        return getVector(x, y);
     }
     inline Eigen::Vector2d getVector(const Eigen::Vector2d& pos, double t) const
     {
@@ -618,4 +626,5 @@ inline auto computeTargetCrtierion(const std::vector<std::vector<Eigen::Vector2d
 std::vector<std::vector<double>> randomNoiseTexture(int width, int height);
 std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(const SteadyVectorField2D& vecfield, const int licImageSizeX, const int licImageSizeY, double stepSize, int MaxIntegrationSteps, VORTEX_CRITERION criterionlColorBlend = VORTEX_CRITERION::NONE);
 std::vector<std::vector<std::vector<Eigen::Vector3d>>> LICAlgorithm_UnsteadyField(const UnSteadyVectorField2D& vecfield, const int licImageSizeX, const int licImageSizeY, double stepSize, int MaxIntegrationSteps, VORTEX_CRITERION curlColorBlend = VORTEX_CRITERION::NONE);
+
 #endif
