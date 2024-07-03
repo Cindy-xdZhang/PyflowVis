@@ -4,6 +4,20 @@ import os
 import logging
 import argparse
 import yaml
+def CollectWandbLogfiles(arti_code):
+    def match_file(path):    
+        return path.endswith(".py") 
+    saveFolder="./DeepUtils/"
+    fileList0=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]
+    saveFolder="./FlowUtils/"
+    fileList1=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]    
+    fileList0.append("train_vector_field.py")
+
+    for file in fileList0:
+        arti_code.add_file(file, name= file)
+    for file in fileList1:
+        arti_code.add_file(file, name=file)
+    return arti_code
 
 
 def load_config(path):

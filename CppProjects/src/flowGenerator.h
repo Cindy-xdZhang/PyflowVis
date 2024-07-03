@@ -41,11 +41,11 @@ struct KillingComponentFunctionFactory {
 
         // Randomly generate parameters
         int direction = std::uniform_int_distribution<int>(0, 2)(gen);
-        double scale = dist_speed(gen);
-        double acc = dist_acc(gen);
-        double rot = dist_rot(gen);
-        double scaleA = dist_speed(gen);
-        double scaleB = dist_speed(gen);
+        double scale = 0.5 * dist_speed(gen);
+        double acc = 0.5 * dist_acc(gen);
+        double rot = 0.5 * dist_rot(gen);
+        double scaleA = 0.5 * dist_speed(gen);
+        double scaleB = 0.5 * dist_speed(gen);
         ObserverType type = static_cast<ObserverType>(itype);
         // Return the corresponding function
         switch (type) {
@@ -62,9 +62,9 @@ struct KillingComponentFunctionFactory {
         case SinCurve:
             return SinCurveObserver(direction, scale, rot);
         case StepRotation:
-            return stepRotation(scale, 0.1 * acc * M_PI);
+            return stepRotation(scale, 0.05 * M_PI);
         case StepTranslation:
-            return stepTranslation(direction, scale, 0.1 * acc * M_PI);
+            return stepTranslation(direction, scale, 0.05 * M_PI);
         case ArbitraryTranslation:
             return ArbitraryDirectionTranslation(scaleA, scaleB);
         case SpiralMotion:
@@ -122,10 +122,11 @@ struct KillingComponentFunctionFactory {
 
             // Determine the position within the period
             double positionInPeriod = fmod(t, period);
-
+            double tbiggerthanZero = t > 0 ? t : 0;
+            const auto validValue2 = validValue * tbiggerthanZero;
             // If within the first half of the period, return validValue, otherwise return zero
             if (positionInPeriod < StopInterval) {
-                return Eigen::Vector3d(0, 0, validValue);
+                return Eigen::Vector3d(0, 0, validValue2);
             } else {
                 return Eigen::Vector3d(0, 0, 0);
             }
@@ -140,8 +141,8 @@ struct KillingComponentFunctionFactory {
             double period = 2 * StopInterval;
             // Determine the position within the period
             double positionInPeriod = fmod(t, period);
-
-            auto value = positionInPeriod < StopInterval ? validValue : 0;
+            double tbiggerthanZero = t > 0 ? t : 0;
+            auto value = (positionInPeriod < StopInterval && tbiggerthanZero) ? validValue : 0;
             if (direction == 0) {
                 return Eigen::Vector3d(value, 0, 0);
             } else if (direction == 1) {

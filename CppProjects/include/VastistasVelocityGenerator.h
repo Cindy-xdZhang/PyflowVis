@@ -133,11 +133,7 @@ public:
     VastistasVelocityGenerator(int Xdim, int Ydim, Eigen::Vector2d minBondary, Eigen::Vector2d maxBondary, double rc, double n);
 
     // generate a deformed steady velocity slice  following the paper: Vortex Boundary Identification using Convolutional Neural Network
-    velocityFieldData generateSteadyVersionVortexBoundary(double sx, double sy, double theta, int Si) const noexcept;
-
-    // generate velocity following the paper: Robust Reference Frame Extraction from Unsteady 2D Vector
-    // Fields..,but fix M=1(only one Vastistas profile, no mixture of multiple profile)
-    SteadyVectorField2D generateSteadyField(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept;
+    SteadyVectorField2D generateSteadyField_VortexBoundaryVIS2020(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept;
 
     // support mixture of multiple Vastistas profile
     SteadyVectorField2D generateSteadyFieldMixture(int mixture) const noexcept;

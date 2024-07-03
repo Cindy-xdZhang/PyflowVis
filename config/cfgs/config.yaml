@@ -8,16 +8,16 @@ network:
   
 
 dataset:
-    name: 'data_gen_Jun13'
-    root: 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data'
+    name: 'vastis'
+    root: 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data\\debugX64_Y64_T8_no_mixture'
     transform: 'ToTensor'
 
-wandb: False
+wandb: True
 
 training: 
   device: 'cuda'
   # device: 'cpu'
-  epochs: 1
+  epochs: 100
   batch_size: 32
   shuffle: True
   num_workers: 0

@@ -137,20 +137,6 @@ def test_model(model,config,testDataset=None):
     model.train()
     return test_loss,min_loss,max_loss,reconstruction_error
 
-def CollectWandbLogfiles(arti_code):
-    def match_file(path):    
-        return path.endswith(".py") 
-    saveFolder="./DeepUtils/"
-    fileList0=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]
-    saveFolder="./FlowUtils/"
-    fileList1=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]    
-    fileList0.append("train_vector_field.py")
-
-    for file in fileList0:
-        arti_code.add_file(file, name= file)
-    for file in fileList1:
-        arti_code.add_file(file, name=file)
-    return arti_code
 
 
     
@@ -309,11 +295,11 @@ def test(checkpoint_path):
 
 
 
-if __name__ == '__main__':
-   test("models\\CNN_200_0.001_20240629_013617_seed_623621614793900\\20240629_153130_best_checkpoint.pth.tar")
-
 # if __name__ == '__main__':
-#     train_pipeline()
+#    test("models\\CNN_200_0.001_20240629_013617_seed_623621614793900\\20240629_153130_best_checkpoint.pth.tar")
+
+if __name__ == '__main__':
+    train_pipeline()
 
   
 # if __name__ == "__main__":

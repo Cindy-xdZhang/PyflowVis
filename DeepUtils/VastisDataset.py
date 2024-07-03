@@ -37,8 +37,7 @@ def keep_last_n_levels(path,n):
 # create torch dataset using the load result function:
 class UnsteadyVastisDataset(torch.utils.data.Dataset):
     def __init__(self, directory_path,mode):
-        fx_directory_path=self.FixDataFolder(directory_path)
-        self.directory_path=os.path.join(fx_directory_path,"X64_Y64_T16_no_mixture")
+        self.directory_path=directory_path
         self.dataName=[]
         self.data=[]
         self.labelReferenceFrame=[]
@@ -51,18 +50,7 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         self.transform=transform
     def getBinaryName(self,sampleIdx):        
         return self.dataName[sampleIdx]
-    def FixDataFolder(self,directory_path):
-        """try directory_path, directory_path's parent, directory_path's grad parent to find the folder with name "unsteady"
-        """
-        if os.path.isdir(directory_path) and "X64_Y64_T16_no_mixture" in os.listdir(directory_path):
-            return directory_path
-        parent=os.path.dirname(directory_path)
-        if os.path.isdir(parent) and "X64_Y64_T16_no_mixture" in os.listdir(parent):
-            return parent
-        gradParent=os.path.dirname(parent)
-        if os.path.isdir(gradParent) and "X64_Y64_T16_no_mixture" in os.listdir(gradParent):
-            return gradParent
-        raise ValueError(f"Can't find the folder with name 'unsteady' in {directory_path}, {parent}, {gradParent}")
+
     
     def loadOneTaskFolder(self,sub_folder:str):
         if self.dastasetMetaInfo=={}:

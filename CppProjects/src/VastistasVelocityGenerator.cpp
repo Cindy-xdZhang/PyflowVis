@@ -33,53 +33,25 @@ VastistasVelocityGenerator::VastistasVelocityGenerator(int Xdim, int Ydim, Eigen
     SiMatices_[2].row(1) = { 1.0f, 0.0f };*/
 }
 
-// resample VastistasVelocity to discrete grid
-velocityFieldData VastistasVelocityGenerator::generateSteadyVersionVortexBoundary(double sx, double sy, double theta, int Si) const noexcept
+SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField_VortexBoundaryVIS2020(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept
 {
 
     std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d { 0.0, 0.0 }));
-
-    /*  const auto SiMat22 = SiMatices_[Si];*/
+    Eigen::Matrix2d deformMatA = Eigen::Matrix2d::Identity();
+    deformMatA(0, 0) = sx * cos(theta);
+    deformMatA(0, 1) = -sy * sin(theta);
+    deformMatA(1, 0) = sx * sin(theta);
+    deformMatA(1, 1) = sy * cos(theta);
     const auto SiMat22 = SiMatices_[Si];
-    Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
-    deformMat(0, 0) = sx * cos(theta);
-    deformMat(0, 1) = -sy * sin(theta);
-    deformMat(1, 0) = sx * sin(theta);
-    deformMat(1, 1) = sy * cos(theta);
-    auto lambdaFunc = [this, SiMat22, deformMat](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
-        auto deformPos = deformMat.inverse() * pos;
-        Eigen::Vector2d xy_txy = deformPos;
-        const double vastis = NormalizedVastistasV0(xy_txy.norm());
-        auto vp = deformMat * SiMat22 * xy_txy * vastis;
-        return vp;
-    };
-    for (size_t i = 0; i < mgridDim_y; i++)
-        for (size_t j = 0; j < mgridDim_x; j++) {
-            auto pos = getPosition(j, i);
-            data_[i][j] = lambdaFunc(pos, 0.0);
-        }
+    const Eigen::Vector2d translation_t = { tx, ty };
 
-    return data_;
-}
-
-SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept
-{
-
-    std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d { 0.0, 0.0 }));
-    Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
-    deformMat(0, 0) = sx * cos(theta);
-    deformMat(0, 1) = -sy * sin(theta);
-    deformMat(1, 0) = sx * sin(theta);
-    deformMat(1, 1) = sy * cos(theta);
-    const auto SiMat22 = SiMatices_[Si];
-    const Eigen::Vector2d critial_point = { tx, ty };
-
-    auto lambdaFunc = [this, SiMat22, critial_point, deformMat](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
-        auto deformPos = deformMat.inverse() * pos;
-        Eigen::Vector2d xy_txy = deformPos - critial_point;
-        const double vastis = NormalizedVastistasV0(xy_txy.norm());
-        auto vp = deformMat * SiMat22 * xy_txy * vastis;
-        return vp;
+    auto lambdaFunc = [this, SiMat22, translation_t, deformMatA](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+        auto originalPos = deformMatA.inverse() * (pos - translation_t);
+        // get standard VastistasVelocity vector on originalPos (v(x=originalPos))
+        auto standardVastistasVelocity = SiMat22 * originalPos * NormalizedVastistasV0(originalPos.norm());
+        // get the transformed VastistasVelocity vector on pos (v(x=pos))
+        auto transformedVastistasVelocity = deformMatA * standardVastistasVelocity;
+        return transformedVastistasVelocity;
     };
 
     for (size_t i = 0; i < mgridDim_y; i++)

@@ -19,14 +19,14 @@ std::mt19937 rng(static_cast<unsigned int>(std::time(0)));
 using namespace std;
 
 constexpr double tmin = 0.0;
-constexpr double tmax = M_PI;
+constexpr double tmax = M_PI * 0.5;
 constexpr int Xdim = 64, Ydim = 64;
 constexpr int LicImageSize = 256;
 Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
-constexpr int unsteadyFieldTimeStep = 16;
-constexpr int LicSaveFrequency = 4; // every 2 time steps save one
-const double stepSize = 0.02;
+constexpr int unsteadyFieldTimeStep = 8;
+constexpr int LicSaveFrequency = 2; // every 2 time steps save one
+const double stepSize = 0.01;
 const int maxLICIteratioOneDirection = 256;
 
 std::string trimNumString(const std::string& numString)
@@ -151,6 +151,7 @@ struct pair_hash {
     }
 };
 std::vector<std::pair<double, double>> presetNRCParameters = {
+    { 0.25, 2.0 },
     { 1.0, 2.0 },
     { 1.0, 3.0 },
     { 1.0, 5.0 },
@@ -160,7 +161,7 @@ std::vector<std::pair<double, double>> presetNRCParameters = {
     { 2.0, 5.0 },
 };
 
-std::vector<std::pair<double, double>> generateNParamters(int n)
+std::vector<std::pair<double, double>> generateNParamters(int n, std::string mode)
 {
     static std::unordered_set<std::pair<double, double>, pair_hash> unique_params;
 
@@ -174,7 +175,7 @@ std::vector<std::pair<double, double>> generateNParamters(int n)
     int i = 0;
     while (parameters.size() < n) {
 
-        if (i < presetNRCParameters.size()) {
+        if (i < presetNRCParameters.size() && mode == "train") {
             std::pair<double, double> preset_pair = presetNRCParameters.at(i++);
             if (unique_params.find(preset_pair) == unique_params.end()) {
                 parameters.emplace_back(preset_pair);
@@ -575,7 +576,7 @@ void testKillingTransformationForRFC()
     }
 }
 
-void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inputLicImage, const SteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn, const Eigen::Vector2d& txy, const Eigen::Matrix2d& deformMat)
+void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inputLicImage, const SteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn, const Eigen::Vector2d& translation_t, const Eigen::Matrix2d& deformMat)
 {
     // if si=0 then no vortex
     if (meta_n_rc_si.z() == 0.0) {
@@ -584,11 +585,10 @@ void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inp
     const auto rc = meta_n_rc_si(1);
     const auto deformInverse = deformMat.inverse();
 
-    auto judgeVortex = [rc, txy, deformInverse](const Eigen::Vector2d& pos) -> bool {
-        auto posdeform = deformInverse * pos;
-        Eigen::Vector2d center = { txy(0), txy(1) };
-        auto radius = (posdeform - center).norm();
-        return radius < rc;
+    auto judgeVortex = [rc, translation_t, deformInverse](const Eigen::Vector2d& pos) -> bool {
+        auto originalPos = deformInverse * (pos - translation_t);
+        auto dx = rc - originalPos.norm();
+        return dx > 0;
     };
     const int licImageSizeY = inputLicImage.size();
     const int licImageSizeX = inputLicImage[0].size();
@@ -613,7 +613,7 @@ void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inp
                 // red for critial point(coreline)
                 auto velocity = vectorField.getVector(pos.x(), pos.y());
                 // !note: because txy is random core line center, then critical point==txy(velocity ==0.0) might not  lie on any grid points
-                if (velocity.norm() < 1e-12 || (pos - txy).norm() < maxDistanceAnyPoint2gridPoints)
+                if (velocity.norm() < 1e-7)
                     [[unlikely]] {
                     inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 0.0, 0.0);
                 } else {
@@ -633,11 +633,10 @@ void addSegmentationVisualization(std::vector<std::vector<std::vector<Eigen::Vec
     const auto rc = meta_n_rc_si(1);
     const auto deformInverse = deformMat.inverse();
 
-    auto judgeVortexInSteadyField = [rc, txy, deformInverse](const Eigen::Vector2d& pos) -> bool {
-        auto posdeform = deformInverse * pos;
-        Eigen::Vector2d center = { txy(0), txy(1) };
-        auto radius = (posdeform - center).norm();
-        return radius < rc;
+    auto judgeVortex = [rc, translation_t = txy, deformInverse](const Eigen::Vector2d& pos) -> bool {
+        auto originalPos = deformInverse * (pos - translation_t);
+        auto dx = rc - originalPos.norm();
+        return dx > 0;
     };
     const int licImageSizeY = inputLicImages[0].size();
     const int licImageSizeX = inputLicImages[0][0].size();
@@ -667,12 +666,12 @@ void addSegmentationVisualization(std::vector<std::vector<std::vector<Eigen::Vec
                 F_inverse_x /= F_inverse_x(2);
                 Eigen::Vector2d posInOriginalFrame = { F_inverse_x(0), F_inverse_x(1) };
 
-                if (judgeVortexInSteadyField(posInOriginalFrame)) {
+                if (judgeVortex(posInOriginalFrame)) {
                     auto preColor = inputLicImage[j][i];
                     // red for critial point(coreline)
                     auto velocity = vectorField.getVector(posInObserverFrame.x(), posInObserverFrame.y(), time);
                     // !note: because txy is random core line center, then critical point==txy(velocity ==0.0) might not  lie on any grid points
-                    if (velocity.norm() < 1e-7 || (posInOriginalFrame - txy).norm() < maxDistanceAnyPoint2gridPoints)
+                    if (velocity.norm() < 1e-7)
                         [[unlikely]] {
                         inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 0.0, 0.0);
                     } else {
@@ -710,7 +709,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
         (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
     };
 
-    const auto paramters = generateNParamters(Nparamters);
+    const auto paramters = generateNParamters(Nparamters, dataSetSplitTag);
     // const auto licNoisetexture = randomNoiseTexture(Xdim, Ydim);
 
     std::normal_distribution<double> genTheta(0.0, 0.50); // rotation angle's distribution
@@ -778,7 +777,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             Eigen::Vector2d txy = { tx, ty };
 
             Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
-            const SteadyVectorField2D steadyField = generator.generateSteadyField(tx, ty, sx, sy, theta, Si);
+            const SteadyVectorField2D steadyField = generator.generateSteadyField_VortexBoundaryVIS2020(tx, ty, sx, sy, theta, Si);
             const auto& steadyFieldResData = steadyField.field;
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
                 printf(".");
