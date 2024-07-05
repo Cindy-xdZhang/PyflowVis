@@ -72,9 +72,9 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
             self.data.append(vectorFieldDataSlice)
             if self.mode=="test":
                 self.dataName.append(keep_last_n_levels(binPath,1))
-            Qt, tc=torch.tensor( labelReferenceFrame[0]),torch.tensor(labelReferenceFrame[1])
-            #Qt shape is [ time_steps,4], ct shape is [ time_steps,2],concat to [time_steps,6]->reshape to [6*time_steps]
-            labelQtctSlice = torch.concat((Qt, tc), dim=1).reshape(-1)
+            theta_t, c_t=torch.tensor( labelReferenceFrame[0]),torch.tensor(labelReferenceFrame[1])
+            #Qt shape is [ time_steps,1], ct shape is [ time_steps,2],concat to [time_steps,3]->reshape to [time_steps*3]
+            labelQtctSlice = torch.concat((theta_t.unsqueeze(-1), c_t), dim=1).reshape(-1)
             self.labelReferenceFrame.append(labelQtctSlice)
             self.labelVortex.append(torch.tensor(vortexlabel))#vortexlabel=[tx,ty,n,rc] 
             
@@ -133,8 +133,8 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         return len(self.data)
     def __getitem__(self, idx):
         sample=self.data[idx]
-        if self.transform:
-            sample=self.transform(self.data[idx])            
+        # if self.transform:
+        #     sample=self.transform(self.data[idx])            
         return sample, self.labelReferenceFrame[idx],self.labelVortex[idx]
 
 def buildDataset(args,mode="train"):

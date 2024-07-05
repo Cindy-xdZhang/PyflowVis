@@ -34,18 +34,17 @@ struct KillingComponentFunctionFactory {
         std::random_device rd;
         std::mt19937 gen(rd());
 
-        // Gaussian distributions for generating parameters
-        std::normal_distribution<double> dist_speed(-0.2, 0.2);
-        std::normal_distribution<double> dist_acc(-0.05, 0.05);
-        std::normal_distribution<double> dist_rot(-0.1, 0.1);
+        std::uniform_real_distribution<double> dist_speed(-0.5, 0.5);
+        std::uniform_real_distribution<double> dist_acc(-0.1, 0.1);
+        std::uniform_real_distribution<double> dist_rot(-0.1, 0.1);
 
         // Randomly generate parameters
         int direction = std::uniform_int_distribution<int>(0, 2)(gen);
         double scale = 0.5 * dist_speed(gen);
         double acc = 0.5 * dist_acc(gen);
         double rot = 0.5 * dist_rot(gen);
-        double scaleA = 0.5 * dist_speed(gen);
-        double scaleB = 0.5 * dist_speed(gen);
+        double scaleA = dist_speed(gen);
+        double scaleB = dist_speed(gen);
         ObserverType type = static_cast<ObserverType>(itype);
         // Return the corresponding function
         switch (type) {
@@ -73,21 +72,12 @@ struct KillingComponentFunctionFactory {
             return constantTranslation(0, scale); // default case
         }
     }
-    // constant translation velocity(killing  a or b), acc =0.
-    static std::function<Eigen::Vector3d(double)> ArbitraryDirectionTranslation(double scaleA, double scaleB)
-    {
 
-        return [=](double t) {
-            double tbiggerthanZero = t > 0 ? t : 0;
-            return Eigen::Vector3d(scaleA * tbiggerthanZero, scaleB * tbiggerthanZero, 0);
-        };
-    }
     // constant translation velocity(killing  a or b), acc =0.
     static std::function<Eigen::Vector3d(double)> constantTranslation(int direction, double scale)
     {
         return [=](double t) {
-            double tbiggerthanZero = t > 0 ? t : 0;
-            double value = scale * tbiggerthanZero;
+            double value = t > 0 ? scale : 0;
             if (direction == 0) {
                 return Eigen::Vector3d(value, 0, 0);
             } else if (direction == 1) {
@@ -101,9 +91,9 @@ struct KillingComponentFunctionFactory {
     static std::function<Eigen::Vector3d(double)> SinCurveObserver(int direction, double speed, double start)
     {
         return [=](double t) {
-            double tbiggerthanZero = t > 0 ? t : 0;
+            double tbiggerthanZero = t > 0 ? 1 : 0;
             double theta = speed * t + start;
-            double value = 0.25 * sin(theta) * tbiggerthanZero;
+            double value = 0.5 * sin(theta) * tbiggerthanZero;
             if (direction == 0) {
                 return Eigen::Vector3d(value, 0, 0);
             } else if (direction == 1) {
@@ -122,7 +112,7 @@ struct KillingComponentFunctionFactory {
 
             // Determine the position within the period
             double positionInPeriod = fmod(t, period);
-            double tbiggerthanZero = t > 0 ? t : 0;
+            double tbiggerthanZero = t > 0 ? 1 : 0;
             const auto validValue2 = validValue * tbiggerthanZero;
             // If within the first half of the period, return validValue, otherwise return zero
             if (positionInPeriod < StopInterval) {
@@ -141,8 +131,7 @@ struct KillingComponentFunctionFactory {
             double period = 2 * StopInterval;
             // Determine the position within the period
             double positionInPeriod = fmod(t, period);
-            double tbiggerthanZero = t > 0 ? t : 0;
-            auto value = (positionInPeriod < StopInterval && tbiggerthanZero) ? validValue : 0;
+            auto value = (positionInPeriod < StopInterval && t > 0) ? validValue : 0;
             if (direction == 0) {
                 return Eigen::Vector3d(value, 0, 0);
             } else if (direction == 1) {
@@ -158,7 +147,7 @@ struct KillingComponentFunctionFactory {
     {
         return [=](double t) {
             double tbiggerthanZero = t > 0 ? t : 0;
-            auto velocity = acc * t * tbiggerthanZero;
+            auto velocity = acc * tbiggerthanZero;
             if (direction == 0) {
                 return Eigen::Vector3d(velocity, 0, 0);
             } else if (direction == 1) {
@@ -172,14 +161,15 @@ struct KillingComponentFunctionFactory {
     static std::function<Eigen::Vector3d(double)> combinedconstantTranslationRotation(int direction, double scale, double rot)
     {
         return [=](double t) {
-            double tbiggerthanZero = t > 0 ? t : 0;
+            double tbiggerthanZero = t > 0 ? 1 : 0;
             auto velocity = scale * tbiggerthanZero;
+            auto rot_ = rot * tbiggerthanZero;
             if (direction == 0) {
-                return Eigen::Vector3d(velocity, 0, 0);
+                return Eigen::Vector3d(velocity, 0, rot_);
             } else if (direction == 1) {
-                return Eigen::Vector3d(0, velocity, 0);
+                return Eigen::Vector3d(0, velocity, rot_);
             } else {
-                return Eigen::Vector3d(velocity, velocity, 0);
+                return Eigen::Vector3d(velocity, velocity, rot_);
             }
         };
     }
@@ -187,15 +177,23 @@ struct KillingComponentFunctionFactory {
     static std::function<Eigen::Vector3d(double)> constantRotation(double speed)
     {
         return [=](double t) {
-            double tbiggerthanZero = t > 0 ? t : 0;
+            double tbiggerthanZero = t > 0 ? 1 : 0;
             return Eigen::Vector3d(0, 0, speed * tbiggerthanZero);
         };
     }
+    // constant translation velocity(killing  a or b), acc =0.
+    static std::function<Eigen::Vector3d(double)> ArbitraryDirectionTranslation(double scaleA, double scaleB)
+    {
 
+        return [=](double t) {
+            double tbiggerthanZero = t > 0 ? 1 : 0;
+            return Eigen::Vector3d(scaleA * tbiggerthanZero, scaleB * tbiggerthanZero, 0);
+        };
+    }
     static std::function<Eigen::Vector3d(double)> constantAccRotation(double acc)
     {
         return [=](double t) {
-            double tbiggerthanZero = t > 0 ? t : 0;
+            double tbiggerthanZero = t > 0 ? 1 : 0;
             double velocity = acc * t * tbiggerthanZero;
             return Eigen::Vector3d(0, 0, velocity);
         };
@@ -203,11 +201,11 @@ struct KillingComponentFunctionFactory {
     static std::function<Eigen::Vector3d(double)> spiralMotion(double radialSpeed, double angularSpeed)
     {
         return [=](double t) {
-            double tbiggerthanZero = t > 0 ? t : 0;
+            double tbiggerthanZero = t > 0 ? 1 : 0;
             // r increases linearly with t
-            double r = radialSpeed * tbiggerthanZero;
+            double r = radialSpeed * t * tbiggerthanZero;
             // theta increases linearly with t
-            double theta = angularSpeed * tbiggerthanZero;
+            double theta = angularSpeed * t * tbiggerthanZero;
             // Convert polar coordinates to Cartesian coordinates
             double x = r * std::cos(theta);
             double y = r * std::sin(theta);

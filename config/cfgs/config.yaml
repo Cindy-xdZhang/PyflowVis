@@ -12,13 +12,13 @@ dataset:
     root: 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data\\debugX64_Y64_T8_no_mixture'
     transform: 'ToTensor'
 
-wandb: True
+wandb: False
 
 training: 
   device: 'cuda'
   # device: 'cpu'
-  epochs: 100
-  batch_size: 32
+  epochs: 200
+  batch_size: 100
   shuffle: True
   num_workers: 0
   pin_memory: True
@@ -26,7 +26,7 @@ training:
 
   optimizer: Adam
   learning_rate: 0.001
-  weight_decay: 0.00001
+  weight_decay: 0.0001
   # loss_function: MSELoss
 
 

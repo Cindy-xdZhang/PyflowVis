@@ -4,6 +4,7 @@
 #include "VectorFieldCompute.h"
 #include "cereal/archives/binary.hpp"
 #include "cereal/archives/json.hpp"
+#include "cereal/types/array.hpp"
 #include "cereal/types/vector.hpp"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
@@ -195,6 +196,18 @@ std::vector<std::pair<double, double>> generateNParamters(int n, std::string mod
     }
 
     return parameters;
+}
+
+// Function to convert a 2x2 rotation matrix to an angle
+double matrix2angle(const Eigen::Matrix2d& rotationMat)
+{
+    // Ensure the matrix is orthogonal and its determinant is 1
+    assert(rotationMat.determinant() > 0.999 && rotationMat.determinant() < 1.001);
+
+    // Calculate the angle theta
+    double theta = std::atan2(rotationMat(1, 0), rotationMat(0, 0));
+
+    return theta;
 }
 
 // function killingABCtransformation transform a SteadyVectorField2D& inputField to an unsteady field by observing it with respect to KillingAbcField& observerfield
@@ -766,7 +779,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
             // generate steady field with vortex
             int Si = std::clamp((int)std::ceil(dist_int(rngSample) / 2), 0, 2);
-            const auto theta = genTheta(rngSample);
+            const auto thetaSteady = genTheta(rngSample);
             const auto sx = genSx(rngSample);
             const auto sy = genSx(rngSample);
             auto tx = genTx(rngSample);
@@ -777,15 +790,17 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             Eigen::Vector2d txy = { tx, ty };
 
             Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
-            const SteadyVectorField2D steadyField = generator.generateSteadyField_VortexBoundaryVIS2020(tx, ty, sx, sy, theta, Si);
+            const SteadyVectorField2D steadyField = generator.generateSteadyField_VortexBoundaryVIS2020(tx, ty, sx, sy, thetaSteady, Si);
             const auto& steadyFieldResData = steadyField.field;
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
                 printf(".");
                 // Randomly select a type
-                int type
+                const int type
                     = dist_Observer_type(rng);
+                // type = ConstTranslationRotation;
 
-                const auto observer_name = std::string { magic_enum::enum_name((ObserverType)type) };
+                const auto observer_name
+                    = std::string { magic_enum::enum_name((ObserverType)type) };
 
                 const int taskSampleId = sample * observerPerSetting + observerIndex;
                 const string sample_tag_name = "rc_" + str_Rc + "_n_" + str_n + "_sample_" + to_string(taskSampleId) + "Si_" + to_string(Si) + "observer_" + observer_name;
@@ -821,8 +836,15 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 auto& c_t_rec = reconstruct_field.c_t;
                 for (size_t rec = 0; rec < reconstruct_field.field.size() - 1; rec++) {
                     Eigen ::Matrix3d shouldbeI = (Q_t_deforming[rec] * Q_t_rec[rec]);
-                    auto shouldbe0 = c_t_deforming[rec] + c_t_rec[rec];
-                    if ((shouldbeI - Eigen::Matrix3d::Identity()).norm() > 1e-7 || shouldbe0.norm() > 1e-7) {
+
+                    // if deforming transformation is x*=Q_tx+c1(t) then observer transformation is x*=R_t*x+c2(t)
+                    // if rec success it should satisfy R_t=Q_t^(-1) and c2(t)=-Q_t^(-1)*c1(t)
+                    auto c2t_ideal = -Q_t_rec[rec] * c_t_deforming[rec];
+
+                    Eigen::Vector3d shouldbe0 = c2t_ideal - c_t_rec[rec];
+                    double Qerror = (shouldbeI - Eigen::Matrix3d::Identity()).norm();
+                    double c_error = shouldbe0.norm();
+                    if (Qerror > 1e-7 || c_error > 1e-7) {
                         printf("\n\n");
                         printf("\n observer transformation not equal to inverse observer transformation at step %u,check observe type %s\n", (unsigned int)rec, observer_name.c_str());
                         printf("\n\n");
@@ -857,10 +879,10 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     auto outputSteadyTexture = LICAlgorithm(steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     // add segmentation visualization for steady lic
                     Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
-                    deformMat(0, 0) = sx * cos(theta);
-                    deformMat(0, 1) = -sy * sin(theta);
-                    deformMat(1, 0) = sx * sin(theta);
-                    deformMat(1, 1) = sy * cos(theta);
+                    deformMat(0, 0) = sx * cos(thetaSteady);
+                    deformMat(0, 1) = -sy * sin(thetaSteady);
+                    deformMat(1, 0) = sx * sin(thetaSteady);
+                    deformMat(1, 1) = sy * cos(thetaSteady);
                     addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy, deformMat);
                     string steadyField_name = "steady_beforeTransformation_";
                     string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
@@ -894,27 +916,31 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                              archive_o(CEREAL_NVP(domainMinBoundary));
                              archive_o(CEREAL_NVP(domainMaxBoundary));*/
 
-                        Eigen::Vector3d deform = { theta, sx, sy };
+                        Eigen::Vector3d deform = { thetaSteady, sx, sy };
                         archive_o(cereal::make_nvp("n_rc_Si", n_rc_si));
                         archive_o(cereal::make_nvp("deform_theta_sx_sy", deform));
                         archive_o(cereal::make_nvp("txy", txy));
-
                         archive_o(CEREAL_NVP(minV));
                         archive_o(CEREAL_NVP(maxV));
                         // meta for observer field
                         archive_o(cereal::make_nvp("Observer Type", observer_name));
-                        archive_o(CEREAL_NVP(observerfieldDeform));
+                        // archive_o(CEREAL_NVP(observerfieldDeform));
 
-                        std::vector<Eigen::Matrix2d> Q_t2d;
-                        Q_t2d.reserve(unsteadyFieldTimeStep);
+                        std::vector<double> thetaObserver;
+                        thetaObserver.reserve(unsteadyFieldTimeStep);
+                        std::vector<std::array<double, 2>> c_t;
+                        c_t.reserve(unsteadyFieldTimeStep);
+                        thetaObserver.reserve(unsteadyFieldTimeStep);
                         for (size_t i = 0; i < unsteadyFieldTimeStep; i++) {
                             // matix3d unsteady_field.Q_t[i] to matrix2d
                             Eigen::Matrix2d Q_t2d_t = unsteady_field.Q_t[i].block<2, 2>(0, 0);
-                            Q_t2d.push_back(Q_t2d_t);
+                            const double theta_rot = matrix2angle(Q_t2d_t);
+                            thetaObserver.push_back(theta_rot);
+                            c_t.push_back({ unsteady_field.c_t[i].x(), unsteady_field.c_t[i].y() });
                         }
 
-                        archive_o(cereal::make_nvp("Q(t)", Q_t2d));
-                        archive_o(cereal::make_nvp("c(t)", unsteady_field.c_t));
+                        archive_o(cereal::make_nvp("theta(t)", thetaObserver));
+                        archive_o(cereal::make_nvp("c(t)", c_t));
                     }
                     // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
                     jsonOut.close();

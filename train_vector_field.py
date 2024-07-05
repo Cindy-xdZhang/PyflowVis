@@ -120,7 +120,7 @@ def test_model(model,config,testDataset=None):
             logging.info(f"testSample{sample}_predict Q(t)c(t){predictTransformation}, vs labelQtct{  labelQtct.cpu()}__rec")
             # LicRenderingUnsteadyCpp(recUnsteadyField,licImageSize=800,timeStepSKip=10,saveFolder=save_folder,saveName=f"testSample_{binaryName}__rec",stepSize=0.005,MaxIntegrationSteps=128)
             # glyphsRenderUnsteadyField(recUnsteadyField,ImageSize=800,timeStepSKip=10,saveFolder=save_folder,saveName=f"testSample_{binaryName}__rec_glyph",ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v))
-            LicGlyphMixRenderingUnsteady(recUnsteadyField,licImageSize=800,timeStepSKip=10,saveFolder=save_folder,saveName=f"testSample_{binaryName}_rec__licglyph",stepSize=0.005,MaxIntegrationSteps=128)
+            LicGlyphMixRenderingUnsteady(recUnsteadyField,licImageSize=800,timeStepSKip=4,saveFolder=save_folder,saveName=f"testSample_{binaryName}_rec__licglyph",stepSize=0.005,MaxIntegrationSteps=128)
 
             LicRenderingSteadyCpp(steadyField,licImageSize=800,saveFolder=save_folder,saveName=f"testSample_{binaryName}__gt",stepSize=0.005,MaxIntegrationSteps=256)
             ouputSteadyPath=os.path.join(save_folder,f"testSample_{binaryName}__gt_glyph.png")
@@ -151,7 +151,7 @@ def train_pipeline():
     device = training_args['device']
     #generate radom seed and record to config
     config['training']['random_seed']=torch.seed()
-    run_Name,runTags=runNameTagGenerator(config,tagattach=["Q(t)c(t)","referenceFrameReconstruct"])
+    run_Name,runTags=runNameTagGenerator(config,tagattach=["theta(t)c(t)","referenceFrame"])
 
 
     # Initialize wandb
@@ -183,7 +183,7 @@ def train_pipeline():
  
 
     # Initialize the model
-    model = ReferenceFrameExtractor(2,  xdim, ydim, timesteps, ouptputDim=6*timesteps, hiddenSize=config['network']['hidden_size'])
+    model = ReferenceFrameExtractor(2,  xdim, ydim, timesteps, ouptputDim=3*timesteps, hiddenSize=config['network']['hidden_size'])
     model.apply(init_weights)
     model.to(device)
     torchsummary.summary(model, (2, xdim, ydim, timesteps))

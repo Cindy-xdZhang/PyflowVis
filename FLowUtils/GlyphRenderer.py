@@ -80,8 +80,8 @@ def glyphsRenderSteadyFieldAlgorthim(vecfield: SteadyVectorField2D, image_size=(
     min_mag = np.min(fieldMaginitude)
     max_mag = np.max(fieldMaginitude)
     vector_feild_scale=1.0
-    if max_mag<=0.1:
-        vector_feild_scale=0.1/(max_mag+0.0000001)
+    if max_mag<=0.25:
+        vector_feild_scale=2/(max_mag+0.0000001)
 
     arrayHeadLength=(min(img_width, img_height)/800 )*3
     arrayStemLength=(min(img_width, img_height)/800 )*5

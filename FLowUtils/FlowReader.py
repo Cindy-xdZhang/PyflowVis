@@ -45,13 +45,13 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
     metaINFo=read_json_file(meta_file)
 
     #observe and unsteady info  
-    Q_tInfo=metaINFo['Q(t)']
+    # Q_tInfo=metaINFo['theta(t)']
     c_tInfo=metaINFo['c(t)']
-    Q_t=[]
+    theta_t=metaINFo['theta(t)']
     c_t=[]
-    for abcDict_of_time_step_t in Q_tInfo:
-        q_slice=[abcDict_of_time_step_t["value0"],abcDict_of_time_step_t["value1"],abcDict_of_time_step_t["value2"],abcDict_of_time_step_t["value3"] ]
-        Q_t.append(q_slice)
+    # for abcDict_of_time_step_t in Q_tInfo:
+    #     q_slice=[abcDict_of_time_step_t["value0"],abcDict_of_time_step_t["value1"],abcDict_of_time_step_t["value2"],abcDict_of_time_step_t["value3"] ]
+    #     Q_t.append(q_slice)
     for abcDict_of_time_step_t in c_tInfo:
         c_slice=[abcDict_of_time_step_t["value0"],abcDict_of_time_step_t["value1"]] 
         c_t.append(c_slice)
@@ -71,20 +71,13 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
 
     fieldData = raw_Binary.reshape( time_steps,Ydim,Xdim, 2)
     vortexLableData= np.array([tx,ty,n,rc,metaINFo['minV'],metaINFo['maxV']],dtype=np.float32) 
-    Q_t= np.array(Q_t,dtype=np.float32)
+    theta_t= np.array(theta_t,dtype=np.float32)
     c_t= np.array(c_t,dtype=np.float32)
     assert(fieldData.shape[0]==time_steps)
-    assert(Q_t.shape[0]==time_steps and Q_t.shape[1]==4) 
+    assert(theta_t.shape[0]==time_steps) 
     assert(c_t.shape[0]==time_steps and c_t.shape[1]==2)
-    # if ForcePositiveNormalization:
-    #force to make every tensor positive
+    # if ForceNormalization:
     fieldData = (fieldData - metaINFo['minV']) / (metaINFo['maxV'] - metaINFo['minV'])
-    # c_t=(c_t -(-2)) / (4)
-    # Q_t=Q_t+1
-
-
-    # abc_t= np.array(abc_t,dtype=np.float32) 
-    # assert(abc_t.shape[0]==time_steps)
-    return fieldData, (Q_t,c_t),vortexLableData
+    return fieldData, (theta_t,c_t),vortexLableData
 
 

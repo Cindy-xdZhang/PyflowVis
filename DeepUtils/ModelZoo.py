@@ -105,7 +105,7 @@ class CNN3D(nn.Module):
         x = F.relu(self.fc3(x))
         return x
 
-#! todo: add vector field reconstruction loss into  ReferenceFrameExtractor
+
 class ReferenceFrameExtractor(nn.Module):
     def __init__(self,inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize=64):
         super(ReferenceFrameExtractor, self).__init__()
@@ -125,6 +125,8 @@ class ReferenceFrameExtractor(nn.Module):
             nn.ConvTranspose3d(hiddenSize, inputChannels, kernel_size=2, stride=2),
             nn.ReLU()  
         )
+        self.outputDim=ouptputDim
+        self.referenceFrameDim=ouptputDim//TimeSteps
 
     def forward(self, image):
         #image [batch_size, chanel=2,W=64, H=64, depth(timsteps)=7]
@@ -132,7 +134,8 @@ class ReferenceFrameExtractor(nn.Module):
         #abc_t [batchsize, self.ouptputDim*time_steps]
         abc_t = self.cnn(image)
         #generate reconstruct steady field
-        abc_t_reshape = abc_t.reshape(bs, 6, depth).unsqueeze(-2).unsqueeze(-2)
+        
+        abc_t_reshape = abc_t.reshape(bs, self.referenceFrameDim, depth).unsqueeze(-2).unsqueeze(-2)
         #abc_t_reshape [batchsize, 6,  height, width,time_steps]
         abc_t_reshape_expanded = abc_t_reshape.repeat(1, 1, height,width,1)
         vectorFieldwithTransforamtion=torch.concat((image, abc_t_reshape_expanded), dim=1)
