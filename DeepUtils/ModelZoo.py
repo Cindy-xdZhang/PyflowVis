@@ -110,21 +110,21 @@ class ReferenceFrameExtractor(nn.Module):
     def __init__(self,inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize=64):
         super(ReferenceFrameExtractor, self).__init__()
         self.cnn = CNN3D(inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize)
-        self.reconstructor = nn.Sequential(
-            nn.Conv3d(inputChannels+6, hiddenSize, kernel_size=3, padding=1),
-            nn.BatchNorm3d(hiddenSize),
-            nn.ReLU(inplace=True),
-            nn.MaxPool3d(kernel_size=2, stride=2),
-            nn.Conv3d(hiddenSize, hiddenSize * 2, kernel_size=3, padding=1),
-            nn.BatchNorm3d(hiddenSize * 2),
-            nn.ReLU(inplace=True),
-            nn.MaxPool3d(kernel_size=2, stride=2),
-            nn.ConvTranspose3d(hiddenSize * 2, hiddenSize, kernel_size=2, stride=2),
-            nn.BatchNorm3d(hiddenSize),
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose3d(hiddenSize, inputChannels, kernel_size=2, stride=2),
-            nn.ReLU()  
-        )
+        # self.reconstructor = nn.Sequential(
+        #     nn.Conv3d(inputChannels+6, hiddenSize, kernel_size=3, padding=1),
+        #     nn.BatchNorm3d(hiddenSize),
+        #     nn.ReLU(inplace=True),
+        #     nn.MaxPool3d(kernel_size=2, stride=2),
+        #     nn.Conv3d(hiddenSize, hiddenSize * 2, kernel_size=3, padding=1),
+        #     nn.BatchNorm3d(hiddenSize * 2),
+        #     nn.ReLU(inplace=True),
+        #     nn.MaxPool3d(kernel_size=2, stride=2),
+        #     nn.ConvTranspose3d(hiddenSize * 2, hiddenSize, kernel_size=2, stride=2),
+        #     nn.BatchNorm3d(hiddenSize),
+        #     nn.ReLU(inplace=True),
+        #     nn.ConvTranspose3d(hiddenSize, inputChannels, kernel_size=2, stride=2),
+        #     nn.ReLU()  
+        # )
         self.outputDim=ouptputDim
         self.referenceFrameDim=ouptputDim//TimeSteps
 
@@ -133,14 +133,14 @@ class ReferenceFrameExtractor(nn.Module):
         bs,vecComponnetChannel,height,width,depth=image.shape
         #abc_t [batchsize, self.ouptputDim*time_steps]
         abc_t = self.cnn(image)
+        return abc_t
         #generate reconstruct steady field
-        
-        abc_t_reshape = abc_t.reshape(bs, self.referenceFrameDim, depth).unsqueeze(-2).unsqueeze(-2)
         #abc_t_reshape [batchsize, 6,  height, width,time_steps]
-        abc_t_reshape_expanded = abc_t_reshape.repeat(1, 1, height,width,1)
-        vectorFieldwithTransforamtion=torch.concat((image, abc_t_reshape_expanded), dim=1)
-        rec = self.reconstructor(vectorFieldwithTransforamtion)
-        return abc_t, rec 
+        # abc_t_reshape = abc_t.reshape(bs, self.referenceFrameDim, depth).unsqueeze(-2).unsqueeze(-2)
+        # abc_t_reshape_expanded = abc_t_reshape.repeat(1, 1, height,width,1)
+        # vectorFieldwithTransforamtion=torch.concat((image, abc_t_reshape_expanded), dim=1)
+        # rec = self.reconstructor(vectorFieldwithTransforamtion)
+        # return abc_t, rec 
     
 
 
