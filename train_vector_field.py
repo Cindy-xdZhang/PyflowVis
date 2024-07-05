@@ -47,13 +47,14 @@ def validate(model, data_loader, device,config) -> float:
             steadyField3D = vectorFieldImage[:, :, :, :, 0]
             steadyField3D = steadyField3D.unsqueeze(-1).repeat(1, 1, 1, 1, slicePerdata).to(device)
             vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
-            predictQtCt, rec = model(vectorFieldImage)
-
-            lossRec = F.mse_loss(rec, steadyField3D)
-            lossRef = F.mse_loss(predictQtCt, labelQtct) 
+            # predictQtCt, rec = model(vectorFieldImage)
+            predictQtCt= model(vectorFieldImage)
+            lossRef = F.mse_loss(predictQtCt, labelQtct)
+            # lossRec = F.mse_loss(rec, steadyField3D)
+            lossRec=0
             loss = lossRec + lossRef
             val_loss += loss.item()
-            val_rec_loss += lossRec.item()
+            # val_rec_loss += lossRec.item()
 
     val_loss /= len(data_loader)
     val_rec_loss /= len(data_loader)
@@ -81,12 +82,14 @@ def test_model(model,config,testDataset=None):
             steadyField3D = vectorFieldImage[:, :, :, :, 0]
             steadyField3D = steadyField3D.unsqueeze(-1).repeat(1, 1, 1, 1, slicePerdata).to(device)
             vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
-            predictQtCt, rec = model(vectorFieldImage)
-            lossRec = F.mse_loss(rec, steadyField3D)
+            # predictQtCt, rec = model(vectorFieldImage)
+            predictQtCt= model(vectorFieldImage)
             lossRef = F.mse_loss(predictQtCt, labelQtct)
+            # lossRec = F.mse_loss(rec, steadyField3D)
+            lossRec=0
             loss = lossRec + lossRef
 
-            reconstruction_error += lossRec.item()
+            # reconstruction_error += lossRec.item()
             test_loss += loss.item()
             test_loss_records.append(loss.item())
 
@@ -105,26 +108,27 @@ def test_model(model,config,testDataset=None):
  
 
             vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
-            predictQtCt, recField = model(vectorFieldImage)
-            #recField [batch_size, chanel=2,W=64, H=64, depth(timsteps)]
-            recField=recField[0,:,:,:,:] .cpu()
-            recField=recField.transpose(0,3)
-            recField=recField*(maxv-minv)+minv
-            recUnsteadyField=  UnsteadyVectorField2D(64,64,slicePerdata)            
-            recUnsteadyField.field=recField
+            predictQtCt= model(vectorFieldImage)
+            # predictQtCt, recField = model(vectorFieldImage)
+            # #recField [batch_size, chanel=2,W=64, H=64, depth(timsteps)]
+            # recField=recField[0,:,:,:,:] .cpu()
+            # recField=recField.transpose(0,3)
+            # recField=recField*(maxv-minv)+minv
+            # recUnsteadyField=  UnsteadyVectorField2D(64,64,slicePerdata)            
+            # recUnsteadyField.field=recField
 
-            steadyField=  SteadyVectorField2D(64,64)
-            steadyField3D=steadyField3D*(maxv-minv)+minv
-            steadyField.field=steadyField3D.numpy()
+            # steadyField=  SteadyVectorField2D(64,64)
+            # steadyField3D=steadyField3D*(maxv-minv)+minv
+            # steadyField.field=steadyField3D.numpy()
             predictTransformation=predictQtCt[0].cpu().numpy()
             logging.info(f"testSample{sample}_predict Q(t)c(t){predictTransformation}, vs labelQtct{  labelQtct.cpu()}__rec")
             # LicRenderingUnsteadyCpp(recUnsteadyField,licImageSize=800,timeStepSKip=10,saveFolder=save_folder,saveName=f"testSample_{binaryName}__rec",stepSize=0.005,MaxIntegrationSteps=128)
             # glyphsRenderUnsteadyField(recUnsteadyField,ImageSize=800,timeStepSKip=10,saveFolder=save_folder,saveName=f"testSample_{binaryName}__rec_glyph",ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v))
-            LicGlyphMixRenderingUnsteady(recUnsteadyField,licImageSize=800,timeStepSKip=4,saveFolder=save_folder,saveName=f"testSample_{binaryName}_rec__licglyph",stepSize=0.005,MaxIntegrationSteps=128)
+            # LicGlyphMixRenderingUnsteady(recUnsteadyField,licImageSize=800,timeStepSKip=4,saveFolder=save_folder,saveName=f"testSample_{binaryName}_rec__licglyph",stepSize=0.005,MaxIntegrationSteps=128)
 
-            LicRenderingSteadyCpp(steadyField,licImageSize=800,saveFolder=save_folder,saveName=f"testSample_{binaryName}__gt",stepSize=0.005,MaxIntegrationSteps=256)
-            ouputSteadyPath=os.path.join(save_folder,f"testSample_{binaryName}__gt_glyph.png")
-            glyphsRenderSteadyField(steadyField,ouputSteadyPath,(800,800),ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v),gridSkip=1)
+            # LicRenderingSteadyCpp(steadyField,licImageSize=800,saveFolder=save_folder,saveName=f"testSample_{binaryName}__gt",stepSize=0.005,MaxIntegrationSteps=256)
+            # ouputSteadyPath=os.path.join(save_folder,f"testSample_{binaryName}__gt_glyph.png")
+            # glyphsRenderSteadyField(steadyField,ouputSteadyPath,(800,800),ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v),gridSkip=1)
 
 
 
@@ -205,11 +209,13 @@ def train_pipeline():
                 steadyField3D = vectorFieldImage[:, :, :, :, 0]
                 steadyField3D = steadyField3D.unsqueeze(-1).repeat(1, 1, 1, 1, timesteps).to(device)
                 vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
-                predictQtCt, rec = model(vectorFieldImage)
-
-                lossRec = F.mse_loss(rec, steadyField3D)
+                # predictQtCt, rec = model(vectorFieldImage)
+                predictQtCt= model(vectorFieldImage)
                 lossRef = F.mse_loss(predictQtCt, labelQtct)
+                # lossRec = F.mse_loss(rec, steadyField3D)
+                lossRec=0
                 loss = lossRec + lossRef
+                loss = lossRef
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -218,7 +224,8 @@ def train_pipeline():
                 
                 total_iterations += 1
                 if batch_idx % training_args['print_frequency'] == 0:
-                    stepRecError = lossRec.item()
+                    # stepRecError = lossRec.item()
+                    stepRecError = 0
                     logging.info(f'Epoch {epoch+1}, iter {batch_idx+1}, total_iterations: {total_iterations}. Loss: {loss.item()}.RecLoss: {stepRecError}')
                     if config['wandb']:
                         wandb.log({"train_loss": loss.item(),  "step_rec_error":stepRecError,"total_iterations": total_iterations})
