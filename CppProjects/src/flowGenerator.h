@@ -31,18 +31,17 @@ struct KillingComponentFunctionFactory {
     static std::function<Eigen::Vector3d(double)> randomObserver(int itype)
     {
         // Random device and generator
-        std::random_device rd;
-        std::mt19937 gen(rd());
-
-        std::uniform_real_distribution<double> dist_speed(-0.5, 0.5);
-        std::uniform_real_distribution<double> dist_acc(-0.1, 0.1);
-        std::uniform_real_distribution<double> dist_rot(-0.1, 0.1);
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        static std::uniform_real_distribution<double> dist_speed(-0.5, 0.5);
+        static std::uniform_real_distribution<double> dist_acc(-0.1, 0.1);
+        static std::uniform_real_distribution<double> dist_rot(-0.1, 0.1);
 
         // Randomly generate parameters
         int direction = std::uniform_int_distribution<int>(0, 2)(gen);
-        double scale = 0.5 * dist_speed(gen);
-        double acc = 0.5 * dist_acc(gen);
-        double rot = 0.5 * dist_rot(gen);
+        double scale = dist_speed(gen);
+        double acc = dist_acc(gen);
+        double rot = dist_rot(gen);
         double scaleA = dist_speed(gen);
         double scaleB = dist_speed(gen);
         ObserverType type = static_cast<ObserverType>(itype);
@@ -218,5 +217,6 @@ struct KillingComponentFunctionFactory {
 void ConvertNoiseTextureImage2Text(const std::string& infilename, const std::string& outFile, int width, int height);
 void testKillingTransformationForRFC();
 // number of result traing data = Nparamters * samplePerParameters * observerPerSetting
-void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting, std::string dataSetSplitTag);
+
+void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string in_root_fodler, const std::string dataSetSplitTag);
 void testCriterion();

@@ -698,7 +698,7 @@ void addSegmentationVisualization(std::vector<std::vector<std::vector<Eigen::Vec
 }
 
 // number of result traing data = Nparamters * samplePerParameters * observerPerSetting;dataSetSplitTag should be "train"/"test"/"validation"
-void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting, std::string dataSetSplitTag)
+void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string in_root_fodler, const std::string dataSetSplitTag)
 {
 #if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
     auto policy = std::execution::seq;
@@ -712,7 +712,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     }
 
     int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
-    std::string root_folder = "../data/debugX" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "_no_mixture/" + dataSetSplitTag + "/";
+    std::string root_folder = in_root_fodler + "/X" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "_no_mixture/" + dataSetSplitTag + "/";
     if (!filesystem::exists(root_folder)) {
         filesystem::create_directories(root_folder);
     }
