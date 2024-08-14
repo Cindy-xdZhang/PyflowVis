@@ -127,13 +127,17 @@ public:
         return vectorField2d;
     }
 };
-
+enum class VastisVortexType : unsigned char {
+    saddle = 0,
+    center_cw = 1,
+    center_ccw = 2,
+};
 class VastistasVelocityGenerator {
 public:
     VastistasVelocityGenerator(int Xdim, int Ydim, Eigen::Vector2d minBondary, Eigen::Vector2d maxBondary, double rc, double n);
 
     // generate a deformed steady velocity slice  following the paper: Vortex Boundary Identification using Convolutional Neural Network
-    SteadyVectorField2D generateSteadyField_VortexBoundaryVIS2020(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept;
+    SteadyVectorField2D generateSteadyField_VortexBoundaryVIS2020(double tx, double ty, double sx, double sy, double theta, VastisVortexType Si) const noexcept;
 
     // support mixture of multiple Vastistas profile
     SteadyVectorField2D generateSteadyFieldMixture(int mixture) const noexcept;

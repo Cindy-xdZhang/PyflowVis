@@ -74,7 +74,7 @@ std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(
         }
     }
 
-    constexpr auto& noiseTexture = stablizedTexture::noiseTexture512;
+    constexpr auto& noiseTexture = stablizedTexture::noiseTexture64;
     constexpr int TexDim = noiseTexture.size();
     const double FloatIdx_field2textureMultipilierX = ((double)TexDim - 1.0) / (double)(Xdim - 1.0);
     const double FloatIdx_field2textureMultipilierY = ((double)TexDim - 1.0) / (double)(Ydim - 1.0);

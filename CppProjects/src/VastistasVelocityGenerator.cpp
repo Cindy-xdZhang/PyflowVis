@@ -33,7 +33,7 @@ VastistasVelocityGenerator::VastistasVelocityGenerator(int Xdim, int Ydim, Eigen
     SiMatices_[2].row(1) = { 1.0f, 0.0f };*/
 }
 
-SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField_VortexBoundaryVIS2020(double tx, double ty, double sx, double sy, double theta, int Si) const noexcept
+SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField_VortexBoundaryVIS2020(double tx, double ty, double sx, double sy, double theta, VastisVortexType Si) const noexcept
 {
 
     std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d { 0.0, 0.0 }));
@@ -42,7 +42,7 @@ SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField_VortexBounda
     deformMatA(0, 1) = -sy * sin(theta);
     deformMatA(1, 0) = sx * sin(theta);
     deformMatA(1, 1) = sy * cos(theta);
-    const auto SiMat22 = SiMatices_[Si];
+    const auto SiMat22 = SiMatices_[static_cast<int>(Si)];
     const Eigen::Vector2d translation_t = { tx, ty };
 
     auto lambdaFunc = [this, SiMat22, translation_t, deformMatA](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
