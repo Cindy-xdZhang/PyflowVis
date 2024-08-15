@@ -70,9 +70,9 @@ def save_checkpoint(state, folder_name="./", checkpoint_name="checkpoint.pth.tar
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
     # Get the current date and time
-    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Construct the file path
-    file_path = os.path.join(folder_name, f"{current_time}_{checkpoint_name}")
+    # current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # file_path = os.path.join(folder_name, f"{current_time}_{checkpoint_name}")
+    file_path =os.path.join(folder_name, checkpoint_name)
 
     # Save the checkpoint
     print(f"=> Saving checkpoint to {file_path}")

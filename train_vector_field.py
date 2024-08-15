@@ -70,7 +70,7 @@ def test_model(model,config,testDataset=None):
         testDataset=buildDataset(config["dataset"],mode="test")
 
     test_data_loader= torch.utils.data.DataLoader(testDataset, batch_size=config['training']['batch_size'], shuffle=False)
-    slicePerdata = config["dataset"]["time_steps"]
+    # slicePerdata = config["dataset"]["time_steps"]
     model.eval()
     reconstruction_error = 0
     test_loss = 0
@@ -79,16 +79,11 @@ def test_model(model,config,testDataset=None):
     with torch.no_grad():
         for batch_idx, (vectorFieldImage, labelQtct, labelVortex) in enumerate(test_data_loader):
             # tx, ty, n, rc = labelVortex[0], labelVortex[1], labelVortex[2], labelVortex[3]
-            steadyField3D = vectorFieldImage[:, :, :, :, 0]
-            steadyField3D = steadyField3D.unsqueeze(-1).repeat(1, 1, 1, 1, slicePerdata).to(device)
             vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
             # predictQtCt, rec = model(vectorFieldImage)
             predictQtCt= model(vectorFieldImage)
             lossRef = F.mse_loss(predictQtCt, labelQtct)
-            # lossRec = F.mse_loss(rec, steadyField3D)
-            lossRec=0
-            loss = lossRec + lossRef
-
+            loss =   lossRef
             # reconstruction_error += lossRec.item()
             test_loss += loss.item()
             test_loss_records.append(loss.item())
@@ -104,11 +99,9 @@ def test_model(model,config,testDataset=None):
             #vectorFieldImage shape is [bs=1,  chanel=2,W=Ydim, Xdim, depth(timsteps)]
             tmp =vectorFieldImage
             tmp =tmp.transpose(1, 4).cpu()
-            steadyField3D = tmp[0, 0, :, :, :].cpu()
- 
-
             vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
             predictQtCt= model(vectorFieldImage)
+
             # predictQtCt, recField = model(vectorFieldImage)
             # #recField [batch_size, chanel=2,W=64, H=64, depth(timsteps)]
             # recField=recField[0,:,:,:,:] .cpu()
@@ -125,7 +118,6 @@ def test_model(model,config,testDataset=None):
             # LicRenderingUnsteadyCpp(recUnsteadyField,licImageSize=800,timeStepSKip=10,saveFolder=save_folder,saveName=f"testSample_{binaryName}__rec",stepSize=0.005,MaxIntegrationSteps=128)
             # glyphsRenderUnsteadyField(recUnsteadyField,ImageSize=800,timeStepSKip=10,saveFolder=save_folder,saveName=f"testSample_{binaryName}__rec_glyph",ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v))
             # LicGlyphMixRenderingUnsteady(recUnsteadyField,licImageSize=800,timeStepSKip=4,saveFolder=save_folder,saveName=f"testSample_{binaryName}_rec__licglyph",stepSize=0.005,MaxIntegrationSteps=128)
-
             # LicRenderingSteadyCpp(steadyField,licImageSize=800,saveFolder=save_folder,saveName=f"testSample_{binaryName}__gt",stepSize=0.005,MaxIntegrationSteps=256)
             # ouputSteadyPath=os.path.join(save_folder,f"testSample_{binaryName}__gt_glyph.png")
             # glyphsRenderSteadyField(steadyField,ouputSteadyPath,(800,800),ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v),gridSkip=1)
@@ -187,7 +179,7 @@ def train_pipeline():
  
 
     # Initialize the model
-    model = ReferenceFrameExtractor(2,  xdim, ydim, timesteps, ouptputDim=3*timesteps, hiddenSize=config['network']['hidden_size'])
+    model = TobiasReferenceFrameCNN(2,  xdim, ydim, timesteps, ouptputDim=6, hiddenSize=config['network']['hidden_size'])
     model.apply(init_weights)
     model.to(device)
     torchsummary.summary(model, (2, xdim, ydim, timesteps))
@@ -214,7 +206,6 @@ def train_pipeline():
                 lossRef = F.mse_loss(predictQtCt, labelQtct)
                 # lossRec = F.mse_loss(rec, steadyField3D)
                 lossRec=0
-                loss = lossRec + lossRef
                 loss = lossRef
 
                 optimizer.zero_grad()
@@ -239,7 +230,7 @@ def train_pipeline():
                 wandb.log({"epoch": epoch+1,  "epoch_Loss": {epoch_loss}, "val_loss": val_loss, "val_rec_error": val_rec_error})
 
             #save best model 
-            if val_loss < best_val_loss and training_args['save_model'] and epoch % training_args["save_model_frequency"]== 0:
+            if val_loss < best_val_loss and training_args['save_model'] :
                 best_val_loss = val_loss
                 saving_path= os.path.join(training_args['save_model_path'],run_Name) 
                 save_checkpoint({
@@ -247,6 +238,14 @@ def train_pipeline():
                     'state_dict': model.state_dict(),
                     'optimizer': optimizer.state_dict(),
                 }, folder_name=saving_path, checkpoint_name= f'best_checkpoint.pth.tar')
+            #periodically save model
+            if  training_args['save_model'] and epoch % training_args["save_model_frequency"]== 0 and epoch>0:
+                saving_path= os.path.join(training_args['save_model_path'],run_Name) 
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'state_dict': model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                }, folder_name=saving_path, checkpoint_name= f'epoch_{epoch+ 1}.pth.tar')
         except RuntimeError as exception:
             if "out of memory" in str(exception):
                 oom_time += 1
@@ -280,7 +279,7 @@ def test(checkpoint_path):
     config['run_name']=checkpoint_path.split(".pth.tar")[0]
 
     xdim, ydim,timesteps= config["dataset"]["Xdim"],config["dataset"]["Ydim"],config["dataset"]["time_steps"]
-    model = ReferenceFrameExtractor(2,  xdim, ydim, timesteps, ouptputDim=6*timesteps, hiddenSize=config['network']['hidden_size'])
+    model = ReferenceFrameExtractor(2,  xdim, ydim, timesteps, ouptputDim=6, hiddenSize=config['network']['hidden_size'])
     model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
@@ -301,14 +300,18 @@ def test(checkpoint_path):
 
 
 
+def LICAlgorithmTest():
+    from FLowUtils.AnalyticalFlowCreator import rotation_four_center
+    vecfield=rotation_four_center((128,128),8)
+    LicRenderingUnsteadyCpp(vecfield,licImageSize=128, timeStepSKip=1, saveFolder="./testPybindLicRendering",saveName="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128)
+  
 
 # if __name__ == '__main__':
-#    test("models\\CNN_200_0.001_20240629_013617_seed_623621614793900\\20240629_153130_best_checkpoint.pth.tar")
+#    test("models\\CNN_1_0.001_20240814_171651_seed_4653893914979600\\20240814_172603_best_checkpoint.pth.tar")
 
 if __name__ == '__main__':
     train_pipeline()
 
-  
 # if __name__ == "__main__":
 #     # Define the vector field dimensions and boundaries
 #     Xdim, Ydim = 20, 20
@@ -331,5 +334,10 @@ if __name__ == '__main__':
 
 
 
- 
 
+  
+# if __name__ == '__main__':
+#     # test pybind cpp lic rendering
+#     LICAlgorithmTest()
+
+   

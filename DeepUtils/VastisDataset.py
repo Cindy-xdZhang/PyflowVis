@@ -64,18 +64,16 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         for binFile in binFiles:
             binPath=os.path.join(sub_folder,binFile)
             loadField, labelReferenceFrame,vortexlabel=loadOneFlowEntryRawData(binPath, Xdim,Ydim,time_steps)
-            timesteps=loadField.shape[0]
+            # timesteps=loadField.shape[0]
             # dataSlice shape is [ depth(timsteps)=7, W=64, H=64, chanel=2]
             # need  transpose to [ chanel=2, W=64, H=64, depth(timsteps)=7] to feed conv3D
-            dataSlice=torch.tensor(loadField)
-            vectorFieldDataSlice = dataSlice.transpose(0, 3)
-            self.data.append(vectorFieldDataSlice)
+            dataSlice=torch.tensor(loadField).transpose(0, 3)
+            self.data.append(dataSlice)
             if self.mode=="test":
                 self.dataName.append(keep_last_n_levels(binPath,1))
-            theta_t, c_t=torch.tensor( labelReferenceFrame[0]),torch.tensor(labelReferenceFrame[1])
-            #Qt shape is [ time_steps,1], ct shape is [ time_steps,2],concat to [time_steps,3]->reshape to [time_steps*3]
-            labelQtctSlice = torch.concat((theta_t.unsqueeze(-1), c_t), dim=1).reshape(-1)
-            self.labelReferenceFrame.append(labelQtctSlice)
+                
+            labelReferenceFrame=torch.tensor(labelReferenceFrame)
+            self.labelReferenceFrame.append(labelReferenceFrame)
             self.labelVortex.append(torch.tensor(vortexlabel))#vortexlabel=[tx,ty,n,rc] 
             
             #uncomment code if you need  split vectorfield according to slicePerData             
@@ -134,8 +132,11 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         sample=self.data[idx]
         # if self.transform:
-        #     sample=self.transform(self.data[idx])            
-        return sample, self.labelReferenceFrame[idx],self.labelVortex[idx]
+        #     sample=self.transform(self.data[idx])  
+        noise = np.random.normal(0, 0.05, sample.shape)  # Mean=0, Std=0.1, adjust the std value as needed
+        noise = np.clip( noise.astype(np.float32), -0.01, 0.01)  # Clip noise to be within the range (-0.1, 0.1)
+        sample_with_noise = sample + noise
+        return sample_with_noise, self.labelReferenceFrame[idx],self.labelVortex[idx]
 
 def buildDataset(args,mode="train"):
     ds=UnsteadyVastisDataset(args['root'],mode)

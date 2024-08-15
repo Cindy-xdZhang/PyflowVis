@@ -46,17 +46,12 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
 
     #observe and unsteady info  
     # Q_tInfo=metaINFo['theta(t)']
-    c_tInfo=metaINFo['c(t)']
-    theta_t=metaINFo['theta(t)']
-    c_t=[]
+    abc_tInfo=[value for value in metaINFo['observer_abc'].values()]
+    abcdot_t=[value for value in metaINFo['observer_abc_dot'].values()] 
+    referenceLabel=abc_tInfo+abcdot_t
     # for abcDict_of_time_step_t in Q_tInfo:
     #     q_slice=[abcDict_of_time_step_t["value0"],abcDict_of_time_step_t["value1"],abcDict_of_time_step_t["value2"],abcDict_of_time_step_t["value3"] ]
     #     Q_t.append(q_slice)
-    for abcDict_of_time_step_t in c_tInfo:
-        c_slice=[abcDict_of_time_step_t["value0"],abcDict_of_time_step_t["value1"]] 
-        c_t.append(c_slice)
-
-        
                             
     n,rc,si=metaINFo['n_rc_Si']["value0"],metaINFo['n_rc_Si']["value1"],metaINFo['n_rc_Si']["value2"]
     tx,ty=metaINFo['txy']["value0"],metaINFo['txy']["value1"]
@@ -67,17 +62,14 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
                                                                       Ydim*Xdim* 2}, got {raw_Binary.size}")
     if raw_Binary.min() !=metaINFo['minV'] or  raw_Binary.max() !=metaINFo['maxV']:
         raise ValueError(f"Binary data min or max value is not correct, expected {metaINFo['minV']} or {metaINFo['maxV']}, got {fieldData.min()} or {fieldData.max()}")
-        
 
     fieldData = raw_Binary.reshape( time_steps,Ydim,Xdim, 2)
     vortexLableData= np.array([tx,ty,n,rc,metaINFo['minV'],metaINFo['maxV']],dtype=np.float32) 
-    theta_t= np.array(theta_t,dtype=np.float32)
-    c_t= np.array(c_t,dtype=np.float32)
+    referenceLabel= np.array(referenceLabel,dtype=np.float32)
     assert(fieldData.shape[0]==time_steps)
-    assert(theta_t.shape[0]==time_steps) 
-    assert(c_t.shape[0]==time_steps and c_t.shape[1]==2)
+    
     # if ForceNormalization:
     fieldData = (fieldData - metaINFo['minV']) / (metaINFo['maxV'] - metaINFo['minV'])
-    return fieldData, (theta_t,c_t),vortexLableData
+    return fieldData,referenceLabel,vortexLableData
 
 

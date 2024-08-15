@@ -57,15 +57,15 @@ class CNN3D(nn.Module):
         self.conv3_3 = nn.Conv3d(in_channels=hiddenSize*4, out_channels=hiddenSize*4, kernel_size=3, padding=1)
         self.bn3_3 = nn.BatchNorm3d(hiddenSize*4)
 
-        self.pool3 = nn.MaxPool3d(kernel_size=2, stride=2)
+        # self.pool3 = nn.MaxPool3d(kernel_size=2, stride=2)
         self.dropout3 = nn.Dropout3d(dropout_prob)
 
         # Flatten for fully connected layer
         self.flatten = nn.Flatten()
         # Fully connected layer
-        DataSizeX = DataSizeX // 8
-        DataSizeY = DataSizeY // 8
-        TimeSteps = TimeSteps // 8
+        DataSizeX = DataSizeX // 4
+        DataSizeY = DataSizeY // 4
+        TimeSteps = TimeSteps // 4
         self.fc1 = nn.Linear(hiddenSize*4 * DataSizeX * DataSizeY * TimeSteps, hiddenSize*4)
         self.fc2 = nn.Linear(hiddenSize*4, hiddenSize)
         self.fc3 = nn.Linear(hiddenSize, outputDim)
@@ -93,7 +93,6 @@ class CNN3D(nn.Module):
         x = F.relu(self.bn3_2(self.conv3_2(x)))
         x = F.relu(self.bn3_3(self.conv3_3(x)))
         x = x + residual
-        x = self.pool3(x)
         x = self.dropout3(x)
 
         # Flatten and fully connected layer
@@ -104,6 +103,53 @@ class CNN3D(nn.Module):
         x = self.dropout_fc(x)
         x = F.relu(self.fc3(x))
         return x
+
+
+class TobiasReferenceFrameCNN(nn.Module):
+    """ RoboustReferenceFrameCNN is the CNN model from paper: Robust Reference Frame Extraction from Unsteady 2D Vector Fields with Convolutional Neural Networks
+    """
+    def __init__(self,inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize):
+        super(TobiasReferenceFrameCNN, self).__init__()
+        # the input tensor of Conv3d should be in the shape of[batch_size, chanel=2,W=16, H=16, depth(timsteps)]
+        self.conv1_1 = nn.Conv3d(in_channels=inputChannels, out_channels=hiddenSize, kernel_size=3, stride=2,padding=1)
+        self.bn1_1 = nn.BatchNorm3d(hiddenSize)
+        # self.CNNlayerCountN=4-2 #n=log2(max(H,W))-2
+        self.conv2_1 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize*2, kernel_size=3, stride=2,padding=1)
+        self.bn2_1 = nn.BatchNorm3d(hiddenSize*2)
+
+        lastCnnOuputChannel=1024
+        self.conv3_1 = nn.Conv3d(in_channels=hiddenSize*2, out_channels=lastCnnOuputChannel, kernel_size=3, stride=2,padding=1)
+        self.bn3_1 = nn.BatchNorm3d(lastCnnOuputChannel)
+
+        self.flatten = nn.Flatten()
+        DataSizeX = DataSizeX // 8
+        DataSizeY = DataSizeY // 8
+        TimeSteps = 1#(5+1/2=3,3+1/2=2)
+        # Fully connected layer
+        self.fc1 = nn.Linear(lastCnnOuputChannel * DataSizeX * DataSizeY * TimeSteps, 1024)
+        self.bn_fc_1 = nn.BatchNorm1d(1024)
+        self.fc2 = nn.Linear(1024, 512)
+        self.bn_fc_2 = nn.BatchNorm1d(512)
+        self.fc3 = nn.Linear(512, ouptputDim)
+        self.bn_fc_3 = nn.BatchNorm1d(ouptputDim)
+        self.dropout_fc = nn.Dropout(0.1)
+        self.outputDim=ouptputDim
+        
+
+    def forward(self, x):
+        x = F.relu(self.bn1_1(self.conv1_1(x)))
+        x = F.relu(self.bn2_1(self.conv2_1(x)))
+        x = F.relu(self.bn3_1(self.conv3_1(x)))
+
+
+        x = self.flatten(x)
+        x = self.dropout_fc(F.relu(self.bn_fc_1(self.fc1(x))))
+        x = self.dropout_fc(F.relu(self.bn_fc_2(self.fc2(x)))) 
+        x = self.dropout_fc(F.relu(self.bn_fc_3(self.fc3(x))))
+        return x
+
+
+
 
 
 class ReferenceFrameExtractor(nn.Module):
@@ -132,8 +178,8 @@ class ReferenceFrameExtractor(nn.Module):
         #image [batch_size, chanel=2,W=64, H=64, depth(timsteps)=7]
         bs,vecComponnetChannel,height,width,depth=image.shape
         #abc_t [batchsize, self.ouptputDim*time_steps]
-        abc_t = self.cnn(image)
-        return abc_t
+        abc_t_abcdot_t = self.cnn(image)
+        return abc_t_abcdot_t
         #generate reconstruct steady field
         #abc_t_reshape [batchsize, 6,  height, width,time_steps]
         # abc_t_reshape = abc_t.reshape(bs, self.referenceFrameDim, depth).unsqueeze(-2).unsqueeze(-2)

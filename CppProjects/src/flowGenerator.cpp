@@ -18,17 +18,18 @@
 #include <magic_enum/magic_enum.hpp>
 
 #define RENDERING_LIC_SAVE_DATA
+#define VALIDATE_RECONSTRUCTION_RESULT
 
 using namespace std;
 
 constexpr double tmin = 0.0;
-constexpr double tmax = M_PI * 0.5;
-constexpr int Xdim = 64, Ydim = 64;
-constexpr int LicImageSize = 128;
+constexpr double tmax = M_PI * 0.25;
+constexpr int Xdim = 16, Ydim = 16;
+constexpr int unsteadyFieldTimeStep = 5;
+constexpr int LicImageSize = 64;
 Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
-constexpr int unsteadyFieldTimeStep = 7;
-constexpr int LicSaveFrequency = 2; // every 2 time steps save one
+constexpr int LicSaveFrequency = 1; // every 2 time steps save one
 const double stepSize = 0.01;
 const int maxLICIteratioOneDirection = 256;
 
@@ -214,14 +215,15 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> generateRandomABCVectors()
     // Random device and generator
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<double> dist(-1.0, 1.0);
-    std::uniform_real_distribution<double> dist_acc(-0.05, 0.05);
+    // range of velocity and acc is -0.3-0.3, -0.01-0.01(from paper "robust reference frame...")
+    std::uniform_real_distribution<double> dist(-0.3, 0.3);
+    std::uniform_real_distribution<double> dist_acc(-0.01, 0.01);
     std::uniform_int_distribution<int> dist_int(0, 5);
     // Generate two random Eigen::Vector3d
     auto option = dist_int(gen);
     if (option == 0) {
-        Eigen::Vector3d vec1(dist(gen), dist(gen), dist(gen));
-        Eigen::Vector3d vec2(dist(gen), dist(gen), dist(gen));
+        Eigen::Vector3d vec1(0, dist(gen), 0);
+        Eigen::Vector3d vec2(dist(gen), 0, 0);
         return std::make_pair(vec1, vec2);
     } else if (option == 1) {
         Eigen::Vector3d vec1(dist(gen), dist(gen), 0);
@@ -556,6 +558,166 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
     return resultField;
 }
 
+// const Eigen::Vector3d& abc, const Eigen::Vector3d& abc_dot represents the xdot,ydot,theta_dot, xdotdot,ydotdot,theta_dotdot of paper "Roboust reference frame..."
+UnSteadyVectorField2D Tobias_ObserverTransformation(const SteadyVectorField2D& inputField, const Eigen::Vector3d& abc, const Eigen::Vector3d& abc_dot, const double tmin, const double tmax, const int timestep)
+{
+    const auto dt = (tmax - tmin) / ((double)(timestep)-1.0);
+    UnSteadyVectorField2D resultField;
+    resultField.spatialDomainMaxBoundary = inputField.getSpatialMaxBoundary();
+    resultField.spatialDomainMinBoundary = inputField.getSpatialMinBoundary();
+    resultField.spatialGridInterval = inputField.spatialGridInterval;
+    resultField.XdimYdim = inputField.XdimYdim;
+    resultField.tmin = tmin;
+    resultField.tmax = tmax;
+    resultField.timeSteps = timestep;
+    resultField.field.resize(timestep);
+
+    // Q(0)=I ->theta(0)=0; translation(0)=0;
+    std::vector<Eigen::Vector2d> Velocities(timestep);
+    std::vector<double> AngularVelocities(timestep);
+    resultField.Q_t.resize(timestep);
+    resultField.c_t.resize(timestep);
+    resultField.Q_t[0] = Eigen::Matrix2d::Identity();
+    resultField.c_t[0] = Eigen::Vector2d::Identity();
+
+    // rotation
+    double theta = 0;
+    double angularVelocity = abc(2);
+    AngularVelocities[0] = { angularVelocity };
+
+    // translation
+    Eigen ::Vector2d translation_c_t = { 0, 0 };
+    Eigen ::Vector2d translation_cdot = { abc(0), abc(1) };
+    Velocities[0] = translation_cdot;
+    Eigen ::Vector2d translation_cdotdot = { abc_dot(0), abc_dot(1) };
+
+    for (size_t i = 1; i < timestep; i++) {
+        theta = theta + dt * angularVelocity;
+        angularVelocity = angularVelocity + dt * abc_dot(2);
+        AngularVelocities[i] = angularVelocity;
+
+        // translation
+        translation_c_t = translation_c_t + dt * translation_cdot;
+        translation_cdot = translation_cdot + dt * translation_cdotdot;
+        Velocities[i] = translation_cdot;
+
+        Eigen::Matrix2d rotQ;
+        rotQ << cos(theta), -sin(theta),
+            sin(theta), cos(theta);
+        resultField.Q_t[i] = rotQ;
+        resultField.c_t[i] = translation_c_t;
+    }
+
+    if (inputField.analyticalFlowfunc_) {
+
+        resultField.analyticalFlowfunc_ = [inputField, tmin, resultField, dt, Velocities, AngularVelocities](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+            const double floatingTimeStep = (t - tmin) / dt;
+            const int timestep_floor = std::clamp((int)std::floor(floatingTimeStep), 0, resultField.timeSteps - 1);
+            const int timestep_ceil = std::clamp((int)std::floor(floatingTimeStep) + 1, 0, resultField.timeSteps - 1);
+            const double ratio = floatingTimeStep - timestep_floor;
+
+            const Eigen::Matrix2d Q_t = resultField.Q_t[timestep_floor] * (1 - ratio) + resultField.Q_t[timestep_ceil] * ratio;
+            auto Q_transpose = Q_t.transpose();
+            auto c_t = resultField.c_t[timestep_floor] * (1 - ratio) + resultField.c_t[timestep_ceil] * ratio;
+            // => F^(-1)(x)= Q^T (x-c)= Q^T *( x+Q*pt-Os)
+            Eigen ::Vector2d F_inverse_x_2d = Q_transpose * (pos - c_t);
+
+            auto v = inputField.getVectorAnalytical(F_inverse_x_2d, t);
+            auto Velocity = Velocities[timestep_floor] * (1 - ratio) + Velocities[timestep_ceil] * ratio;
+            auto AngularVelocity = AngularVelocities[timestep_floor] * (1 - ratio) + AngularVelocities[timestep_ceil] * ratio;
+
+            Eigen::Matrix2d Spintensor;
+            Spintensor(0, 0) = 0.0;
+            Spintensor(1, 0) = -AngularVelocity;
+            Spintensor(0, 1) = AngularVelocity;
+            Spintensor(1, 1) = 0.0;
+            Eigen::Matrix2d Q_dot = Q_t * Spintensor;
+            Eigen ::Vector2d translationTdot = Velocity;
+            Eigen::Vector2d res = Q_t * v + Q_dot * F_inverse_x_2d + translationTdot;
+            return res;
+        };
+        resultField.resampleFromAnalyticalExpression();
+    } else {
+        printf("error...");
+    }
+    return resultField;
+}
+// this function is similar to but 0
+UnSteadyVectorField2D Tobias_reconstructUnsteadyField(const UnSteadyVectorField2D& inputField, const Eigen::Vector3d& abc, const Eigen::Vector3d& abc_dot)
+{
+    const auto tmax = inputField.tmax;
+    const auto tmin = inputField.tmin;
+    const double dt = (inputField.tmax - inputField.tmin) / ((double)inputField.timeSteps - 1.0);
+    if (inputField.analyticalFlowfunc_) {
+
+        UnSteadyVectorField2D outputField;
+        outputField.spatialDomainMaxBoundary = inputField.getSpatialMaxBoundary();
+        outputField.spatialDomainMinBoundary = inputField.getSpatialMinBoundary();
+        outputField.spatialGridInterval = inputField.spatialGridInterval;
+        outputField.XdimYdim = inputField.XdimYdim;
+        outputField.tmin = tmin;
+        outputField.tmax = tmax;
+        outputField.timeSteps = inputField.timeSteps;
+        outputField.field.resize(inputField.timeSteps);
+
+        // Q(0)=I ->theta(0)=0; translation(0)=0;
+        std::vector<Eigen::Vector2d> Velocities(inputField.timeSteps);
+        std::vector<double> AngularVelocities(inputField.timeSteps);
+
+        // rotation
+        double theta = 0;
+        double angularVelocity = abc(2);
+        AngularVelocities[0] = { angularVelocity };
+        // translation
+        Eigen ::Vector2d translation_c_t = { 0, 0 };
+        Eigen ::Vector2d translation_cdot = { abc(0), abc(1) };
+        Velocities[0] = translation_cdot;
+        Eigen ::Vector2d translation_cdotdot = { abc_dot(0), abc_dot(1) };
+        for (size_t i = 1; i < inputField.timeSteps; i++) {
+            theta = theta + dt * angularVelocity;
+            angularVelocity = angularVelocity + dt * abc_dot(2);
+            AngularVelocities[i] = angularVelocity;
+
+            // translation
+            translation_c_t = translation_c_t + dt * translation_cdot;
+            translation_cdot = translation_cdot + dt * translation_cdotdot;
+            Velocities[i] = translation_cdot;
+        }
+
+        outputField.analyticalFlowfunc_ = [=](const Eigen::Vector2d& posX, double t) -> Eigen::Vector2d {
+            const double floatingTimeStep = (t - tmin) / dt;
+            const int timestep_floor = std::clamp((int)std::floor(floatingTimeStep), 0, inputField.timeSteps - 1);
+            const int timestep_ceil = std::clamp((int)std::floor(floatingTimeStep) + 1, 0, inputField.timeSteps - 1);
+            const double ratio = floatingTimeStep - timestep_floor;
+
+            const auto Q_t = inputField.Q_t[timestep_floor] * (1 - ratio) + inputField.Q_t[timestep_ceil] * ratio;
+            const auto Q_transpose = Q_t.transpose();
+            const auto c_t = inputField.c_t[timestep_floor] * (1 - ratio) + inputField.c_t[timestep_ceil] * ratio;
+            const auto Velocity = Velocities[timestep_floor] * (1 - ratio) + Velocities[timestep_ceil] * ratio;
+            const auto AngularVelocity = AngularVelocities[timestep_floor] * (1 - ratio) + AngularVelocities[timestep_ceil] * ratio;
+
+            Eigen::Vector2d xStar = Q_t * posX + c_t;
+            Eigen::Vector2d v_star_xstar = inputField.getVectorAnalytical({ xStar(0), xStar(1) }, t);
+
+            // compute Qdot=Q(t)*Omega(t) where Omega(t) is the anti-symmetric matrix of the angular velocity vector
+            Eigen::Matrix2d Spintensor;
+            Spintensor(0, 0) = 0.0;
+            Spintensor(1, 0) = -AngularVelocity;
+            Spintensor(0, 1) = AngularVelocity;
+            Spintensor(1, 1) = 0.0;
+
+            Eigen::Matrix2d Q_dot = Q_t * Spintensor;
+            Eigen ::Vector2d translationTdot = Velocity;
+            Eigen::Vector2d v_at_pos = Q_transpose * (v_star_xstar - Q_dot * posX - translationTdot);
+            return v_at_pos;
+        };
+        outputField.resampleFromAnalyticalExpression();
+        return outputField;
+    } else {
+        printf("reconstructUnsteadyField only support analyticalFlowfunc_");
+        return {};
+    }
+}
 void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inputLicImage, const SteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn, const Eigen::Vector2d& translation_t, const Eigen::Matrix2d& deformMat)
 {
     // if si=0 then no vortex
@@ -665,8 +827,8 @@ void addSegmentationVisualization(std::vector<std::vector<std::vector<Eigen::Vec
 }
 
 // this function is similar to but 0different from killingABCtransformation, this function assume inputField is some unsteady field get deformed by an observer represented by
-//  predictKillingABCfunc, reconstructUnsteadyField will remove the transformation imposed by predictKillingABCfunc.
-UnSteadyVectorField2D reconstructUnsteadyField(std::function<Eigen::Vector3d(double)> predictKillingABCfunc, const UnSteadyVectorField2D& inputField)
+//  predictKillingABCfunc, reconstructKillingDeformedUnsteadyField will remove the transformation imposed by predictKillingABCfunc.
+UnSteadyVectorField2D reconstructKillingDeformedUnsteadyField(std::function<Eigen::Vector3d(double)> predictKillingABCfunc, const UnSteadyVectorField2D& inputField)
 {
     const auto tmax = inputField.tmax;
     const auto tmin = inputField.tmin;
@@ -790,9 +952,8 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             archive_o(CEREAL_NVP(tmax));
         }
 
+        std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
         for (size_t sample = 0; sample < numVelocityFields; sample++) {
-
-            std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
             // the type of this sample(divergence,cw vortex, cc2 vortex)
             auto Si = static_cast<VastisVortexType>(sample % 3);
 
@@ -807,8 +968,8 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
             auto tx = genTx(rngSample);
             auto ty = genTy(rngSample);
             // clamp tx ty to 0.5*domian
-            tx = std::clamp(tx, 0.5 * domainMinBoundary.x(), 0.5 * domainMaxBoundary.x());
-            ty = std::clamp(ty, 0.5 * domainMinBoundary.y(), 0.5 * domainMaxBoundary.y());
+            tx = std::clamp(tx, 0.3 * domainMinBoundary.x(), 0.3 * domainMaxBoundary.x());
+            ty = std::clamp(ty, 0.3 * domainMinBoundary.y(), 0.3 * domainMaxBoundary.y());
             Eigen::Vector2d txy = { tx, ty };
 
             Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
@@ -828,14 +989,12 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 const auto& observerParameters = generateRandomABCVectors();
                 const auto& abc = observerParameters.first;
                 const auto& abc_dot = observerParameters.second;
-                auto func = KillingComponentFunctionFactory::arbitrayObserver(abc, abc_dot);
-
-                KillingAbcField observerfieldDeform(
-                    func, unsteadyFieldTimeStep, tmin, tmax);
-                auto unsteady_field = killingABCtransformation(observerfieldDeform, { 0.0, 0.0 }, steadyField);
+                /* auto func = KillingComponentFunctionFactory::arbitrayObserver(abc, abc_dot);
+               KillingAbcField observerfieldDeform(  func, unsteadyFieldTimeStep, tmin, tmax);*/
+                auto unsteady_field = Tobias_ObserverTransformation(steadyField, abc, abc_dot, tmin, tmax, unsteadyFieldTimeStep);
                 // reconstruct unsteady field from observer field
-                auto reconstruct_field = reconstructUnsteadyField(observerfieldDeform.killingABCfunc_, unsteady_field);
-
+                auto reconstruct_field = Tobias_reconstructUnsteadyField(unsteady_field, abc, abc_dot);
+#ifdef VALIDATE_RECONSTRUCTION_RESULT
                 // //validate reconstruction result
                 for (size_t rec = 0; rec < unsteadyFieldTimeStep; rec++) {
                     const auto& reconstruct_slice = reconstruct_field.field[rec];
@@ -854,7 +1013,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                         printf("\n\n");
                     }
                 }
-
+#endif
 #ifdef RENDERING_LIC_SAVE_DATA
 
                 {

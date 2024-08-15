@@ -114,12 +114,6 @@ def test_analytical_flow_creator():
 
 
 
-def LICAlgorithmTest():
-    vecfield=rotation_four_center((128,128),32)
-  
-    LicRenderingUnsteadyCpp(vecfield,licImageSize=128, timeStepSKip=1, saveFolder="./testPybindLicRendering",saveName="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128)
-    
-   
 
 
 
