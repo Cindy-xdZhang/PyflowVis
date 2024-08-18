@@ -21,7 +21,7 @@
 #define VALIDATE_RECONSTRUCTION_RESULT
 
 using namespace std;
-
+namespace {
 constexpr double tmin = 0.0;
 constexpr double tmax = M_PI * 0.25;
 constexpr int Xdim = 16, Ydim = 16;
@@ -32,7 +32,12 @@ Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
 constexpr int LicSaveFrequency = 1; // every 2 time steps save one
 const double stepSize = 0.01;
 const int maxLICIteratioOneDirection = 256;
-
+#if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
+auto policy = std::execution::seq;
+#else
+auto policy = std::execution::par_unseq;
+#endif
+}
 inline std::string trimNumString(const std::string& numString)
 {
     std::string str = numString;
@@ -222,12 +227,12 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> generateRandomABCVectors()
     // Generate two random Eigen::Vector3d
     auto option = dist_int(gen);
     if (option == 0) {
-        Eigen::Vector3d vec1(0, dist(gen), 0);
-        Eigen::Vector3d vec2(dist(gen), 0, 0);
+        Eigen::Vector3d vec1(dist(gen), dist(gen), dist(gen));
+        Eigen::Vector3d vec2(dist_acc(gen), dist_acc(gen), dist_acc(gen));
         return std::make_pair(vec1, vec2);
     } else if (option == 1) {
         Eigen::Vector3d vec1(dist(gen), dist(gen), 0);
-        Eigen::Vector3d vec2(dist(gen), dist(gen), 0);
+        Eigen::Vector3d vec2(dist_acc(gen), dist_acc(gen), 0);
         return std::make_pair(vec1, vec2);
     } else if (option == 2) {
         Eigen::Vector3d vec1(dist(gen), dist(gen), 0);
@@ -239,7 +244,7 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> generateRandomABCVectors()
         return std::make_pair(vec1, vec2);
     } else {
         Eigen::Vector3d vec1(0, 0, dist(gen));
-        Eigen::Vector3d vec2(0, 0, dist(gen));
+        Eigen::Vector3d vec2(0, 0, dist_acc(gen));
         return std::make_pair(vec1, vec2);
     }
 }
@@ -883,11 +888,7 @@ UnSteadyVectorField2D reconstructKillingDeformedUnsteadyField(std::function<Eige
 // number of result traing data = Nparamters * samplePerParameters * observerPerSetting;dataSetSplitTag should be "train"/"test"/"validation"
 void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string in_root_fodler, const std::string dataSetSplitTag)
 {
-#if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
-    auto policy = std::execution::seq;
-#else
-    auto policy = std::execution::par_unseq;
-#endif
+
     // check datasplittag is "train"/"test"/"validation"
     if (dataSetSplitTag != "train" && dataSetSplitTag != "test" && dataSetSplitTag != "validation") {
         printf("dataSetSplitTag should be \"train\"/\"test\"/\"validation\"");
@@ -913,6 +914,8 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
     std::normal_distribution<double> genSy(0, 2.24);
     std::normal_distribution<double> genTx(0.0, 1.34);
     std::normal_distribution<double> genTy(0.0, 1.27);
+    double minMagintude = INFINITY;
+    double maxMagintude = -INFINITY;
 
     for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
         const double rc = params.first;
@@ -933,23 +936,6 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
         std::string task_licfolder = root_folder + Major_task_Licfoldername;
         if (!filesystem::exists(task_licfolder)) {
             filesystem::create_directories(task_licfolder);
-        }
-        // create Root meta json file, save plane information here instead of every sample's meta file
-        string taskFolder_rootMetaFilename = task_folder + "meta.json";
-        // save root meta info:
-        std::ofstream root_jsonOut(taskFolder_rootMetaFilename);
-        if (!root_jsonOut.good()) {
-            printf("couldn't open file: %s", taskFolder_rootMetaFilename.c_str());
-            return;
-        } else {
-            cereal::JSONOutputArchive archive_o(root_jsonOut);
-            archive_o(CEREAL_NVP(Xdim));
-            archive_o(CEREAL_NVP(Ydim));
-            archive_o(CEREAL_NVP(unsteadyFieldTimeStep));
-            archive_o(CEREAL_NVP(domainMinBoundary));
-            archive_o(CEREAL_NVP(domainMaxBoundary));
-            archive_o(CEREAL_NVP(tmin));
-            archive_o(CEREAL_NVP(tmax));
         }
 
         std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
@@ -995,6 +981,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 // reconstruct unsteady field from observer field
                 auto reconstruct_field = Tobias_reconstructUnsteadyField(unsteady_field, abc, abc_dot);
 #ifdef VALIDATE_RECONSTRUCTION_RESULT
+
                 // //validate reconstruction result
                 for (size_t rec = 0; rec < unsteadyFieldTimeStep; rec++) {
                     const auto& reconstruct_slice = reconstruct_field.field[rec];
@@ -1044,6 +1031,12 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     }
                     auto rawUnsteadyFieldData = flatten3DAs1Dfloat(unsteady_field.field);
                     auto [minV, maxV] = computeMinMax(rawUnsteadyFieldData);
+                    if (minV < minMagintude) {
+                        minMagintude = minV;
+                    }
+                    if (maxV > maxMagintude) {
+                        maxMagintude = maxV;
+                    }
                     // save meta info:
                     std::ofstream jsonOut(metaFilename);
                     if (!jsonOut.good()) {
@@ -1060,8 +1053,6 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
 
                         archive_o(cereal::make_nvp("observer_abc", abc));
                         archive_o(cereal::make_nvp("observer_abc_dot", abc_dot));
-                        archive_o(CEREAL_NVP(minV));
-                        archive_o(CEREAL_NVP(maxV));
 
                         std::vector<double> thetaObserver;
                         thetaObserver.reserve(unsteadyFieldTimeStep);
@@ -1097,8 +1088,30 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                 }
 #endif
             } // for (size_t observerIndex = 0..)
+
         } // for sample
     });
+
+    // create Root meta json file, save plane information here instead of every sample's meta file
+    string taskFolder_rootMetaFilename = root_folder + "meta.json";
+    // save root meta info:
+    std::ofstream root_jsonOut(taskFolder_rootMetaFilename);
+    if (!root_jsonOut.good()) {
+        printf("couldn't open file: %s", taskFolder_rootMetaFilename.c_str());
+        return;
+    } else {
+        cereal::JSONOutputArchive archive_o(root_jsonOut);
+        archive_o(CEREAL_NVP(Xdim));
+        archive_o(CEREAL_NVP(Ydim));
+        archive_o(CEREAL_NVP(unsteadyFieldTimeStep));
+        archive_o(CEREAL_NVP(domainMinBoundary));
+        archive_o(CEREAL_NVP(domainMaxBoundary));
+        archive_o(CEREAL_NVP(tmin));
+        archive_o(CEREAL_NVP(tmax));
+        // save min and max
+        archive_o(cereal::make_nvp("minV", minMagintude));
+        archive_o(cereal::make_nvp("maxV", maxMagintude));
+    }
 }
 
 void testCriterion()
@@ -1213,3 +1226,158 @@ void testCriterion()
 //        saveAsPNG(outputTexturesObservedField[i], licFilename);
 //    }
 //}
+
+// reproduce paper : Vortex Boundary Identification using Convolutional Neural Network
+void GenerateSteadyVortexBoundary(int Nparamters, int samplePerParameters, const std::string in_root_fodler, const std::string dataSetSplitTag)
+{
+
+    // check datasplittag is "train"/"test"/"validation"
+    if (dataSetSplitTag != "train" && dataSetSplitTag != "test" && dataSetSplitTag != "validation") {
+        printf("dataSetSplitTag should be \"train\"/\"test\"/\"validation\"");
+        return;
+    }
+    int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
+    std::string root_folder = in_root_fodler + "/X" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "Steady/" + dataSetSplitTag + "/";
+    if (!filesystem::exists(root_folder)) {
+        filesystem::create_directories(root_folder);
+    }
+    Eigen::Vector2d gridInterval = {
+        (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
+        (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
+    };
+    const auto paramters = generateNParamters(Nparamters, dataSetSplitTag);
+    std::normal_distribution<double> genTheta(0.0, 0.50); // rotation angle's distribution
+    // normal distribution from supplementary material of Vortex Boundary Identification Paper
+    std::normal_distribution<double> genSx(0, 3.59);
+    std::normal_distribution<double> genSy(0, 2.24);
+    std::normal_distribution<double> genTx(0.0, 1.34);
+    std::normal_distribution<double> genTy(0.0, 1.27);
+    double minMagintude = INFINITY;
+    double maxMagintude = -INFINITY;
+
+    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
+        const double rc = params.first;
+        const double n = params.second;
+        std::string str_Rc = trimNumString(std::to_string(rc));
+        std::string str_n = trimNumString(std::to_string(n));
+        VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
+        printf("generate %d sample for rc=%f , n=%f \n", numVelocityFields, rc, n);
+        const string Major_task_foldername = "velocity_rc_" + str_Rc + "n_" + str_n + "/";
+        const string Major_task_Licfoldername = Major_task_foldername + "/LIC/";
+        std::string task_folder = root_folder + Major_task_foldername;
+        if (!filesystem::exists(task_folder)) {
+            filesystem::create_directories(task_folder);
+        }
+        std::string task_licfolder = root_folder + Major_task_Licfoldername;
+        if (!filesystem::exists(task_licfolder)) {
+            filesystem::create_directories(task_licfolder);
+        }
+
+        std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
+        for (size_t sample = 0; sample < numVelocityFields; sample++) {
+            // the type of this sample(divergence,cw vortex, cc2 vortex)
+            auto Si = static_cast<VastisVortexType>(sample % 3);
+
+            const auto theta = genTheta(rngSample);
+            auto sx = genSx(rngSample);
+            auto sy = genSy(rngSample);
+            while (sx * sy == 0.0) {
+                sx = genSx(rngSample);
+                sy = genSy(rngSample);
+            }
+
+            auto tx = genTx(rngSample);
+            auto ty = genTy(rngSample);
+            // clamp tx ty to 0.5*domian
+            tx = std::clamp(tx, 0.3 * domainMinBoundary.x(), 0.3 * domainMaxBoundary.x());
+            ty = std::clamp(ty, 0.3 * domainMinBoundary.y(), 0.3 * domainMaxBoundary.y());
+            Eigen::Vector2d txy = { tx, ty };
+
+            Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
+            const SteadyVectorField2D steadyField = generator.generateSteadyField_VortexBoundaryVIS2020(tx, ty, sx, sy, theta, Si);
+            const std::vector<std::vector<Eigen::Vector2d>>& steadyFieldResData = steadyField.field;
+
+            printf(".");
+            const int taskSampleId = sample;
+            const string vortexTypeName = string { magic_enum::enum_name<VastisVortexType>(Si) };
+            const string sample_tag_name
+                = "sample_" + to_string(taskSampleId) + vortexTypeName;
+
+#ifdef RENDERING_LIC_SAVE_DATA
+
+            {
+                auto outputSteadyTexture = LICAlgorithm(steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+                // add segmentation visualization for steady lic
+                Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
+                deformMat(0, 0) = sx * cos(theta);
+                deformMat(0, 1) = -sy * sin(theta);
+                deformMat(1, 0) = sx * sin(theta);
+                deformMat(1, 1) = sy * cos(theta);
+                // addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy, deformMat);
+                string steadyField_name = "steady_";
+                string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
+                saveAsPNG(outputSteadyTexture, licFilename0);
+
+                auto rawSteadyFieldData = flatten2DAs1Dfloat(steadyField.field);
+                auto [minV, maxV] = computeMinMax(rawSteadyFieldData);
+                if (minV < minMagintude) {
+                    minMagintude = minV;
+                }
+                if (maxV > maxMagintude) {
+                    maxMagintude = maxV;
+                }
+
+                string metaFilename = task_folder + sample_tag_name + "meta.json";
+                string velocityFilename = task_folder + sample_tag_name + ".bin";
+                // save meta info:
+                std::ofstream jsonOut(metaFilename);
+                if (!jsonOut.good()) {
+                    printf("couldn't open file: %s", metaFilename.c_str());
+                    return;
+                }
+                {
+                    cereal::JSONOutputArchive archive_o(jsonOut);
+
+                    Eigen::Vector3d deform = { theta, sx, sy };
+                    archive_o(cereal::make_nvp("n_rc_Si", n_rc_si));
+                    archive_o(cereal::make_nvp("txy", txy));
+                    archive_o(cereal::make_nvp("deform_theta_sx_sy", deform));
+                }
+                // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
+                jsonOut.close();
+
+                std::ofstream outBin(velocityFilename, std::ios::binary);
+                if (!outBin.good()) {
+                    printf("couldn't open file: %s", velocityFilename.c_str());
+                    return;
+                }
+                cereal::BinaryOutputArchive archive_Binary(outBin);
+                archive_Binary(rawSteadyFieldData);
+                outBin.close();
+            }
+#endif
+
+        } // for sample
+    });
+
+    // create Root meta json file, save plane information here instead of every sample's meta file
+    string taskFolder_rootMetaFilename = root_folder + "meta.json";
+    // save root meta info:
+    std::ofstream root_jsonOut(taskFolder_rootMetaFilename);
+    if (!root_jsonOut.good()) {
+        printf("couldn't open file: %s", taskFolder_rootMetaFilename.c_str());
+        return;
+    } else {
+        cereal::JSONOutputArchive archive_o(root_jsonOut);
+        archive_o(CEREAL_NVP(Xdim));
+        archive_o(CEREAL_NVP(Ydim));
+        archive_o(CEREAL_NVP(unsteadyFieldTimeStep));
+        archive_o(CEREAL_NVP(domainMinBoundary));
+        archive_o(CEREAL_NVP(domainMaxBoundary));
+        archive_o(CEREAL_NVP(tmin));
+        archive_o(CEREAL_NVP(tmax));
+        // save min and max
+        archive_o(cereal::make_nvp("minV", minMagintude));
+        archive_o(cereal::make_nvp("maxV", maxMagintude));
+    }
+}

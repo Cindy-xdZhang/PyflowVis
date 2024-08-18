@@ -9,12 +9,12 @@
 
 //  #define DISABLE_CPP_PARALLELISM
 //   define execute policy
+namespace {
 #if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
 auto policy = std::execution::seq;
 #else
 auto policy = std::execution::par_unseq;
 #endif
-namespace {
 
 std::mt19937 rng(static_cast<unsigned int>(std::time(0)));
 

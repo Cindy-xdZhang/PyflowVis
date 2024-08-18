@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from FLowUtils.VectorField2d import *
-from FLowUtils.FlowReader import read_rootMetaGridresolution,loadOneFlowEntryRawData
+from FLowUtils.FlowReader import loadOneFlowEntryRawData,read_rootMetaGridresolution
 import torch,time,tqdm
 import torchvision.transforms as transforms
 class AddGaussianNoise(object):
@@ -48,95 +48,70 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         self.preLoading(mode)
     def setTransform(self,transform):
         self.transform=transform
-    def getBinaryName(self,sampleIdx):        
+    def getSampleName(self,sampleIdx):        
         return self.dataName[sampleIdx]
 
+    def readRootMetaInfo(self,rootFolder):
+        if self.dastasetMetaInfo=={}:
+            folder_meta_file = os.path.join(rootFolder, 'meta.json')
+            #   {"Xdim":Xdim,"Ydim":Ydim,"time_steps":time_steps,"dominMinBoundary":dominMinBoundary,"dominMaxBoundary":dominMaxBoundary,"tmin":tmin,"tmax":tmax}
+            self.dastasetMetaInfo=read_rootMetaGridresolution(folder_meta_file)
     
     def loadOneTaskFolder(self,sub_folder:str):
-        if self.dastasetMetaInfo=={}:
-            folder_meta_file = os.path.join(sub_folder, 'meta.json')
-            Xdim,Ydim,time_steps,dominMinBoundary,dominMaxBoundary,tmin,tmax=read_rootMetaGridresolution(folder_meta_file)
-            self.dastasetMetaInfo={"Xdim":Xdim,"Ydim":Ydim,"time_steps":time_steps,"dominMinBoundary":dominMinBoundary,"dominMaxBoundary":dominMaxBoundary,"tmin":tmin,"tmax":tmax}
-
-        Xdim,Ydim,time_steps=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"],self.dastasetMetaInfo["time_steps"]
+        Xdim,Ydim,time_steps=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"],self.dastasetMetaInfo["unsteadyFieldTimeStep"]
         #find all *.bin data in this subfoder
         binFiles = [f for f in os.listdir(sub_folder) if f.endswith('.bin')]
+        minV,maxV=   self.dastasetMetaInfo['minV'],self.dastasetMetaInfo['maxV']
         for binFile in binFiles:
             binPath=os.path.join(sub_folder,binFile)
             loadField, labelReferenceFrame,vortexlabel=loadOneFlowEntryRawData(binPath, Xdim,Ydim,time_steps)
+
             # timesteps=loadField.shape[0]
-            # dataSlice shape is [ depth(timsteps)=7, W=64, H=64, chanel=2]
-            # need  transpose to [ chanel=2, W=64, H=64, depth(timsteps)=7] to feed conv3D
+            # dataSlice shape is [ depth(timsteps), W, H, chanel=2]
+            # need  transpose to [ chanel=2, W, H, depth(timsteps)=7] to feed conv3D
             dataSlice=torch.tensor(loadField).transpose(0, 3)
+            # if ForceNormalization:
+            dataSlice = (dataSlice -minV) / ( maxV-minV)
             self.data.append(dataSlice)
+            self.labelReferenceFrame.append(torch.tensor(labelReferenceFrame))
+            self.labelVortex.append(torch.tensor(vortexlabel))#vortexlabel=[tx,ty,n,rc,minv,maxv] 
+
             if self.mode=="test":
-                self.dataName.append(keep_last_n_levels(binPath,1))
-                
-            labelReferenceFrame=torch.tensor(labelReferenceFrame)
-            self.labelReferenceFrame.append(labelReferenceFrame)
-            self.labelVortex.append(torch.tensor(vortexlabel))#vortexlabel=[tx,ty,n,rc] 
+                self.dataName.append(keep_last_n_levels(binPath,2))
             
-            #uncomment code if you need  split vectorfield according to slicePerData             
-            # TimeWindowCount=timesteps//self.slicePerData
-            # for i in range(0,TimeWindowCount):
-            #     sliceStart=i*self.slicePerData
-            #     sliceEnd=(i+1)*self.slicePerData
-            #     dataSlice=torch.tensor(loadField[sliceStart:sliceEnd])
-            #     # dataSlice shape is [(batch_size,) depth(timsteps)=7, W=64, H=64, chanel=2]
-            #     # need  transpose to [(batch_size,)  chanel=2, W=64, H=64, depth(timsteps)=7] to feed conv3D
-            #     vectorFieldDataSlice = dataSlice.transpose(0, 3)
-            #     self.data.append(vectorFieldDataSlice)
-            #     Qt, tc=torch.tensor( labelReferenceFrame[0][sliceStart:sliceEnd,:]),torch.tensor(labelReferenceFrame[1][sliceStart:sliceEnd,:])
-            #     #Qt shape is [  time_steps,4], ct shape is [ time_steps,2],concat to [time_steps,6]->reshape to [6*time_steps]
-            #     labelQtctSlice = torch.concat((Qt, tc), dim=1).reshape(-1)
-            #     self.labelReferenceFrame.append(labelQtctSlice)
-            #     self.labelVortex.append(vortexlabel)#vortexlabel=[tx,ty,n,rc] 
+        
 
     def preLoading(self,mode):                
         start = time.time()         
-        if mode=="train":
-            print("Preloading training data......")
-            #train_directory_path should be  the direct parent folder of all "rc_xxxx_n_xxx"  folders
-            train_directory_path=os.path.join(self.directory_path,"train")
-            rc_n_subfoders=os.listdir(train_directory_path)
-            for folder_name in tqdm.tqdm(rc_n_subfoders) :                
-                if "test" not in folder_name and "val" not in folder_name:                
-                    sub_folder=os.path.join(train_directory_path,folder_name)
-                    self.loadOneTaskFolder(sub_folder)          
-
-        elif mode=="val" or mode=="validation": 
-            print("Preloading validation  data......")
-            val_directory_path=os.path.join(self.directory_path,"validation")
-            rc_n_subfoders=os.listdir(val_directory_path)
-            for folder_name in tqdm.tqdm(rc_n_subfoders) :
-                val_splict_sub_folder=os.path.join(val_directory_path,folder_name)    
-                self.loadOneTaskFolder(val_splict_sub_folder)            
-
-        elif mode=="test":
-            print("Preloading test data......")
-            test_directory_path=os.path.join(self.directory_path,"test")
-            rc_n_subfoders=os.listdir(test_directory_path)
-            for folder_name in tqdm.tqdm(rc_n_subfoders) :
-                test_splict_sub_folder=os.path.join(test_directory_path,folder_name)    
-                self.loadOneTaskFolder(test_splict_sub_folder)                  
-
-
+        print(f"Preloading [{mode}] data......")
+        #train_directory_path should be  the direct parent folder of all "rc_xxxx_n_xxx"  folders
+        train_directory_path=os.path.join(self.directory_path,mode)
+        self.readRootMetaInfo(train_directory_path)
+        rc_n_subfoders=os.listdir(train_directory_path)
+        for folder_name in tqdm.tqdm(rc_n_subfoders) :    
+                if folder_name    == "meta.json":
+                    continue            
+                sub_folder=os.path.join(train_directory_path,folder_name)
+                self.loadOneTaskFolder(sub_folder)          
         #logging dataset information    and time consuming of preloading data
         elapsed = time.time()
         elapsed = elapsed - start
         print("Preloading data......done")
-        print(f"Total number of data:{len(self.data)}, took {elapsed} seconds")
+        print(f"Total number of f{mode} data:{len(self.data)}, took {elapsed} seconds")
         
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
         sample=self.data[idx]
         # if self.transform:
-        #     sample=self.transform(self.data[idx])  
-        noise = np.random.normal(0, 0.05, sample.shape)  # Mean=0, Std=0.1, adjust the std value as needed
-        noise = np.clip( noise.astype(np.float32), -0.01, 0.01)  # Clip noise to be within the range (-0.1, 0.1)
+        #     sample=self.transform(self.data[idx])
+        #  # Generate white noise
+        noise = np.random.uniform(-0.02, 0.02, sample.shape).astype(np.float32)  # Generate noise within the range [-0.01, 0.01]
+        # Add the white noise to the sample
         sample_with_noise = sample + noise
-        return sample_with_noise, self.labelReferenceFrame[idx],self.labelVortex[idx]
+        return sample_with_noise , self.labelReferenceFrame[idx],self.labelVortex[idx]
+  
+
 
 def buildDataset(args,mode="train"):
     ds=UnsteadyVastisDataset(args['root'],mode)

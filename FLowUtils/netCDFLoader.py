@@ -184,13 +184,3 @@ class NetCDFLoader:
 
         return vector_field
     
-    
-def test_NetCDFLoader():
-    file_path = 'C:\\Users\\zhanx0o\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowCDFdata\\tornado3d.nc'
-    variable_names = ['u', 'v', 'w']
-    vector_field = NetCDFLoader.load_vector_field(file_path, variable_names)
-    print(vector_field.Xdim, vector_field.Ydim, vector_field.Zdim)
-    
-    
-if __name__ == '__main__':
-    test_NetCDFLoader()

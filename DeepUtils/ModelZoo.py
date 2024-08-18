@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 def init_weights(m):
     if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d) or isinstance(m, nn.Conv3d):
-        torch.nn.init.xavier_uniform_(m.weight)
+        torch.nn.init.kaiming_normal_(m.weight)
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
 def get_git_commit_id():
@@ -108,7 +108,7 @@ class CNN3D(nn.Module):
 class TobiasReferenceFrameCNN(nn.Module):
     """ RoboustReferenceFrameCNN is the CNN model from paper: Robust Reference Frame Extraction from Unsteady 2D Vector Fields with Convolutional Neural Networks
     """
-    def __init__(self,inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize):
+    def __init__(self,inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize=64, dropout=0.1):
         super(TobiasReferenceFrameCNN, self).__init__()
         # the input tensor of Conv3d should be in the shape of[batch_size, chanel=2,W=16, H=16, depth(timsteps)]
         self.conv1_1 = nn.Conv3d(in_channels=inputChannels, out_channels=hiddenSize, kernel_size=3, stride=2,padding=1)
@@ -118,34 +118,34 @@ class TobiasReferenceFrameCNN(nn.Module):
         self.bn2_1 = nn.BatchNorm3d(hiddenSize*2)
 
         lastCnnOuputChannel=1024
-        self.conv3_1 = nn.Conv3d(in_channels=hiddenSize*2, out_channels=lastCnnOuputChannel, kernel_size=3, stride=2,padding=1)
-        self.bn3_1 = nn.BatchNorm3d(lastCnnOuputChannel)
+        # self.conv3_1 = nn.Conv3d(in_channels=hiddenSize*2, out_channels=lastCnnOuputChannel, kernel_size=3, stride=2,padding=1)
+        # self.bn3_1 = nn.BatchNorm3d(lastCnnOuputChannel)
 
         self.flatten = nn.Flatten()
-        DataSizeX = DataSizeX // 8
-        DataSizeY = DataSizeY // 8
-        TimeSteps = 1#(5+1/2=3,3+1/2=2)
+        DataSizeX = DataSizeX // 4
+        DataSizeY = DataSizeY // 4
+        TimeSteps = 2#(5+1/2=3,3+1/2=2)
         # Fully connected layer
-        self.fc1 = nn.Linear(lastCnnOuputChannel * DataSizeX * DataSizeY * TimeSteps, 1024)
+        self.fc1 = nn.Linear(hiddenSize*2 * DataSizeX * DataSizeY * TimeSteps, 1024)
         self.bn_fc_1 = nn.BatchNorm1d(1024)
         self.fc2 = nn.Linear(1024, 512)
         self.bn_fc_2 = nn.BatchNorm1d(512)
         self.fc3 = nn.Linear(512, ouptputDim)
-        self.bn_fc_3 = nn.BatchNorm1d(ouptputDim)
-        self.dropout_fc = nn.Dropout(0.1)
+        # self.bn_fc_3 = nn.BatchNorm1d(ouptputDim)
+        self.dropout_fc = nn.Dropout(dropout)
         self.outputDim=ouptputDim
         
 
     def forward(self, x):
         x = F.relu(self.bn1_1(self.conv1_1(x)))
         x = F.relu(self.bn2_1(self.conv2_1(x)))
-        x = F.relu(self.bn3_1(self.conv3_1(x)))
+        # x = F.relu(self.bn3_1(self.conv3_1(x)))
 
 
         x = self.flatten(x)
         x = self.dropout_fc(F.relu(self.bn_fc_1(self.fc1(x))))
         x = self.dropout_fc(F.relu(self.bn_fc_2(self.fc2(x)))) 
-        x = self.dropout_fc(F.relu(self.bn_fc_3(self.fc3(x))))
+        x =self.fc3(x)
         return x
 
 

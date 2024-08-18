@@ -12,5 +12,5 @@ void testKillingTransformationForRFC();
 // number of result traing data = Nparamters * samplePerParameters * observerPerSetting
 
 void generateUnsteadyField(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string in_root_fodler, const std::string dataSetSplitTag);
-
+void GenerateSteadyVortexBoundary(int Nparamters, int samplePerParameters, const std::string in_root_fodler, const std::string dataSetSplitTag);
 void testCriterion();
