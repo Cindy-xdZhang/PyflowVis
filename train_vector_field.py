@@ -4,11 +4,13 @@ import torch.optim as optim
 from FLowUtils.LicRenderer import *
 from FLowUtils.VectorField2d import UnsteadyVectorField2D,SteadyVectorField2D
 from FLowUtils.GlyphRenderer import *
-from DeepUtils.VastisDataset import buildDataset
-from DeepUtils.ModelZoo import *
 from DeepUtils.MiscFunctions import *
 import logging,random,wandb
 import torchsummary
+
+from DeepUtils.models import build_model_from_cfg
+from DeepUtils.optim import build_optimizer_from_cfg
+from DeepUtils.dataset import build_dataloader_from_cfg,getDatasetRootaMeta
 
 GLOBAL_WANDB_PROJECT_NAME="DeepVortexExtraction"
 initLogging()
@@ -25,62 +27,64 @@ initLogging()
 #? - [ ]  TODO: curvature gradient
 #? - [ ]  TODO: implement hanger of imgui widget
 
-def runNameTagGenerator(config) ->(str,list[:str]):
-    seed=config['training']['random_seed']
-    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    runName = f"{config['network']['family_name']}_{config['training']['epochs']}_{config['training']['learning_rate']}_{current_time}_seed_{seed}"
-    
-    tagGen0=config['dataset']['root'].split("\\")[-1]
-    tagGen1=config['network']['family_name']
-    runTags= [tagGen0,tagGen1]
-    return runName,runTags
     
 
-def validate(model, data_loader, device) -> float:
+def validate(model, val_data_loader, device) -> float:
     model.eval()
     val_loss = 0
     # val_rec_loss = 0
     with torch.no_grad():
-         for batch_idx, (vectorFieldImage, labelQtct, labelVortex) in enumerate(data_loader):
-            vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
-            predictQtCt= model(vectorFieldImage)
-            loss = F.mse_loss(predictQtCt, labelQtct)
-            val_loss += loss.item()
-            # val_rec_loss += lossRec.item()
-
-    val_loss /= len(data_loader)
-    # val_rec_loss /= len(data_loader)
+        for batch_idx, (vectorFieldImage, label) in enumerate(val_data_loader):
+                vectorFieldImage,label = vectorFieldImage.to(device), label.to(device)
+                predictition= model(vectorFieldImage)                
+                loss=model.get_loss(predictition,label)
+                val_loss += loss.item()
+    val_loss /= len(val_data_loader)
     model.train()
     return val_loss
 
 
-def test_model(model,config,testDataset=None):
-    device = config['training']['device']
-    if testDataset is None:
-        testDataset=buildDataset(config["dataset"],mode="test")
-
-    test_data_loader= torch.utils.data.DataLoader(testDataset, batch_size=config['training']['batch_size'], shuffle=False)
-    model.eval()
+def test_model(model,cfg):
+    device = cfg['device']
     test_loss = 0
     test_loss_records=[]
-    save_folder=f"./testOutput/{config['run_name']}/"
-    minv,maxv=testDataset.dastasetMetaInfo["minV"],testDataset.dastasetMetaInfo["maxV"]
+    save_folder=f"./testOutput/{cfg['run_name']}/"
+    test_data_loader = build_dataloader_from_cfg(cfg.batch_size,
+                                        cfg.dataset,
+                                        cfg.dataloader,
+                                        datatransforms_cfg=cfg.datatransforms,
+                                        split='test'                                             
+                                        )
+    print(f"length of test dataset: {len(test_data_loader.dataset)}")
+    model.eval()
     with torch.no_grad():
-        for batch_idx, (vectorFieldImage, labelReferenceF, labelVortex) in enumerate(test_data_loader):
-            vectorFieldImage, labelReferenceF = vectorFieldImage.to(device), labelReferenceF.to(device)
-            predictReferenceF= model(vectorFieldImage)
-            loss = F.mse_loss(predictReferenceF, labelReferenceF)
+        correct=0
+        for batch_idx, (vectorFieldImage, label) in enumerate(test_data_loader):
+            vectorFieldImage,label = vectorFieldImage.to(device), label.to(device)
+            predictition= model(vectorFieldImage)                
+            loss=model.get_loss(predictition,label)
             test_loss += loss.item()
             test_loss_records.append(loss.item())
 
+            predicted_classes = torch.argmax(predictition, dim=1)
+            true_classes = torch.argmax(label, dim=1)
+            # Compare and count the number of correct predictions
+            correct += (predicted_classes == true_classes).sum().item()
+
+        precision=float(correct)/float(len(test_data_loader.dataset)-1)
+        logging.info(f"correctly predict {correct} out of {len(test_data_loader.dataset)-1}, precision=f{precision}")
+
         #random select  samples to visualize
-        for i in range(5):
-            sample=random.randint(0,len(testDataset)-1)
-            vectorFieldImage, labelReferenceF, labelVortex=testDataset[sample]
+        for i in range(20):
+            sample=random.randint(0,len(test_data_loader.dataset)-1)
+            vectorFieldImage, labelVortex=test_data_loader.dataset[sample]
             vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
-            predictReferenceF= model(vectorFieldImage)
-            predictReferenceF=predictReferenceF[0].cpu().numpy()
-            logging.info(f"testSample{sample}_predict ReferenceFrame {predictReferenceF}, vs label Ref{  labelReferenceF}__rec")
+            predictition= model(vectorFieldImage)
+            predictition=predictition[0].cpu().numpy()
+            logging.info(f"testSample{sample}_predict  {predictition}, vs label { labelVortex}")
+ 
+
+
      
     test_loss /= len(test_data_loader)
     min_loss,max_loss=min(test_loss_records),max(test_loss_records)
@@ -92,28 +96,22 @@ def test_model(model,config,testDataset=None):
 #MAKE THIS FUNCIION INDENPENT OF THE MODEL
 def train_model(model, data_loader, validation_data_loader, optimizer,config):
     # Initialize training parameters from args
-    training_args=config['training']
-    epochs = training_args['epochs']
-    device = training_args['device']
-    valiate_every=training_args['validateion_frequency']
-    run_Name=config['run_name']
+    epochs,device,valiate_every,run_Name=config['epochs'],config['device'],config['val_freq'],config['run_name']
+    total_iterations,oom_time,best_val_loss=0,0,float('inf')
     model.to(device)
-    total_iterations = 0
-    oom_time=0
-    best_val_loss = float('inf')
     for epoch in range(epochs):
         epoch_loss = 0
         try:
-            for batch_idx, (vectorFieldImage, labelQtct, labelVortex) in enumerate(data_loader):
-                vectorFieldImage, labelQtct = vectorFieldImage.to(device), labelQtct.to(device)
-                predictQtCt= model(vectorFieldImage)
-                loss = F.mse_loss(predictQtCt, labelQtct)
+            for batch_idx, (vectorFieldImage, label) in enumerate(data_loader):
+                vectorFieldImage,label = vectorFieldImage.to(device), label.to(device)
+                predictition= model(vectorFieldImage)                
+                loss=model.get_loss(predictition,label)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
                 total_iterations += 1
-                if batch_idx % training_args['print_frequency'] == 0:
+                if batch_idx % config['print_freq'] == 0:
                     logging.info(f'Epoch {epoch+1}, iter {batch_idx+1}, total_iterations: {total_iterations}. Loss: {loss.item()}.')
                     if config['wandb']:
                         wandb.log({"train_loss": loss.item(),  "total_iterations": total_iterations})
@@ -128,17 +126,17 @@ def train_model(model, data_loader, validation_data_loader, optimizer,config):
                 if config['wandb']:
                     wandb.log({"epoch": epoch+1,  "epoch_Loss": epoch_loss, "val_loss": val_loss})
                 #save best model 
-                if val_loss < best_val_loss and training_args['save_model'] :
+                if val_loss < best_val_loss and config['save_freq']>0 :
                     best_val_loss = val_loss
-                    saving_path= os.path.join(training_args['save_model_path'],run_Name) 
+                    saving_path= os.path.join(config['save_model_path'],run_Name) 
                     save_checkpoint({
                         'epoch': epoch + 1,
                         'state_dict': model.state_dict(),
                         'optimizer': optimizer.state_dict(),
                     }, folder_name=saving_path, checkpoint_name= f'best_checkpoint.pth.tar')
                 #periodically save model
-                if  training_args['save_model'] and epoch % training_args["save_model_frequency"]== 0 and epoch>0:
-                    saving_path= os.path.join(training_args['save_model_path'],run_Name) 
+                if  config['save_freq']>0 and epoch % config["save_freq"]== 0 and epoch>0:
+                    saving_path= os.path.join(config['save_model_path'],run_Name) 
                     save_checkpoint({
                         'epoch': epoch + 1,
                         'state_dict': model.state_dict(),
@@ -167,77 +165,73 @@ def train_model(model, data_loader, validation_data_loader, optimizer,config):
 
 
 def train_pipeline():
-    config=argParse()
-    config['training']['random_seed']=torch.seed()
-    config["gitInfo"]=get_git_commit_id()
-    run_Name,runTags=runNameTagGenerator(config)
-    config['run_name']=run_Name
-    # Initialize wandb
-    if config['wandb']:
-        run=wandb.init(project=GLOBAL_WANDB_PROJECT_NAME,
-                    name=run_Name,
-                    tags=runTags,
-                    config=config)
-        arti_code=wandb.Artifact("code", type="code")
-        arti_code=CollectWandbLogfiles(arti_code)
-        wandb.log_artifact(arti_code) 
-    logging.info(config,f"run name: {run_Name}, run tags: {runTags}")
+    try:
+        cfg=argParse()
+        cfg['random_seed']=torch.seed()
+        cfg["gitInfo"]=get_git_commit_id()
+        run_Name,runTags=runNameTagGenerator(cfg)
+        cfg['run_name']=run_Name
+        # Initialize wandb
+        if cfg['wandb']:
+            run=wandb.init(project=GLOBAL_WANDB_PROJECT_NAME,
+                        name=run_Name,
+                        tags=runTags,
+                        config=cfg)
+            arti_code=wandb.Artifact("code", type="code")
+            arti_code=CollectWandbLogfiles(arti_code)
+            wandb.log_artifact(arti_code) 
+        print_args(cfg)
+        logging.info(f"run name: {run_Name}, run tags: {runTags}")
 
+        model = build_model_from_cfg(cfg.model)
+        model.to(cfg['device'])
+        # build dataset        
+        rootInfo=getDatasetRootaMeta(cfg.dataset['data_dir'])
+        # torchsummary.summary(model, (2, xdim, ydim, timesteps))
+        torchsummary.summary(model, (2, rootInfo["Xdim"], rootInfo["Ydim"]))
 
+        if isinstance(cfg.datatransforms['kwargs'], dict):   
+            cfg.datatransforms['kwargs'].update(rootInfo) 
+        else: 
+            cfg.datatransforms['kwargs']= rootInfo
 
-    #build data loader using the dataset and args
-    training_args=config['training']
-    train_VastisDataset=buildDataset(config["dataset"],mode="train")   
-    config["dataset"].update(train_VastisDataset.dastasetMetaInfo)  
-    xdim, ydim,timesteps= config["dataset"]["Xdim"],config["dataset"]["Ydim"],config["dataset"]["unsteadyFieldTimeStep"]
-    validationDataset=buildDataset(config["dataset"],mode="validation")       
-    data_loader = torch.utils.data.DataLoader(train_VastisDataset, batch_size=training_args['batch_size'], shuffle=training_args['shuffle'], num_workers=training_args['num_workers'], pin_memory=training_args['pin_memory'])
-    validation_data_loader= torch.utils.data.DataLoader(validationDataset, batch_size=training_args['batch_size'], shuffle=False)
-    
+        train_loader = build_dataloader_from_cfg(cfg.batch_size,
+                                                cfg.dataset,
+                                                cfg.dataloader,
+                                                datatransforms_cfg=cfg.datatransforms,
+                                                split='train'                                             
+                                                )
+        print(f"length of training dataset: {len(train_loader.dataset)}")
 
+        val_loader = build_dataloader_from_cfg(cfg.batch_size,
+                                                cfg.dataset,
+                                                cfg.dataloader,
+                                                datatransforms_cfg=cfg.datatransforms,
+                                                split='val'                                             
+                                                )
+        print(f"length of val dataset: {len(val_loader.dataset)}")
 
-    # Initialize the model
-    model = TobiasReferenceFrameCNN(2,  xdim, ydim, timesteps, ouptputDim=6, hiddenSize=config['network']['hidden_size'],dropout=config['network']['dropout'])
-    model.apply(init_weights)  
-    model.to(training_args['device'])
-    torchsummary.summary(model, (2, xdim, ydim, timesteps))
+      
+       # optimizer & scheduler
+        optimizer = build_optimizer_from_cfg(model, lr=cfg.lr, **cfg.optimizer)
 
-    # Initialize the optimizer with L2 regularization
-    optimizer = optim.Adam(model.parameters(), lr= training_args['learning_rate'], weight_decay=training_args['weight_decay'])
+        # Training
+        best_val_loss=train_model(model, train_loader, val_loader, optimizer,cfg)
+        #final test 
+        avgtest_loss,mintest_error,maxtest_error=test_model(model,cfg)
 
-    # Training
-    best_val_loss=train_model(model, data_loader, validation_data_loader, optimizer,config)
-    #final test 
-    avgtest_loss,mintest_error,maxtest_error=test_model(model,config=config)
-    if config['wandb']:
-        wandb.summary.update({"best_val_loss": best_val_loss})
-        wandb.summary.update({"avg_test_loss": avgtest_loss})
-        wandb.summary.update({"min_test_error": mintest_error})
-        wandb.summary.update({"max_test_error": maxtest_error})
-        wandb.finish()
+        if cfg['wandb']:
+            wandb.summary.update({"best_val_loss": best_val_loss})
+            wandb.summary.update({"avg_test_loss": avgtest_loss})
+            wandb.summary.update({"min_test_error": mintest_error})
+            wandb.summary.update({"max_test_error": maxtest_error})
+            wandb.finish()
 
-
-
-
-
-def test(checkpoint_path):
-    config = load_config("config\\cfgs\\config.yaml")
-    device = config['training']['device']
-    test_dataset=buildDataset(config["dataset"],mode="test")   
-    config["dataset"].update(test_dataset.dastasetMetaInfo)  
-    config['run_name']=checkpoint_path.split(".pth.tar")[0]
-
-    xdim, ydim,timesteps= config["dataset"]["Xdim"],config["dataset"]["Ydim"],config["dataset"]["unsteadyFieldTimeStep"]
-    model = TobiasReferenceFrameCNN(2,  xdim, ydim, timesteps, ouptputDim=6, hiddenSize=config['network']['hidden_size'])
-    model.to(device)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    # Load the last checkpoint
-    load_checkpoint(torch.load(checkpoint_path), model, optimizer)
-    test_model(model,config,test_dataset)
-
-
-
+    except Exception as e:
+        print(e)
+        print("Error loading config file")
+        return
+   
 
 
 

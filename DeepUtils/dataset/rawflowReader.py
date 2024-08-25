@@ -1,11 +1,6 @@
 import json
 import numpy as np
 import os
-from .LicRenderer import LicRenderingUnsteady
-from .VectorField2d import UnsteadyVectorField2D
-
-
-
 
 def read_json_file(filepath):
     if not os.path.exists(filepath):
@@ -16,12 +11,20 @@ def read_json_file(filepath):
 
 def read_rootMetaGridresolution(meta_file):
     metaINFo = read_json_file(meta_file)
-    tmin=metaINFo['tmin']
-    tmax=metaINFo['tmax']    
-    dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"],tmin] 
-    dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"],tmax]
+    if 'tmin' in metaINFo:          
+        tmin=metaINFo['tmin']
+        dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"],tmin] 
+    else:
+        dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"]]
+    if 'tmax' in metaINFo:
+        tmax=metaINFo['tmax']    
+        dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"],tmax]
+    else:
+        dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"]]
     metaINFo['domainMinBoundary']=dominMinBoundary
     metaINFo['domainMaxBoundary']=dominMaxBoundary
+    if 'unsteadyFieldTimeStep' not in metaINFo:
+        metaINFo['unsteadyFieldTimeStep']=1
     return metaINFo
 
 
@@ -33,7 +36,18 @@ def read_binary_file(filepath, dtype=np.float32) -> np.ndarray:
         elif dtype == np.float64:
             data=data[1:]        
     return data
-1
+
+
+
+def loadOneFlowEntryRawDataSteady(binPath,Xdim,Ydim):
+    raw_Binary = read_binary_file(binPath)
+    #get meta information
+    meta_file = binPath.replace('.bin', 'meta.json')
+    metaINFo=read_json_file(meta_file)
+    n,rc,si=metaINFo['n_rc_Si']["value0"],metaINFo['n_rc_Si']["value1"],metaINFo['n_rc_Si']["value2"]
+    fieldData = raw_Binary.reshape( Ydim,Xdim, 2)
+    vortexLabelOneHot= np.array([0.0,1.0],dtype=np.float32) if si==0.0 else np.array([1.0,0.0],dtype=np.float32)
+    return fieldData,vortexLabelOneHot
 
 
 def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
@@ -59,14 +73,10 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
     if raw_Binary.size!=time_steps*Ydim*Xdim* 2:
         raise ValueError(f"Binary data size is not correct, expected {time_steps*
                                                                       Ydim*Xdim* 2}, got {raw_Binary.size}")
-    # if raw_Binary.min() !=metaINFo['minV'] or  raw_Binary.max() !=metaINFo['maxV']:
-    #     raise ValueError(f"Binary data min or max value is not correct, expected {metaINFo['minV']} or {metaINFo['maxV']}, got {fieldData.min()} or {fieldData.max()}")
-
     fieldData = raw_Binary.reshape( time_steps,Ydim,Xdim, 2)
     vortexLableData= np.array([tx,ty,n,rc],dtype=np.float32) 
     referenceLabel= np.array(referenceLabel,dtype=np.float32)
     assert(fieldData.shape[0]==time_steps)
-    
     return fieldData,referenceLabel,vortexLableData
 
 

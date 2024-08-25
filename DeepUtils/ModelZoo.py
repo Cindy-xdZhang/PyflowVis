@@ -6,16 +6,7 @@ def init_weights(m):
         torch.nn.init.kaiming_normal_(m.weight)
         if m.bias is not None:
             torch.nn.init.zeros_(m.bias)
-def get_git_commit_id():
-    import subprocess
-    try:
-        commit_id = subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode("utf-8")
-        is_dirty = subprocess.check_output(["git", "diff"]).decode("utf-8")
-        dirty_suffix = "-dirty" if is_dirty else ""
-        return f"GitCommit-{commit_id}{dirty_suffix}"
-    except subprocess.CalledProcessError:
-        return "Not a git repository"
-    
+
 class CNN3DBNBLock(nn.Module):
     def __init__(self, inputChannels, hiddenSize=64, dropout_prob=0.5):
         self.conv1_1 = nn.Conv3d(in_channels=inputChannels, out_channels=hiddenSize, kernel_size=3, padding=1)
@@ -26,7 +17,6 @@ class CNN3DBNBLock(nn.Module):
         # Conv Block 1
         x = F.relu(self.bn1_1(self.conv1_1(x)))
         x = self.dropout1(x)
-
 
 
 class CNN3D(nn.Module):
@@ -105,53 +95,6 @@ class CNN3D(nn.Module):
         return x
 
 
-class TobiasReferenceFrameCNN(nn.Module):
-    """ RoboustReferenceFrameCNN is the CNN model from paper: Robust Reference Frame Extraction from Unsteady 2D Vector Fields with Convolutional Neural Networks
-    """
-    def __init__(self,inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize=64, dropout=0.1):
-        super(TobiasReferenceFrameCNN, self).__init__()
-        # the input tensor of Conv3d should be in the shape of[batch_size, chanel=2,W=16, H=16, depth(timsteps)]
-        self.conv1_1 = nn.Conv3d(in_channels=inputChannels, out_channels=hiddenSize, kernel_size=3, stride=2,padding=1)
-        self.bn1_1 = nn.BatchNorm3d(hiddenSize)
-        # self.CNNlayerCountN=4-2 #n=log2(max(H,W))-2
-        self.conv2_1 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize*2, kernel_size=3, stride=2,padding=1)
-        self.bn2_1 = nn.BatchNorm3d(hiddenSize*2)
-
-        lastCnnOuputChannel=1024
-        # self.conv3_1 = nn.Conv3d(in_channels=hiddenSize*2, out_channels=lastCnnOuputChannel, kernel_size=3, stride=2,padding=1)
-        # self.bn3_1 = nn.BatchNorm3d(lastCnnOuputChannel)
-
-        self.flatten = nn.Flatten()
-        DataSizeX = DataSizeX // 4
-        DataSizeY = DataSizeY // 4
-        TimeSteps = 2#(5+1/2=3,3+1/2=2)
-        # Fully connected layer
-        self.fc1 = nn.Linear(hiddenSize*2 * DataSizeX * DataSizeY * TimeSteps, 1024)
-        self.bn_fc_1 = nn.BatchNorm1d(1024)
-        self.fc2 = nn.Linear(1024, 512)
-        self.bn_fc_2 = nn.BatchNorm1d(512)
-        self.fc3 = nn.Linear(512, ouptputDim)
-        # self.bn_fc_3 = nn.BatchNorm1d(ouptputDim)
-        self.dropout_fc = nn.Dropout(dropout)
-        self.outputDim=ouptputDim
-        
-
-    def forward(self, x):
-        x = F.relu(self.bn1_1(self.conv1_1(x)))
-        x = F.relu(self.bn2_1(self.conv2_1(x)))
-        # x = F.relu(self.bn3_1(self.conv3_1(x)))
-
-
-        x = self.flatten(x)
-        x = self.dropout_fc(F.relu(self.bn_fc_1(self.fc1(x))))
-        x = self.dropout_fc(F.relu(self.bn_fc_2(self.fc2(x)))) 
-        x =self.fc3(x)
-        return x
-
-
-
-
-
 class ReferenceFrameExtractor(nn.Module):
     def __init__(self,inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize=64):
         super(ReferenceFrameExtractor, self).__init__()
@@ -180,50 +123,9 @@ class ReferenceFrameExtractor(nn.Module):
         #abc_t [batchsize, self.ouptputDim*time_steps]
         abc_t_abcdot_t = self.cnn(image)
         return abc_t_abcdot_t
-        #generate reconstruct steady field
-        #abc_t_reshape [batchsize, 6,  height, width,time_steps]
-        # abc_t_reshape = abc_t.reshape(bs, self.referenceFrameDim, depth).unsqueeze(-2).unsqueeze(-2)
-        # abc_t_reshape_expanded = abc_t_reshape.repeat(1, 1, height,width,1)
-        # vectorFieldwithTransforamtion=torch.concat((image, abc_t_reshape_expanded), dim=1)
-        # rec = self.reconstructor(vectorFieldwithTransforamtion)
-        # return abc_t, rec 
-    
 
 
-        
-class VortexNet(nn.Module):
-    def __init__(self, inputChannels, DataSizeX, DataSizeY, TimeSteps, outputDim, hiddenSize=64):
-        super(VortexNet, self).__init__()
-        
-        self.conv1 = nn.Conv2d(inputChannels, 16, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
-        
-        self.relu = nn.ReLU()
-        
-        # Calculate the size of the flattened features after convolutions
-        self.flatten_size = 64 * (DataSizeX - 4) * (DataSizeY - 4)
-        
-        # Fully connected layers
-        self.fc1 = nn.Linear(self.flatten_size, hiddenSize)
-        self.fc2 = nn.Linear(hiddenSize, outputDim)
 
-    def forward(self, image):
-        # Convolutional layers with ReLU activation
-        x = self.relu(self.conv1(image))
-        x = self.relu(self.conv2(x))
-        x = self.relu(self.conv3(x))
-        x = self.relu(self.conv4(x))
-        
-        # Flatten the output
-        x = x.view(-1, self.flatten_size)
-        
-        # Fully connected layers
-        x = self.relu(self.fc1(x))
-        x = self.fc2(x)
-        
-        return x
 
 
 class DoubleConv(nn.Module):
@@ -297,17 +199,50 @@ class UNet(nn.Module):
 
 
 
+class TobiasReferenceFrameCNN(nn.Module):
+    """ RoboustReferenceFrameCNN is the CNN model from paper: Robust Reference Frame Extraction from Unsteady 2D Vector Fields with Convolutional Neural Networks
+    """
+    def __init__(self,inputChannels, DataSizeX,DataSizeY,TimeSteps,ouptputDim, hiddenSize=64, dropout=0.1):
+        super(TobiasReferenceFrameCNN, self).__init__()
+        # the input tensor of Conv3d should be in the shape of[batch_size, chanel=2,W=16, H=16, depth(timsteps)]
+        self.conv1_1 = nn.Conv3d(in_channels=inputChannels, out_channels=hiddenSize, kernel_size=3, stride=2,padding=1)
+        self.bn1_1 = nn.BatchNorm3d(hiddenSize)
+        # self.CNNlayerCountN=4-2 #n=log2(max(H,W))-2
+        self.conv2_1 = nn.Conv3d(in_channels=hiddenSize, out_channels=hiddenSize*2, kernel_size=3, stride=2,padding=1)
+        self.bn2_1 = nn.BatchNorm3d(hiddenSize*2)
 
-# class VortexClassifier(nn.Module):
-#     def __init__(self):
-#         super(VortexClassifier, self).__init__()
-#         self.reference_frame_extractor = ReferenceFrameExtractor()
-#         self.cnn = CNN()
+        lastCnnOuputChannel=1024
+        # self.conv3_1 = nn.Conv3d(in_channels=hiddenSize*2, out_channels=lastCnnOuputChannel, kernel_size=3, stride=2,padding=1)
+        # self.bn3_1 = nn.BatchNorm3d(lastCnnOuputChannel)
 
-#     def forward(self, image):
-#         reference_frame_abc= self.reference_frame_extractor(image)
-#         image_features = self.cnn(image)
-#         return image_features
+        self.flatten = nn.Flatten()
+        DataSizeX = DataSizeX // 4
+        DataSizeY = DataSizeY // 4
+        TimeSteps = 2#(5+1/2=3,3+1/2=2)
+        # Fully connected layer
+        self.fc1 = nn.Linear(hiddenSize*2 * DataSizeX * DataSizeY * TimeSteps, 1024)
+        self.bn_fc_1 = nn.BatchNorm1d(1024)
+        self.fc2 = nn.Linear(1024, 512)
+        self.bn_fc_2 = nn.BatchNorm1d(512)
+        self.fc3 = nn.Linear(512, ouptputDim)
+        # self.bn_fc_3 = nn.BatchNorm1d(ouptputDim)
+        self.dropout_fc = nn.Dropout(dropout)
+        self.outputDim=ouptputDim
+        
+
+    def forward(self, x):
+        x = F.relu(self.bn1_1(self.conv1_1(x)))
+        x = F.relu(self.bn2_1(self.conv2_1(x)))
+        # x = F.relu(self.bn3_1(self.conv3_1(x)))
 
 
+        x = self.flatten(x)
+        x = self.dropout_fc(F.relu(self.bn_fc_1(self.fc1(x))))
+        x = self.dropout_fc(F.relu(self.bn_fc_2(self.fc2(x)))) 
+        x =self.fc3(x)
+        return x
+
+    def get_loss(self, ret, labelRef,labelVortex) -> torch.Tensor:
+        loss = F.mse_loss(ret, labelVortex)
+        return loss
 

@@ -4,7 +4,7 @@ Basic multi step LR schedule with warmup, noise.
 """
 import torch
 import bisect
-from openpoints.scheduler.scheduler import Scheduler
+from .scheduler import Scheduler
 from typing import List
 
 class MultiStepLRScheduler(Scheduler):

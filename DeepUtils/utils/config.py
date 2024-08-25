@@ -8,11 +8,8 @@ import yaml
 import logging 
 
 
-def print_args(args, printer=logging.info):
-    printer("==========       args      =============")
-    for arg, content in args.__dict__.items():
-        printer("{}:{}".format(arg, content))
-    printer("==========     args END    =============")
+
+
 
 
 class EasyConfig(dict):

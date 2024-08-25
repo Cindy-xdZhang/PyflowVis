@@ -1,21 +1,11 @@
 import numpy as np
 import os
 from FLowUtils.VectorField2d import *
-from FLowUtils.FlowReader import loadOneFlowEntryRawData,read_rootMetaGridresolution
+from DeepUtils.dataset.rawflowReader import loadOneFlowEntryRawData,loadOneFlowEntryRawDataSteady,read_rootMetaGridresolution
 import torch,time,tqdm
-import torchvision.transforms as transforms
-class AddGaussianNoise(object):
-    def __init__(self, mean=0.0, std=0.1):
-        self.mean = mean
-        self.std = std
+from .build import DATASETS
 
-    def __call__(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std + self.mean
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
-    
-def keep_last_n_levels(path,n):
+def keep_path_last_n_names(path,n):
     """
     Keep only the last two levels of the given path.
     
@@ -34,7 +24,8 @@ def keep_last_n_levels(path,n):
     last_two_levels=last_two_levels.replace("\\","_")
     return last_two_levels
 
-# create torch dataset using the load result function:
+
+@DATASETS.register_module()
 class UnsteadyVastisDataset(torch.utils.data.Dataset):
     def __init__(self, directory_path,mode):
         self.directory_path=directory_path
@@ -45,7 +36,9 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         self.transform=[]
         self.dastasetMetaInfo={}
         self.mode=mode
+        self.steady= directory_path.find("Steady")>0 or directory_path.find("steady")>0 
         self.preLoading(mode)
+
     def setTransform(self,transform):
         self.transform=transform
     def getSampleName(self,sampleIdx):        
@@ -64,17 +57,20 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         minV,maxV=   self.dastasetMetaInfo['minV'],self.dastasetMetaInfo['maxV']
         for binFile in binFiles:
             binPath=os.path.join(sub_folder,binFile)
-            loadField, labelReferenceFrame,vortexlabel=loadOneFlowEntryRawData(binPath, Xdim,Ydim,time_steps)
+            if  self.steady:
+                loadField, labelReferenceFrame,vortexlabel=loadOneFlowEntryRawDataSteady(binPath, Xdim,Ydim)
+                dataSlice=torch.tensor(loadField).transpose(0, -1)
+            else:
+                loadField, labelReferenceFrame,vortexlabel=loadOneFlowEntryRawData(binPath, Xdim,Ydim,time_steps) 
+                # timesteps=loadField.shape[0]
+                # dataSlice shape is [ depth(timsteps), W, H, chanel=2]
+                # need  transpose to [ chanel=2, W, H, depth(timsteps)=7] to feed conv3D
+                dataSlice=torch.tensor(loadField).transpose(0, -1)
 
-            # timesteps=loadField.shape[0]
-            # dataSlice shape is [ depth(timsteps), W, H, chanel=2]
-            # need  transpose to [ chanel=2, W, H, depth(timsteps)=7] to feed conv3D
-            dataSlice=torch.tensor(loadField).transpose(0, 3)
-            # if ForceNormalization:
             dataSlice = (dataSlice -minV) / ( maxV-minV)
             self.data.append(dataSlice)
             self.labelReferenceFrame.append(torch.tensor(labelReferenceFrame))
-            self.labelVortex.append(torch.tensor(vortexlabel))#vortexlabel=[tx,ty,n,rc,minv,maxv] 
+            self.labelVortex.append(torch.tensor(vortexlabel))
 
             if self.mode=="test":
                 self.dataName.append(keep_last_n_levels(binPath,2))
@@ -96,8 +92,8 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
         #logging dataset information    and time consuming of preloading data
         elapsed = time.time()
         elapsed = elapsed - start
-        print("Preloading data......done")
-        print(f"Total number of f{mode} data:{len(self.data)}, took {elapsed} seconds")
+        print(f"Preloading  [{mode}] data......done")
+        print(f"Total number of [{mode}] data:{len(self.data)}, took {elapsed} seconds")
         
     def __len__(self):
         return len(self.data)
@@ -115,7 +111,6 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
 
 def buildDataset(args,mode="train"):
     ds=UnsteadyVastisDataset(args['root'],mode)
-    
     return ds
 
 

@@ -4,9 +4,8 @@ Author: PointNeXt
 import numpy as np
 import torch
 from easydict import EasyDict as edict
-from openpoints.utils import registry
-from openpoints.transforms import build_transforms_from_cfg
-
+from ..utils import registry
+from .transforms import build_transforms_from_cfg
 DATASETS = registry.Registry('dataset')
 
 
@@ -46,7 +45,7 @@ def build_dataloader_from_cfg(batch_size,
                               dataloader_cfg=None,
                               datatransforms_cfg=None,
                               split='train',
-                              distributed=True,
+                              distributed=False,
                               dataset=None
                               ):
     if dataset is None:
@@ -56,7 +55,7 @@ def build_dataloader_from_cfg(batch_size,
                 trans_split = 'val'
             else:
                 trans_split = split
-            data_transform = build_transforms_from_cfg(trans_split, datatransforms_cfg)
+            data_transform = build_transforms_from_cfg(trans_split, datatransforms_cfg)            
         else:
             data_transform = None
 
@@ -68,31 +67,32 @@ def build_dataloader_from_cfg(batch_size,
         if split_cfg.get('split', None) is None:    # add 'split' in dataset_split_cfg
             split_cfg.split = split
         split_cfg.transform = data_transform
-        dataset = build_dataset_from_cfg(dataset_cfg.common, split_cfg)
+        dataset_common_cfgs=dataset_cfg.common if hasattr(dataset, 'common') else dataset_cfg
+        dataset = build_dataset_from_cfg(dataset_common_cfgs, split_cfg)
 
     collate_fn = dataset.collate_fn if hasattr(dataset, 'collate_fn') else None
     collate_fn = dataloader_cfg.collate_fn if dataloader_cfg.get('collate_fn', None) is not None else collate_fn
     collate_fn = eval(collate_fn) if isinstance(collate_fn, str) else collate_fn
 
     shuffle = split == 'train'
-    if distributed:
-        sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=shuffle)
-        dataloader = torch.utils.data.DataLoader(dataset,
-                                                 batch_size=batch_size,
-                                                 num_workers=int(dataloader_cfg.num_workers),
-                                                 worker_init_fn=worker_init_fn,
-                                                 drop_last=split == 'train',
-                                                 sampler=sampler,
-                                                 collate_fn=collate_fn, 
-                                                 pin_memory=True
-                                                 )
-    else:
-        dataloader = torch.utils.data.DataLoader(dataset,
-                                                 batch_size=batch_size,
-                                                 num_workers=int(dataloader_cfg.num_workers),
-                                                 worker_init_fn=worker_init_fn,
-                                                 drop_last=split == 'train',
-                                                 shuffle=shuffle,
-                                                 collate_fn=collate_fn,
-                                                 pin_memory=True)
+    # if distributed:
+    #     sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=shuffle)
+    #     dataloader = torch.utils.data.DataLoader(dataset,
+    #                                              batch_size=batch_size,
+    #                                              num_workers=int(dataloader_cfg.num_workers),
+    #                                              worker_init_fn=worker_init_fn,
+    #                                              drop_last=split == 'train',
+    #                                              sampler=sampler,
+    #                                              collate_fn=collate_fn, 
+    #                                              pin_memory=True
+    #                                              )
+    # else:
+    dataloader = torch.utils.data.DataLoader(dataset,
+                                                batch_size=batch_size,
+                                                num_workers=int(dataloader_cfg.num_workers),
+                                                worker_init_fn=worker_init_fn,
+                                                drop_last=split == 'train',
+                                                shuffle=shuffle,
+                                                collate_fn=collate_fn,
+                                                pin_memory=True)
     return dataloader

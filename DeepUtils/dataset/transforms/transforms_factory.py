@@ -1,5 +1,5 @@
 import torch
-from ..utils.registry import Registry
+from ...utils.registry import Registry
 
 DataTransforms = Registry('datatransforms')
 
@@ -41,7 +41,7 @@ class ListCompose(object):
         return coord, feat, label
 
 
-def build_transforms_from_cfg(split, datatransforms_cfg):
+def build_transforms_from_cfg(split:str, datatransforms_cfg):
     """
     Build a dataset transform for a certrain split, defined by `datatransforms_cfg`.
     """

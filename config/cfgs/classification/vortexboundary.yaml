@@ -1,0 +1,39 @@
+
+model:
+  NAME: BaseCls
+  encoder_args:
+    NAME: TobiasVortexBoundaryCNN
+    in_channels: 2
+    DataSizeX: 16
+    DataSizeY: 16
+  criterion_args:
+    NAME: BCELoss
+   
+
+# ---------------------------------------------------------------------------- #
+# Training cfgs of TobiasVortexBoundaryCNN
+# ---------------------------------------------------------------------------- #
+# Training parameters
+dataloader:
+  num_workers: 0
+
+dataset:
+  NAME: SteadyVastisDataset
+  data_dir: 'CppProjects/data/Steady/X16_Y16_Steady'
+  # train:
+  #   split: train
+  # val:
+  #   split: val
+  # test:
+  #   split: test
+
+datatransforms:
+  train: [ToTensor,WhiteNoise]  # rotation does not help
+  val: [ToTensor,WhiteNoise]
+  test: [ToTensor,WhiteNoise]
+  kwargs:
+    noiseMaginitude: 0.03
+  
+
+
+

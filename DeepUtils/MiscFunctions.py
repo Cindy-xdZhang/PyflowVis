@@ -4,6 +4,22 @@ import os
 import logging
 import argparse
 import yaml
+from .utils import EasyConfig
+def print_args(args, printer=print):
+    printer("==========       args      =============")
+    for arg, content in args.items():
+        printer("{}:{}".format(arg, content))
+    printer("==========     args END    =============")
+
+def runNameTagGenerator(config) ->(str,list[:str]):
+    seed=config['random_seed']
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    runName = f"bs_{config['batch_size']}_ep_{config['epochs']}_lr_{config['lr']}_{current_time}_seed_{seed}"
+    tagGen0=config['dataset']['NAME']
+    tagGen1=config['model']['encoder_args']['NAME']
+    runTags= [tagGen0,tagGen1]
+    return runName,runTags
+
 def CollectWandbLogfiles(arti_code):
     def match_file(path):    
         return path.endswith(".py") 
@@ -84,7 +100,16 @@ def load_checkpoint(checkpoint, model, optimizer):
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
 
-
+def get_git_commit_id():
+    import subprocess
+    try:
+        commit_id = subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode("utf-8")
+        is_dirty = subprocess.check_output(["git", "diff"]).decode("utf-8")
+        dirty_suffix = "-dirty" if is_dirty else ""
+        return f"GitCommit-{commit_id}{dirty_suffix}"
+    except subprocess.CalledProcessError:
+        return "Not a git repository"
+    
 # Function to parse command line arguments and update config
 def argParse():
     parser = argparse.ArgumentParser(description="Train pipeline parameters")
@@ -95,25 +120,21 @@ def argParse():
     parser.add_argument("--learning_rate", type=float, help="Learning rate for the optimizer")
     parser.add_argument("--wandb", action='store_true', help="Enable wandb logging")
     parser.add_argument("--num_workers", type=int, help="Number of data loading workers")
-    parser.add_argument("--pin_memory", action='store_true', help="Pin memory for data loading")
 
     args = parser.parse_args()
-    config = load_config(args.config)
-
+    cfg = EasyConfig()
+    cfg.load(args.config, recursive=True)
     # Update config with command line arguments
     if args.epochs is not None:
-        config['training']['epochs'] = args.epochs
+        cfg['epochs'] = args.epochs
     if args.device is not None:
-        config['training']['device'] = args.device
+        cfg['device'] = args.device
     if args.batch_size is not None:
-        config['training']['batch_size'] = args.batch_size
+        cfg['batch_size'] = args.batch_size
     if args.learning_rate is not None:
-        config['training']['learning_rate'] = args.learning_rate
+        cfg['lr'] = args.learning_rate
     if args.wandb:
-        config['wandb'] = True
+        cfg['wandb'] = True
     if args.num_workers is not None:
-        config['training']['num_workers'] = args.num_workers
-    if args.pin_memory:
-        config['training']['pin_memory'] = True
-
-    return config
+        cfg['dataloader']['num_workers'] = args.num_workers
+    return cfg

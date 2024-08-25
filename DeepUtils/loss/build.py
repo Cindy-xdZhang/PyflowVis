@@ -1,13 +1,13 @@
 import torch
 import torch.nn.functional as F
-from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss
+from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss,BCELoss
 from ..utils import registry
 
 LOSS = registry.Registry('loss')
 LOSS.register_module(name='CrossEntropy', module=CrossEntropyLoss)
 LOSS.register_module(name='CrossEntropyLoss', module=CrossEntropyLoss)
 LOSS.register_module(name='BCEWithLogitsLoss', module=BCEWithLogitsLoss)
-
+LOSS.register_module(name='BCELoss', module=BCELoss)
 @LOSS.register_module()
 class SmoothCrossEntropy(torch.nn.Module):
     def __init__(self, label_smoothing=0.2, 

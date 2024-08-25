@@ -2,14 +2,14 @@
 network:
   family_name: 'CNN'
   hidden_size: 64
-  dropout: 0.2
-  # output_size: 10
+  dropout: 0.5
+  output_size: 1
   activation: 'relu'
   
 
 dataset:
     name: 'vastis'
-    root: 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data\\DebugRobust\\X16_Y16_T5_no_mixture'
+    root: 'C:\\Users\\zhanx0o\\Documents\\sources\\PyflowVis\\CppProjects\\data\\Steady\\X16_Y16_Steady'
     transform: 'ToTensor'
 
 wandb: True 
@@ -17,8 +17,8 @@ wandb: True
 training: 
   device: 'cuda'
   # device: 'cpu'
-  epochs: 200
-  batch_size: 360
+  epochs: 300
+  batch_size: 2000
   shuffle: True
   num_workers: 0
   pin_memory: True
@@ -30,7 +30,7 @@ training:
   # loss_function: MSELoss
 
 
-  validateion_frequency: 2
+  validation_freq: 4
   print_frequency: 100
 
 
