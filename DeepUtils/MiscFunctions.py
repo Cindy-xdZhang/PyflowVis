@@ -4,12 +4,20 @@ import os
 import logging
 import argparse
 import yaml
+import numpy as np
+import random
 from .utils import EasyConfig
 def print_args(args, printer=print):
     printer("==========       args      =============")
     for arg, content in args.items():
         printer("{}:{}".format(arg, content))
     printer("==========     args END    =============")
+
+def set_seed(seed):
+    torch.manual_seed(seed)  # Sets the seed for CPU
+    torch.cuda.manual_seed(seed)  # Sets the seed for all GPU devices
+    torch.cuda.manual_seed_all(seed)  # If you’re using multiple GPUs
+
 
 def runNameTagGenerator(config) ->(str,list[:str]):
     seed=config['random_seed']
@@ -111,7 +119,7 @@ def get_git_commit_id():
         return "Not a git repository"
     
 # Function to parse command line arguments and update config
-def argParse():
+def argParseAndPrepareConfig():
     parser = argparse.ArgumentParser(description="Train pipeline parameters")
     parser.add_argument("--config", type=str, required=True, help="Path to the config file")
     parser.add_argument("--epochs", type=int, help="Number of training epochs")
@@ -137,4 +145,9 @@ def argParse():
         cfg['wandb'] = True
     if args.num_workers is not None:
         cfg['dataloader']['num_workers'] = args.num_workers
+
+    if 'random_seed' not in cfg:
+        cfg['random_seed']=torch.seed()
+    else:
+        set_seed(cfg['random_seed'])
     return cfg

@@ -23,8 +23,6 @@ def read_rootMetaGridresolution(meta_file):
         dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"]]
     metaINFo['domainMinBoundary']=dominMinBoundary
     metaINFo['domainMaxBoundary']=dominMaxBoundary
-    if 'unsteadyFieldTimeStep' not in metaINFo:
-        metaINFo['unsteadyFieldTimeStep']=1
     return metaINFo
 
 

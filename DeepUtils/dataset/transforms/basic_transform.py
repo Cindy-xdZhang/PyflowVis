@@ -23,7 +23,7 @@ class MinMaxNormalization(object):
         self.one_divided_by_range=1.0/(maxV-minV)
 
     def __call__(self, data):
-        data=(data-min)*self.one_divided_by_range
+        data=(data- self.minV )*self.one_divided_by_range
         return data
 
 @DataTransforms.register_module()    

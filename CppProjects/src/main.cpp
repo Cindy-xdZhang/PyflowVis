@@ -11,8 +11,8 @@ int main()
     // generateUnsteadyField(4, 20, 10, "../data/DebugRobust/", "test");
     //     testCriterion();
 
-    GenerateSteadyVortexBoundary(30, 60, "../data/Steady/", "train");
-    GenerateSteadyVortexBoundary(10, 20, "../data/Steady/", "validation");
-    GenerateSteadyVortexBoundary(10, 20, "../data/Steady/", "test");
+    // GenerateSteadyVortexBoundary(30, 60, "../data/Steady/", "train");
+    // GenerateSteadyVortexBoundary(10, 20, "../data/Steady/", "validation");
+    GenerateSteadyVortexBoundary(5, 60, "../data/Steady/", "test");
     return 0;
 }

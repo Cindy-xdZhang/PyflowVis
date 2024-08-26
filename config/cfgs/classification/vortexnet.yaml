@@ -14,28 +14,23 @@ model:
 # Training cfgs of LiuVortexNet
 # ---------------------------------------------------------------------------- #
 # Training parameters
-epochs: 50
-
-
+batch_size: 512
+lr: 0.0005
+wandb: True 
 dataloader:
   num_workers: 0
+random_seed: 00041698924902
 
 dataset:
   NAME: SteadyVastisDataset
   data_dir: 'CppProjects/data/Steady/X16_Y16_Steady'
-  # train:
-  #   split: train
-  # val:
-  #   split: val
-  # test:
-  #   split: test
-
+ 
 datatransforms:
-  train: [ToTensor,WhiteNoise]  # rotation does not help
-  val: [ToTensor,WhiteNoise]
-  test: [ToTensor,WhiteNoise]
+  train: [ToTensor,MinMaxNormalization] 
+  val: [ToTensor,MinMaxNormalization]
+  test: [ToTensor,MinMaxNormalization]
   kwargs:
-    noiseMaginitude: 0.03
+    noiseMaginitude: 0.0000
   
 
 

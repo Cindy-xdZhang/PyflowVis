@@ -23,6 +23,7 @@ optimizer:
 # resume: False
 # finetune: False 
 print_freq: 100 
+save_model: true
 save_freq: -1 # saving frequency for ckpt. -1 only saving the latest and the best.
 save_model_path: 'models/'
 

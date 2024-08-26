@@ -1,9 +1,6 @@
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from FLowUtils.LicRenderer import *
-from FLowUtils.VectorField2d import UnsteadyVectorField2D,SteadyVectorField2D
-from FLowUtils.GlyphRenderer import *
 from DeepUtils.MiscFunctions import *
 import logging,random,wandb
 import torchsummary
@@ -72,7 +69,7 @@ def test_model(model,cfg):
             correct += (predicted_classes == true_classes).sum().item()
 
         precision=float(correct)/float(len(test_data_loader.dataset)-1)
-        logging.info(f"correctly predict {correct} out of {len(test_data_loader.dataset)-1}, precision=f{precision}")
+        logging.info(f"correctly predict {correct} out of {len(test_data_loader.dataset)-1}, precision={precision*100}%.")
 
         #random select  samples to visualize
         for i in range(20):
@@ -126,7 +123,7 @@ def train_model(model, data_loader, validation_data_loader, optimizer,config):
                 if config['wandb']:
                     wandb.log({"epoch": epoch+1,  "epoch_Loss": epoch_loss, "val_loss": val_loss})
                 #save best model 
-                if val_loss < best_val_loss and config['save_freq']>0 :
+                if val_loss < best_val_loss and config['save_model'] :
                     best_val_loss = val_loss
                     saving_path= os.path.join(config['save_model_path'],run_Name) 
                     save_checkpoint({
@@ -135,7 +132,7 @@ def train_model(model, data_loader, validation_data_loader, optimizer,config):
                         'optimizer': optimizer.state_dict(),
                     }, folder_name=saving_path, checkpoint_name= f'best_checkpoint.pth.tar')
                 #periodically save model
-                if  config['save_freq']>0 and epoch % config["save_freq"]== 0 and epoch>0:
+                if  config['save_model'] and epoch % config["save_freq"]== 0 and epoch>0 and config["save_freq"]>0:
                     saving_path= os.path.join(config['save_model_path'],run_Name) 
                     save_checkpoint({
                         'epoch': epoch + 1,
@@ -166,8 +163,7 @@ def train_model(model, data_loader, validation_data_loader, optimizer,config):
 
 def train_pipeline():
     try:
-        cfg=argParse()
-        cfg['random_seed']=torch.seed()
+        cfg=argParseAndPrepareConfig()
         cfg["gitInfo"]=get_git_commit_id()
         run_Name,runTags=runNameTagGenerator(cfg)
         cfg['run_name']=run_Name
@@ -187,8 +183,11 @@ def train_pipeline():
         model.to(cfg['device'])
         # build dataset        
         rootInfo=getDatasetRootaMeta(cfg.dataset['data_dir'])
-        # torchsummary.summary(model, (2, xdim, ydim, timesteps))
-        torchsummary.summary(model, (2, rootInfo["Xdim"], rootInfo["Ydim"]))
+        if "unsteadyFieldTimeStep" not in rootInfo:            
+            torchsummary.summary(model, (2, rootInfo["Xdim"], rootInfo["Ydim"]))
+        else:
+            torchsummary.summary(model, (2, rootInfo["Xdim"], rootInfo["Ydim"],rootInfo["unsteadyFieldTimeStep"]))
+
 
         if isinstance(cfg.datatransforms['kwargs'], dict):   
             cfg.datatransforms['kwargs'].update(rootInfo) 
@@ -253,24 +252,27 @@ if __name__ == '__main__':
 
 
 
-def testCppGeneratedData(testDataset=None):
-    """
-    test cpp generated flow data is correctly loaded by the torch dataset 
-    """
-    config=argParse()
-    if testDataset is None:
-        testDataset=buildDataset(config["dataset"],mode="test")
-    bs=1
-    minv,maxv=testDataset.dastasetMetaInfo["minV"],testDataset.dastasetMetaInfo["maxV"]
-    with torch.no_grad():
-        for i in range(10):
-            sample=i
-            loadField, _, labelVortex=testDataset[sample]
-            loadFieldDATA=loadField*(maxv-minv)+minv
-            loadFieldDATA=loadFieldDATA.transpose(0,3)
-            UnsteadyField=  UnsteadyVectorField2D(16,16,5,[-2,-2],[2,2],np.pi * 0.25)
-            UnsteadyField.field=loadFieldDATA
-            name=testDataset.getSampleName(sample)
-            LicRenderingUnsteadyCpp(UnsteadyField,licImageSize=256,timeStepSKip=1,saveFolder="./testOutput",saveName=f"test__{name}",stepSize=0.005,MaxIntegrationSteps=256)
+# def testCppGeneratedData(testDataset=None):
+#     """
+#     test cpp generated flow data is correctly loaded by the torch dataset 
+#     """
+#     from FLowUtils.LicRenderer import *
+#     from FLowUtils.VectorField2d import UnsteadyVectorField2D,SteadyVectorField2D
+#     from FLowUtils.GlyphRenderer import *
+#     config=argParse()
+#     if testDataset is None:
+#         testDataset=buildDataset(config["dataset"],mode="test")
+#     bs=1
+#     minv,maxv=testDataset.dastasetMetaInfo["minV"],testDataset.dastasetMetaInfo["maxV"]
+#     with torch.no_grad():
+#         for i in range(10):
+#             sample=i
+#             loadField, _, labelVortex=testDataset[sample]
+#             loadFieldDATA=loadField*(maxv-minv)+minv
+#             loadFieldDATA=loadFieldDATA.transpose(0,3)
+#             UnsteadyField=  UnsteadyVectorField2D(16,16,5,[-2,-2],[2,2],np.pi * 0.25)
+#             UnsteadyField.field=loadFieldDATA
+#             name=testDataset.getSampleName(sample)
+#             LicRenderingUnsteadyCpp(UnsteadyField,licImageSize=256,timeStepSKip=1,saveFolder="./testOutput",saveName=f"test__{name}",stepSize=0.005,MaxIntegrationSteps=256)
    
 

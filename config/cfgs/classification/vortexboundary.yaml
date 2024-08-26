@@ -17,6 +17,8 @@ model:
 dataloader:
   num_workers: 0
 
+
+
 dataset:
   NAME: SteadyVastisDataset
   data_dir: 'CppProjects/data/Steady/X16_Y16_Steady'
