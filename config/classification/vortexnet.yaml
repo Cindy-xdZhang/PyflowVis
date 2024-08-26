@@ -15,11 +15,11 @@ model:
 # ---------------------------------------------------------------------------- #
 # Training parameters
 batch_size: 512
-lr: 0.0005
+lr: 0.00025
 wandb: True 
 dataloader:
   num_workers: 0
-random_seed: 00041698924902
+random_seed: 754
 
 dataset:
   NAME: SteadyVastisDataset

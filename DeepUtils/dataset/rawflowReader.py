@@ -44,7 +44,11 @@ def loadOneFlowEntryRawDataSteady(binPath,Xdim,Ydim):
     metaINFo=read_json_file(meta_file)
     n,rc,si=metaINFo['n_rc_Si']["value0"],metaINFo['n_rc_Si']["value1"],metaINFo['n_rc_Si']["value2"]
     fieldData = raw_Binary.reshape( Ydim,Xdim, 2)
-    vortexLabelOneHot= np.array([0.0,1.0],dtype=np.float32) if si==0.0 else np.array([1.0,0.0],dtype=np.float32)
+    #si=0 means this is saddle not vortex, logits 0 means non-votex class, logits 1 means vortex class
+    if si==0.0:
+        vortexLabelOneHot= np.array([1.0,0.0],dtype=np.float32)
+    else:
+        vortexLabelOneHot=np.array([0.0,1.0],dtype=np.float32)
     return fieldData,vortexLabelOneHot
 
 

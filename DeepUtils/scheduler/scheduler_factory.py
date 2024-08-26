@@ -5,7 +5,7 @@ from .cosine_lr import CosineLRScheduler
 from .multistep_lr import MultiStepLRScheduler
 from .plateau_lr import PlateauLRScheduler
 from .poly_lr import PolyLRScheduler
-from .step_lr import StepLRScheduler
+from .step_lr import StepLRScheduler,TwoStepLRScheduler
 from .tanh_lr import TanhLRScheduler
 
 
@@ -42,7 +42,8 @@ def build_scheduler_from_cfg(args, optimizer, return_epochs=False):
     )
 
     lr_scheduler = None
-    if args.sched == 'cosine':
+    args.scheduler=str(args.scheduler).lower()
+    if args.scheduler == 'cosine':
         lr_scheduler = CosineLRScheduler(
             optimizer,
             t_initial=t_max,
@@ -55,7 +56,7 @@ def build_scheduler_from_cfg(args, optimizer, return_epochs=False):
             **noise_args,
         )
         num_epochs = lr_scheduler.get_cycle_length() + cooldown_epochs
-    elif args.sched == 'tanh':
+    elif args.scheduler == 'tanh':
         lr_scheduler = TanhLRScheduler(
             optimizer,
             t_initial=num_epochs,
@@ -67,7 +68,7 @@ def build_scheduler_from_cfg(args, optimizer, return_epochs=False):
             **noise_args,
         )
         num_epochs = lr_scheduler.get_cycle_length() + cooldown_epochs
-    elif args.sched == 'step':
+    elif args.scheduler == 'step':
         lr_scheduler = StepLRScheduler(
             optimizer,
             decay_t=decay_epochs,
@@ -76,7 +77,7 @@ def build_scheduler_from_cfg(args, optimizer, return_epochs=False):
             warmup_t=warmup_epochs,
             **noise_args,
         )
-    elif args.sched == 'multistep':
+    elif args.scheduler == 'multistep':
         lr_scheduler = MultiStepLRScheduler(
             optimizer,
             decay_t=decay_epochs,
@@ -85,7 +86,7 @@ def build_scheduler_from_cfg(args, optimizer, return_epochs=False):
             warmup_t=warmup_epochs,
             **noise_args,
         )
-    elif args.sched == 'plateau':
+    elif args.scheduler == 'plateau':
         mode = 'min' if 'loss' in getattr(args, 'eval_metric', '') else 'max'
         lr_scheduler = PlateauLRScheduler(
             optimizer,
@@ -98,7 +99,7 @@ def build_scheduler_from_cfg(args, optimizer, return_epochs=False):
             cooldown_t=0,
             **noise_args,
         )
-    elif args.sched == 'poly':
+    elif args.scheduler == 'poly':
         lr_scheduler = PolyLRScheduler(
             optimizer,
             power=args.decay_rate,  # overloading 'decay_rate' as polynomial power
@@ -111,7 +112,15 @@ def build_scheduler_from_cfg(args, optimizer, return_epochs=False):
             **noise_args,
         )
         num_epochs = lr_scheduler.get_cycle_length() + cooldown_epochs
-
+    elif args.scheduler == 'twostep':
+        lr_scheduler = TwoStepLRScheduler(
+            optimizer,
+            lr=args.lr,  # overloading 'decay_rate' as polynomial power
+            second_lr=args.second_lr,
+            warmup_epochs=args.warmup_epochs,
+            min_lr=min_lr,
+            **noise_args,
+        )
     if return_epochs:
         return lr_scheduler, num_epochs
     else:

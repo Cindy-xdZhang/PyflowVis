@@ -17,6 +17,8 @@ def set_seed(seed):
     torch.manual_seed(seed)  # Sets the seed for CPU
     torch.cuda.manual_seed(seed)  # Sets the seed for all GPU devices
     torch.cuda.manual_seed_all(seed)  # If you’re using multiple GPUs
+    np.random.seed(seed)
+    random.seed(seed)
 
 
 def runNameTagGenerator(config) ->(str,list[:str]):
@@ -147,7 +149,6 @@ def argParseAndPrepareConfig():
         cfg['dataloader']['num_workers'] = args.num_workers
 
     if 'random_seed' not in cfg:
-        cfg['random_seed']=torch.seed()
-    else:
-        set_seed(cfg['random_seed'])
+        cfg['random_seed']=np.random.randint(0,5000)
+    set_seed(cfg['random_seed'])
     return cfg

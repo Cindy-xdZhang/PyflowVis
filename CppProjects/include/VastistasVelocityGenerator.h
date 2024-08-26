@@ -144,8 +144,9 @@ public:
 
     inline auto NormalizedVastistasV0(const double r) const noexcept
     {
-        const auto v0_r = r / (2 * M_PI * (rc * rc) * std::pow(std::pow(r / rc, 2 * n) + 1, 1 / n));
-        return v0_r / (r);
+        /* const auto v0_r = r / (2 * M_PI * (rc * rc) * std::pow(std::pow(r / rc, 2 * n) + 1, 1 / n));
+         return v0_r / (r);*/
+        return 0;
     }
 
     inline auto getPosition(int xid, int yid) const noexcept

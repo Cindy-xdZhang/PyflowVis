@@ -14,27 +14,29 @@ model:
 # Training cfgs of TobiasVortexBoundaryCNN
 # ---------------------------------------------------------------------------- #
 # Training parameters
+
+lr: 0.001
+second_lr: 0.0001
+epochs: 100
+warmup_epochs: 80 
+scheduler: TwoStep
+random_seed: 4259
+wandb: True 
+
+
+
 dataloader:
   num_workers: 0
-
-
-
 dataset:
   NAME: SteadyVastisDataset
   data_dir: 'CppProjects/data/Steady/X16_Y16_Steady'
-  # train:
-  #   split: train
-  # val:
-  #   split: val
-  # test:
-  #   split: test
 
 datatransforms:
   train: [ToTensor,WhiteNoise]  # rotation does not help
   val: [ToTensor,WhiteNoise]
   test: [ToTensor,WhiteNoise]
   kwargs:
-    noiseMaginitude: 0.03
+    noiseMaginitude: 0.01
   
 
 

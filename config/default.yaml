@@ -11,10 +11,10 @@ val_freq: 10
 
 epochs: 100
 batch_size: 256
-lr: 0.001
+
 optimizer:
  NAME: 'adam'
- weight_decay: 0.000001
+ weight_decay: 0.00000001
 
 # ---------------------------------------------------------------------------- #
 # io and misc
