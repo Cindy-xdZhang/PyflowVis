@@ -39,5 +39,8 @@ datatransforms:
     noiseMaginitude: 0.01
   
 
+test_tasks:
+      tasks: ["TestClassification","TestRandomSamples","TestRotatingZeroField"] 
+
 
 

@@ -54,32 +54,22 @@ def loadOneFlowEntryRawDataSteady(binPath,Xdim,Ydim):
 
 def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
     raw_Binary = read_binary_file(binPath)
-
     #get meta information
     meta_file = binPath.replace('.bin', 'meta.json')
     metaINFo=read_json_file(meta_file)
 
-    #observe and unsteady info  
-    # Q_tInfo=metaINFo['theta(t)']
     abc_tInfo=[value for value in metaINFo['observer_abc'].values()]
     abcdot_t=[value for value in metaINFo['observer_abc_dot'].values()] 
     referenceLabel=abc_tInfo+abcdot_t
-    # for abcDict_of_time_step_t in Q_tInfo:
-    #     q_slice=[abcDict_of_time_step_t["value0"],abcDict_of_time_step_t["value1"],abcDict_of_time_step_t["value2"],abcDict_of_time_step_t["value3"] ]
-    #     Q_t.append(q_slice)
                             
-    n,rc,si=metaINFo['n_rc_Si']["value0"],metaINFo['n_rc_Si']["value1"],metaINFo['n_rc_Si']["value2"]
-    tx,ty=metaINFo['txy']["value0"],metaINFo['txy']["value1"]
-
+    # n,rc,si=metaINFo['n_rc_Si']["value0"],metaINFo['n_rc_Si']["value1"],metaINFo['n_rc_Si']["value2"]
+    # tx,ty=metaINFo['txy']["value0"],metaINFo['txy']["value1"]
+    # vortexLableData= np.array([tx,ty,n,rc],dtype=np.float32) 
     #check raw_Binary.size
-    if raw_Binary.size!=time_steps*Ydim*Xdim* 2:
-        raise ValueError(f"Binary data size is not correct, expected {time_steps*
-                                                                      Ydim*Xdim* 2}, got {raw_Binary.size}")
+    assert (raw_Binary.size==time_steps*Ydim*Xdim* 2)
     fieldData = raw_Binary.reshape( time_steps,Ydim,Xdim, 2)
-    vortexLableData= np.array([tx,ty,n,rc],dtype=np.float32) 
     referenceLabel= np.array(referenceLabel,dtype=np.float32)
-    assert(fieldData.shape[0]==time_steps)
-    return fieldData,referenceLabel,vortexLableData
+    return fieldData,referenceLabel
 
 
 

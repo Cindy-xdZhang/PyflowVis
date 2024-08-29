@@ -169,7 +169,7 @@ struct pair_hash {
         return std::hash<T1>()(pair.first) ^ std::hash<T2>()(pair.second);
     }
 };
-std::vector<std::pair<double, double>> presetNRCParameters = {
+std::vector<std::pair<double, double>> presetRCNParameters = {
     { 0.25, 2.0 },
     { 1.0, 2.0 },
     { 1.0, 3.0 },
@@ -177,7 +177,7 @@ std::vector<std::pair<double, double>> presetNRCParameters = {
     { 2.0, 1.0 },
     { 2.0, 2.0 },
     { 2.0, 3.0 },
-    { 2.0, 5.0 },
+    { 2.0, 10.0 },
 };
 
 std::vector<std::pair<double, double>> generateNParamters(int n, std::string mode)
@@ -188,14 +188,14 @@ std::vector<std::pair<double, double>> generateNParamters(int n, std::string mod
 
     std::random_device rd;
     std::mt19937 rng(rd());
-    std::normal_distribution<double> dist_rc(1.87, 0.34); // mean = 1.87, stddev = 0.34
+    std::normal_distribution<double> dist_rc(1.87, 0.37); // mean = 1.87, stddev = 0.34
     std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
 
     int i = 0;
     while (parameters.size() < n) {
 
-        if (i < presetNRCParameters.size() && mode == "train") {
-            std::pair<double, double> preset_pair = presetNRCParameters.at(i++);
+        if (i < presetRCNParameters.size() && mode == "train") {
+            std::pair<double, double> preset_pair = presetRCNParameters.at(i++);
             if (unique_params.find(preset_pair) == unique_params.end()) {
                 parameters.emplace_back(preset_pair);
                 unique_params.insert(preset_pair);
@@ -272,130 +272,12 @@ UnSteadyVectorField2D killingABCtransformation(const KillingAbcField& observerfi
     const auto dt = observerfield.dt;
     const int timestep = observerfield.timeSteps;
 
-    auto integratePathlineOneStep_RK4 = [&observerfield](T x, T y, T t, T dt) -> Eigen::Vector2d {
-        // RK4 integration step
-        Eigen::Vector2d odeStepStartPoint = { x, y };
-
-        const T h = dt;
-
-        // coefficients
-        constexpr T a21 = 0.5;
-        constexpr T a31 = 0.;
-        constexpr T a32 = 0.5;
-        constexpr T a41 = 0.;
-        constexpr T a42 = 0.;
-        constexpr T a43 = 1.;
-
-        constexpr T c2 = 0.5;
-        constexpr T c3 = 0.5;
-        constexpr T c4 = 1.;
-
-        constexpr T b1 = 1. / 6.;
-        constexpr T b2 = 1. / 3.;
-        constexpr T b3 = b2;
-        constexpr T b4 = b1;
-
-        // 4 stages of 2 equations (i.e., 2 dimensions of the manifold and the tangent vector space)
-
-        // stage 1
-        Eigen::Vector2d k1 = observerfield.getKillingVector(odeStepStartPoint, t);
-
-        // stage 2
-        Eigen::Vector2d stagePoint = odeStepStartPoint + k1 * a21 * h;
-        Eigen::Vector2d k2 = observerfield.getKillingVector(stagePoint, t + c2 * h);
-
-        // stage 3
-        stagePoint = odeStepStartPoint + (a31 * k1 + a32 * k2) * h;
-        Eigen::Vector2d k3 = observerfield.getKillingVector(stagePoint, t + c3 * h);
-
-        // stage 4
-        stagePoint = odeStepStartPoint + (a41 * k1 + a42 * k2 + a43 * k3) * h;
-        Eigen::Vector2d k4 = observerfield.getKillingVector(stagePoint, t + c4 * h);
-
-        Eigen::Vector2d result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
-
-        return result_p;
-    };
-
-    // integration of worldline
-    auto runIntegration = [&](const Eigen::Vector2d& startPoint, /*const double observationTime,*/ const double targetIntegrationTime,
-                              std::vector<Eigen::Vector2d>& pathVelocitys, std::vector<Eigen::Vector3d>& pathPositions) -> bool {
-        const double startTime = 0.0;
-        const int maxIterationCount = 2000;
-        const double spaceConversionRatio = 1.0;
-
-        bool integrationOutOfDomainBounds = false;
-        bool outOfIntegrationTimeBounds = false;
-        int iterationCount = 0;
-        double integrationTimeStepSize = dt;
-
-        if (targetIntegrationTime < startTime) {
-            // we integrate back in time
-            integrationTimeStepSize *= -1.0;
-        }
-        const auto minDomainBounds = inputField.getSpatialMinBoundary();
-        const auto maxDomainBounds = inputField.getSpatialMaxBoundary();
-        // This function checks if the current point is in the domain
-        std::function<bool(const Eigen::Vector2d& point)> checkIfOutOfDomain = [&minDomainBounds, &maxDomainBounds](const Eigen::Vector2d& point) {
-            if (point(0) <= minDomainBounds(0))
-                return true;
-            if (point(0) >= maxDomainBounds(0))
-                return true;
-            if (point(1) <= minDomainBounds(1))
-                return true;
-            if (point(1) >= maxDomainBounds(1))
-                return true;
-            return false;
-        };
-
-        Eigen::Vector2d currentPoint = startPoint;
-
-        integrationOutOfDomainBounds = checkIfOutOfDomain(currentPoint);
-
-        // do integration
-        auto currentTime = startTime;
-
-        // push init_velocity  &start point
-        Eigen::Vector3d pointAndTime = { currentPoint(0), currentPoint(1), currentTime };
-        pathPositions.emplace_back(pointAndTime);
-        auto init_velocity = observerfield.getKillingVector(currentPoint, currentTime);
-        pathVelocitys.emplace_back(init_velocity);
-
-        // integrate until either
-        // - we reached the max iteration count
-        // - we reached the upper limit of the time domain
-        // - we ran out of spatial domain
-        while ((!integrationOutOfDomainBounds) && (!outOfIntegrationTimeBounds) && (pathPositions.size() < maxIterationCount)) {
-
-            // advance to a new point in the chart
-            Eigen::Vector2d newPoint = integratePathlineOneStep_RK4(currentPoint(0), currentPoint(1), currentTime, dt);
-            integrationOutOfDomainBounds = checkIfOutOfDomain(newPoint);
-            if (!integrationOutOfDomainBounds) {
-                auto newTime = currentTime + integrationTimeStepSize;
-                // check if currentTime is out of the time domain -> we are done
-                if ((targetIntegrationTime > startTime) && (newTime >= targetIntegrationTime)) {
-                    outOfIntegrationTimeBounds = true;
-                } else if ((targetIntegrationTime < startTime) && (newTime <= targetIntegrationTime)) {
-                    outOfIntegrationTimeBounds = true;
-                } else {
-                    // add  current point to the result list and set currentPoint to newPoint -> everything fine -> continue with the while loop
-                    Eigen::Vector3d new_pointAndTime = { newPoint(0), newPoint(1), newTime };
-                    pathPositions.emplace_back(new_pointAndTime);
-                    auto velocity = observerfield.getKillingVector(newPoint, newTime);
-                    pathVelocitys.emplace_back(velocity);
-                    currentPoint = newPoint;
-                    currentTime = newTime;
-                    iterationCount++;
-                }
-            }
-        }
-        bool suc = pathPositions.size() > 1 && pathVelocitys.size() == pathPositions.size();
-        return suc;
-    };
+    observerfield.spatialDomainMaxBoundary = inputField.getSpatialMaxBoundary();
+    observerfield.spatialDomainMinBoundary = inputField.getSpatialMinBoundary();
 
     std::vector<Eigen::Vector2d> pathVelocitys;
     std::vector<Eigen::Vector3d> pathPositions;
-    bool suc = runIntegration(StartPosition, tmax, pathVelocitys, pathPositions);
+    bool suc = PathhlineIntegrationRK4(StartPosition, observerfield, tmin, tmax, dt, pathVelocitys, pathPositions);
     assert(suc);
 
     int validPathSize = pathPositions.size();
@@ -583,7 +465,7 @@ UnSteadyVectorField2D Tobias_ObserverTransformation(const SteadyVectorField2D& i
     resultField.Q_t.resize(timestep);
     resultField.c_t.resize(timestep);
     resultField.Q_t[0] = Eigen::Matrix2d::Identity();
-    resultField.c_t[0] = Eigen::Vector2d::Identity();
+    resultField.c_t[0] = Eigen::Vector2d::Zero();
 
     // rotation
     double theta = 0;
@@ -666,13 +548,17 @@ UnSteadyVectorField2D Tobias_reconstructUnsteadyField(const UnSteadyVectorField2
         outputField.field.resize(inputField.timeSteps);
 
         // Q(0)=I ->theta(0)=0; translation(0)=0;
+        std::vector<Eigen::Vector2d> translation_c_t_list(inputField.timeSteps);
         std::vector<Eigen::Vector2d> Velocities(inputField.timeSteps);
         std::vector<double> AngularVelocities(inputField.timeSteps);
-
+        std::vector<Eigen::Matrix2d> Q_t_list(inputField.timeSteps);
+        translation_c_t_list[0] = { 0, 0 };
         // rotation
         double theta = 0;
         double angularVelocity = abc(2);
-        AngularVelocities[0] = { angularVelocity };
+        AngularVelocities[0] = angularVelocity;
+        Q_t_list[0] = Eigen::Matrix2d::Identity();
+
         // translation
         Eigen ::Vector2d translation_c_t = { 0, 0 };
         Eigen ::Vector2d translation_cdot = { abc(0), abc(1) };
@@ -682,11 +568,16 @@ UnSteadyVectorField2D Tobias_reconstructUnsteadyField(const UnSteadyVectorField2
             theta = theta + dt * angularVelocity;
             angularVelocity = angularVelocity + dt * abc_dot(2);
             AngularVelocities[i] = angularVelocity;
+            Eigen::Matrix2d rotQ;
+            rotQ << cos(theta), -sin(theta),
+                sin(theta), cos(theta);
+            Q_t_list[i] = rotQ;
 
             // translation
             translation_c_t = translation_c_t + dt * translation_cdot;
             translation_cdot = translation_cdot + dt * translation_cdotdot;
             Velocities[i] = translation_cdot;
+            translation_c_t_list[i] = translation_c_t;
         }
 
         outputField.analyticalFlowfunc_ = [=](const Eigen::Vector2d& posX, double t) -> Eigen::Vector2d {
@@ -695,11 +586,12 @@ UnSteadyVectorField2D Tobias_reconstructUnsteadyField(const UnSteadyVectorField2
             const int timestep_ceil = std::clamp((int)std::floor(floatingTimeStep) + 1, 0, inputField.timeSteps - 1);
             const double ratio = floatingTimeStep - timestep_floor;
 
-            const auto Q_t = inputField.Q_t[timestep_floor] * (1 - ratio) + inputField.Q_t[timestep_ceil] * ratio;
-            const auto Q_transpose = Q_t.transpose();
-            const auto c_t = inputField.c_t[timestep_floor] * (1 - ratio) + inputField.c_t[timestep_ceil] * ratio;
+            const auto Q_t = Q_t_list[timestep_floor] * (1 - ratio) + Q_t_list[timestep_ceil] * ratio;
+            const auto c_t = translation_c_t_list[timestep_floor] * (1 - ratio) + translation_c_t_list[timestep_ceil] * ratio;
             const auto Velocity = Velocities[timestep_floor] * (1 - ratio) + Velocities[timestep_ceil] * ratio;
             const auto AngularVelocity = AngularVelocities[timestep_floor] * (1 - ratio) + AngularVelocities[timestep_ceil] * ratio;
+
+            const auto Q_transpose = Q_t.transpose();
 
             Eigen::Vector2d xStar = Q_t * posX + c_t;
             Eigen::Vector2d v_star_xstar = inputField.getVectorAnalytical({ xStar(0), xStar(1) }, t);
@@ -960,6 +852,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
 
             Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
             const SteadyVectorField2D steadyField = generator.generateSteadyField_VortexBoundaryVIS2020(tx, ty, sx, sy, theta, Si);
+
             const auto& steadyFieldResData = steadyField.field;
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
                 printf(".");
@@ -1356,6 +1249,132 @@ void GenerateSteadyVortexBoundary(int Nparamters, int samplePerParameters, const
                 outBin.close();
             }
 #endif
+
+        } // for sample
+    });
+
+    // create Root meta json file, save plane information here instead of every sample's meta file
+    string taskFolder_rootMetaFilename = root_folder + "meta.json";
+    // save root meta info:
+    std::ofstream root_jsonOut(taskFolder_rootMetaFilename);
+    if (!root_jsonOut.good()) {
+        printf("couldn't open file: %s", taskFolder_rootMetaFilename.c_str());
+        return;
+    } else {
+        cereal::JSONOutputArchive archive_o(root_jsonOut);
+        archive_o(CEREAL_NVP(Xdim));
+        archive_o(CEREAL_NVP(Ydim));
+        archive_o(CEREAL_NVP(unsteadyFieldTimeStep));
+        archive_o(CEREAL_NVP(domainMinBoundary));
+        archive_o(CEREAL_NVP(domainMaxBoundary));
+        archive_o(CEREAL_NVP(tmin));
+        archive_o(CEREAL_NVP(tmax));
+        // save min and max
+        archive_o(cereal::make_nvp("minV", minMagintude));
+        archive_o(cereal::make_nvp("maxV", maxMagintude));
+    }
+}
+
+// number of result traing data = Nparamters * samplePerParameters * observerPerSetting;dataSetSplitTag should be "train"/"test"/"validation"
+void generateUnsteadyFieldPathline(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string in_root_fodler, const std::string dataSetSplitTag)
+{
+
+    // check datasplittag is "train"/"test"/"validation"
+    if (dataSetSplitTag != "train" && dataSetSplitTag != "test" && dataSetSplitTag != "validation") {
+        printf("dataSetSplitTag should be \"train\"/\"test\"/\"validation\"");
+        return;
+    }
+
+    int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
+    std::string root_folder = in_root_fodler + "/X" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "_no_mixture/" + dataSetSplitTag + "/";
+    if (!filesystem::exists(root_folder)) {
+        filesystem::create_directories(root_folder);
+    }
+
+    Eigen::Vector2d gridInterval = {
+        (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
+        (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
+    };
+
+    const auto paramters = generateNParamters(Nparamters, dataSetSplitTag);
+
+    std::normal_distribution<double> genTheta(0.0, 0.50); // rotation angle's distribution
+    // normal distribution from supplementary material of Vortex Boundary Identification Paper
+    std::normal_distribution<double> genSx(0, 3.59);
+    std::normal_distribution<double> genSy(0, 2.24);
+    std::normal_distribution<double> genTx(0.0, 1.34);
+    std::normal_distribution<double> genTy(0.0, 1.27);
+    double minMagintude = INFINITY;
+    double maxMagintude = -INFINITY;
+
+    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
+        const double rc = params.first;
+        const double n = params.second;
+        std::string str_Rc = trimNumString(std::to_string(rc));
+        std::string str_n = trimNumString(std::to_string(n));
+
+        VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
+        int totalSamples = numVelocityFields * observerPerSetting;
+        printf("generate %d sample for rc=%f , n=%f \n", totalSamples, rc, n);
+
+        const string Major_task_foldername = "velocity_rc_" + str_Rc + "n_" + str_n + "/";
+        const string Major_task_Licfoldername = Major_task_foldername + "/LIC/";
+        std::string task_folder = root_folder + Major_task_foldername;
+        if (!filesystem::exists(task_folder)) {
+            filesystem::create_directories(task_folder);
+        }
+        std::string task_licfolder = root_folder + Major_task_Licfoldername;
+        if (!filesystem::exists(task_licfolder)) {
+            filesystem::create_directories(task_licfolder);
+        }
+
+        std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
+        for (size_t sample = 0; sample < numVelocityFields; sample++) {
+            // the type of this sample(divergence,cw vortex, cc2 vortex)
+            auto Si = static_cast<VastisVortexType>(sample % 3);
+
+            const auto theta = genTheta(rngSample);
+            auto sx = genSx(rngSample);
+            auto sy = genSy(rngSample);
+            while (sx * sy == 0.0) {
+                sx = genSx(rngSample);
+                sy = genSy(rngSample);
+            }
+
+            auto tx = genTx(rngSample);
+            auto ty = genTy(rngSample);
+            // clamp tx ty to 0.5*domian
+            tx = std::clamp(tx, 0.3 * domainMinBoundary.x(), 0.3 * domainMaxBoundary.x());
+            ty = std::clamp(ty, 0.3 * domainMinBoundary.y(), 0.3 * domainMaxBoundary.y());
+            Eigen::Vector2d txy = { tx, ty };
+
+            Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
+            const SteadyVectorField2D steadyField = generator.generateSteadyField_VortexBoundaryVIS2020(tx, ty, sx, sy, theta, Si);
+            const auto& steadyFieldResData = steadyField.field;
+            for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
+                printf(".");
+
+                const int taskSampleId = sample * observerPerSetting + observerIndex;
+
+                const string vortexTypeName = string { magic_enum::enum_name<VastisVortexType>(Si) };
+                const string sample_tag_name
+                    = "sample_" + to_string(taskSampleId) + vortexTypeName;
+                string metaFilename = task_folder + sample_tag_name + "meta.json";
+                string velocityFilename = task_folder + sample_tag_name + ".bin";
+                const std::vector<float> rawSteadyData = flatten2DAs1Dfloat(steadyFieldResData);
+                const auto& observerParameters = generateRandomABCVectors();
+                const auto& abc = observerParameters.first;
+                const auto& abc_dot = observerParameters.second;
+                /* auto func = KillingComponentFunctionFactory::arbitrayObserver(abc, abc_dot);
+               KillingAbcField observerfieldDeform(  func, unsteadyFieldTimeStep, tmin, tmax);*/
+                UnSteadyVectorField2D unsteady_field = Tobias_ObserverTransformation(steadyField, abc, abc_dot, tmin, tmax, unsteadyFieldTimeStep);
+                Eigen::Vector2d txy0 = { tx, ty };
+                std::vector<Eigen::Vector2d> pathVelocitys;
+                std::vector<Eigen::Vector3d> pathPositions;
+                auto suc = PathhlineIntegrationRK4(txy0, unsteady_field, 0, tmax, tmax / 100.0, pathVelocitys, pathPositions);
+                assert(suc);
+
+            } // for (size_t observerIndex = 0..)
 
         } // for sample
     });

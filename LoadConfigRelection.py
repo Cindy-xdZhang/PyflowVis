@@ -7,8 +7,6 @@ import numpy as np
 #EasyConfig con load multiple yaml file in hierarchical manner and upate the config values
 # #wip: using config load from yamle to buidl network
 from DeepUtils.utils import EasyConfig
-from DeepUtils.models import build_model_from_cfg
-from DeepUtils.optim import build_optimizer_from_cfg
 from DeepUtils.dataset import build_dataloader_from_cfg,getDatasetRootaMeta
 
 #config with relection for buidling network

@@ -9,6 +9,8 @@ from DeepUtils.models import build_model_from_cfg
 from DeepUtils.optim import build_optimizer_from_cfg
 from DeepUtils.dataset import build_dataloader_from_cfg,getDatasetRootaMeta
 from DeepUtils.scheduler import build_scheduler_from_cfg
+from test_tasks import test_model
+
 GLOBAL_WANDB_PROJECT_NAME="DeepVortexExtraction"
 initLogging()
 
@@ -42,99 +44,12 @@ def validate(model, val_data_loader, device) -> float:
     model.train()
     return val_loss
 
-def test_spiral_rotating_field(model,device) -> None:
-    from FLowUtils.LicRenderer import LicRenderingUnsteadyCpp
-    from FLowUtils.GlyphRenderer import glyphsRenderUnsteadyField
-    from FLowUtils.VectorField2d import UnsteadyVectorField2D
-    def read_binary_file(filepath, dtype=np.float32) -> np.ndarray:
-        with open(filepath, 'rb') as file:
-            data = np.fromfile(file, dtype=dtype)
-            if dtype == np.float32:
-                data=data[2:]
-            elif dtype == np.float64:
-                data=data[1:]        
-        return data
-    def testOneSample(raw_data_file,correctlabel):
-        raw_Binary = read_binary_file(raw_data_file).reshape(5,16,16, 2)
-        raw_Binary=raw_Binary
-        name=raw_data_file.split("\\")[-1]
-        # UnsteadyField=  UnsteadyVectorField2D(16,16,5,[-2,-2],[2,2],np.pi * 0.25)
-        # UnsteadyField.field=raw_Binary
-        # glyphsRenderUnsteadyField(UnsteadyField,800,timeStepSKip=1,saveFolder="./testOutput",saveName=f"glyph__{name}")
-        # LicRenderingUnsteadyCpp(UnsteadyField,800,timeStepSKip=1,saveFolder="./testOutput",saveName=f"lic__{name}")
-        minV= -3.8220109939575197
-        maxV= 3.5120744705200197
-        model.eval()
-        with torch.no_grad():
-            for step in range(5):
-                slice_data=raw_Binary[step]
-                fieldData = torch.tensor(slice_data).transpose(0, -1).unsqueeze(0)
-                vectorFieldImage=(fieldData-minV)/(maxV-minV)
-                vectorFieldImage = vectorFieldImage.to(device)
-                predictition= model(vectorFieldImage) 
-                predictition=predictition[0].cpu()
-                logging.info(f"testRotatingZeroField {name} step {step}, network predicts {predictition}, vs label ={correctlabel}")
-        model.train()
-    testOneSample("CppProjects\\data\\rotatingZeroField\\sample_0saddle.bin",0)
-    testOneSample("CppProjects\\data\\rotatingZeroField\\sample_6center_ccw.bin",0)
-    testOneSample("CppProjects\\data\\rotatingZeroField\\sample_1NotZeroFieldSaddlemeta.bin",0)
-    testOneSample("CppProjects\\data\\rotatingZeroField\\sample_1977center_cw.bin",1)
-
-
-
-def test_model(model,cfg):
-    device = cfg['device']
-    test_loss = 0
-    test_loss_records=[]
-    save_folder=f"./testOutput/{cfg['run_name']}/"
-    test_data_loader = build_dataloader_from_cfg(cfg.batch_size,
-                                        cfg.dataset,
-                                        cfg.dataloader,
-                                        datatransforms_cfg=cfg.datatransforms,
-                                        split='test'                                             
-                                        )
-    print(f"length of test dataset: {len(test_data_loader.dataset)}")
-    model.eval()
-    with torch.no_grad():
-        correct=0
-        for batch_idx, (vectorFieldImage, label) in enumerate(test_data_loader):
-            vectorFieldImage,label = vectorFieldImage.to(device), label.to(device)
-            predictition= model(vectorFieldImage)                
-            loss=model.get_loss(predictition,label)
-            test_loss += loss.item()
-            test_loss_records.append(loss.item())
-
-            predicted_classes = torch.argmax(predictition, dim=1)
-            true_classes = torch.argmax(label, dim=1)
-            # Compare and count the number of correct predictions
-            correct += (predicted_classes == true_classes).sum().item()
-
-        precision=float(correct)/float(len(test_data_loader.dataset)-1)
-        logging.info(f"correctly predict {correct} out of {len(test_data_loader.dataset)-1}, precision={precision*100}%.")
-
-        #random select  samples to visualize
-        for i in range(20):
-            sample=random.randint(0,len(test_data_loader.dataset)-1)
-            vectorFieldImage, labelVortex=test_data_loader.dataset[sample]
-            vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
-            predictition= model(vectorFieldImage)
-            predictition=predictition[0].cpu().numpy()
-            logging.info(f"testSample{sample}_predict  {predictition}, vs label { labelVortex}")
- 
-
-
-     
-    test_loss /= len(test_data_loader)
-    min_loss,max_loss=min(test_loss_records),max(test_loss_records)
-    model.train()
-    logging.info(f'Avg test loss: {test_loss}, min test loss: {min_loss}, max test loss: {max_loss}')
-    return test_loss,min_loss,max_loss
 
 
 #MAKE THIS FUNCIION INDENPENT OF THE MODEL
 def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,config):
     # Initialize training parameters from args
-    epochs,device,valiate_every,run_Name=config['epochs'],config['device'],config['val_freq'],config['run_name']
+    epochs,device,valiate_every,run_Name,lossName=config['epochs'],config['device'],config['val_freq'],config['run_name'],config["model"]["criterion_args"]["NAME"]
     total_iterations,oom_time,best_val_loss=0,0,float('inf')
     model.to(device)
     for epoch in range(epochs):
@@ -151,7 +66,7 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
                 total_iterations += 1
                 if batch_idx % config['print_freq'] == 0:
                     lr=optimizer.param_groups[0]["lr"]
-                    logging.info(f'Epoch {epoch+1}, iter {batch_idx+1}, total_iterations: {total_iterations}. Loss: {loss.item()},lr:{lr}.')
+                    logging.info(f'Epoch {epoch+1}, iter {batch_idx+1}, total_iterations: {total_iterations}. {lossName}: {loss.item()},lr:{lr}.')
                     if config['wandb']:
                         wandb.log({"train_loss": loss.item(),  "total_iterations": total_iterations})
                 
@@ -264,8 +179,6 @@ def train_pipeline():
         #final test 
         avgtest_loss,mintest_error,maxtest_error=test_model(model,cfg)
 
-        test_spiral_rotating_field(model,device=cfg['device'])
-
         if cfg['wandb']:
             wandb.summary.update({"best_val_loss": best_val_loss})
             wandb.summary.update({"avg_test_loss": avgtest_loss})
@@ -289,49 +202,15 @@ def test_pipeline():
     model_path="models/bs_512_ep_100_lr_0.0005_20240826_152302_seed_00041698924902/best_checkpoint.pth.tar"
     cfg=argParseAndPrepareConfig()
     model = build_model_from_cfg(cfg.model)
+    
     checkpoint=torch.load(model_path)
     model.load_state_dict(checkpoint['state_dict'])
     model.to(cfg['device'])
-    test_spiral_rotating_field(model,device=cfg['device'])
-
+    test_model(model,cfg)
+  
 
 
 
 
 if __name__ == '__main__':
     train_pipeline()
-    # test_pipeline()
-
-# if __name__ == '__main__':
-#    test("models\\CNN_200_0.001_20240818_154340_seed_4993847091818000\\epoch_101.pth.tar")
-
-# if __name__ == '__main__':
-#     testCppGeneratedData()
-
-
-
-
-# def testCppGeneratedData(testDataset=None):
-#     """
-#     test cpp generated flow data is correctly loaded by the torch dataset 
-#     """
-#     from FLowUtils.LicRenderer import *
-#     from FLowUtils.VectorField2d import UnsteadyVectorField2D,SteadyVectorField2D
-#     from FLowUtils.GlyphRenderer import *
-#     config=argParse()
-#     if testDataset is None:
-#         testDataset=buildDataset(config["dataset"],mode="test")
-#     bs=1
-#     minv,maxv=testDataset.dastasetMetaInfo["minV"],testDataset.dastasetMetaInfo["maxV"]
-#     with torch.no_grad():
-#         for i in range(10):
-#             sample=i
-#             loadField, _, labelVortex=testDataset[sample]
-#             loadFieldDATA=loadField*(maxv-minv)+minv
-#             loadFieldDATA=loadFieldDATA.transpose(0,3)
-#             UnsteadyField=  UnsteadyVectorField2D(16,16,5,[-2,-2],[2,2],np.pi * 0.25)
-#             UnsteadyField.field=loadFieldDATA
-#             name=testDataset.getSampleName(sample)
-#             LicRenderingUnsteadyCpp(UnsteadyField,licImageSize=256,timeStepSKip=1,saveFolder="./testOutput",saveName=f"test__{name}",stepSize=0.005,MaxIntegrationSteps=256)
-   
-

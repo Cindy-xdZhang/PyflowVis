@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss,BCELoss
+from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss,BCELoss,MSELoss
 from ..utils import registry
 
 LOSS = registry.Registry('loss')
@@ -8,6 +8,8 @@ LOSS.register_module(name='CrossEntropy', module=CrossEntropyLoss)
 LOSS.register_module(name='CrossEntropyLoss', module=CrossEntropyLoss)
 LOSS.register_module(name='BCEWithLogitsLoss', module=BCEWithLogitsLoss)
 LOSS.register_module(name='BCELoss', module=BCELoss)
+LOSS.register_module(name='MSELoss', module=MSELoss)
+
 @LOSS.register_module()
 class SmoothCrossEntropy(torch.nn.Module):
     def __init__(self, label_smoothing=0.2, 
@@ -272,10 +274,11 @@ class MultiShapeCrossEntropy(torch.nn.Module):
 
 def build_criterion_from_cfg(cfg, **kwargs):
     """
-    Build a criterion (loss function), defined by cfg.NAME.
+    Build a criterion (loss function), defined by cfg.NAME, we don't differentiate upper/lower case for criterion registrar
     Args:
         cfg (eDICT): 
     Returns:
         criterion: a constructed loss function specified by cfg.NAME
     """
+
     return LOSS.build(cfg, **kwargs)

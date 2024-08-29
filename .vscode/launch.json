@@ -8,11 +8,12 @@
             "name": "Python: Train Pipeline",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/train_vector_field.py",
+            "program": "${workspaceFolder}/train.py",
             "console": "integratedTerminal",
             "args": [
                 "--config",
-                "config/classification/vortexboundary.yaml"
+                // "config/classification/vortexboundary.yaml"
+                "config/referenceframe/tobias_reference.yaml"
             ]
         }
     ]

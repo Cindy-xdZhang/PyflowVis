@@ -6,6 +6,7 @@ import torch
 from easydict import EasyDict as edict
 from ..utils import registry
 from .transforms import build_transforms_from_cfg
+
 DATASETS = registry.Registry('dataset')
 
 
@@ -49,13 +50,8 @@ def build_dataloader_from_cfg(batch_size,
                               dataset=None
                               ):
     if dataset is None:
-        if datatransforms_cfg is not None:
-            # in case only val or test transforms are provided. 
-            if split not in datatransforms_cfg.keys() and split in ['val', 'test']:
-                trans_split = 'val'
-            else:
-                trans_split = split
-            data_transform = build_transforms_from_cfg(trans_split, datatransforms_cfg)            
+        if datatransforms_cfg is not None:         
+            data_transform = build_transforms_from_cfg(split, datatransforms_cfg)            
         else:
             data_transform = None
 

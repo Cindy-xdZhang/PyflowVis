@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 # abstract base class work
 from abc import ABC, abstractmethod
-
+from .interpolation import bilinear_interpolate
 
 class VectorFieldLinearOperation():
     """ the VectorFieldLinearOperation class implements linear operations on vector fields.
@@ -129,6 +129,13 @@ class UnsteadyVectorField2D(IVectorFeild2D):
         self.timeInterval = (tmax-tmin)/(time_steps-1)
         
            
+    def getBilinearInterpolateVector(self, posX:float,posY:float,time:int):
+        # sliceData=self.field[time]
+        vec =bilinear_interpolate(self.field[time],  posX,posY)
+        return vec
+       
+
+
 
     def getSlice(self, timeSlice) -> SteadyVectorField2D:
         steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary,self.domainMaxBoundary)

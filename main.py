@@ -1,5 +1,5 @@
 from VisualizationEngine import *
-from train_vector_field import *
+from train import *
 from FLowUtils.AnalyticalFlowCreator import *
 from config.LoadConfig import load_config
 from VertexArrayObject import *

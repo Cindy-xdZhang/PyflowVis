@@ -33,5 +33,5 @@ datatransforms:
     noiseMaginitude: 0.0000
   
 
-
-
+test_tasks:
+      tasks: ["TestClassification","TestRandomSampless"] 

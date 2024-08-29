@@ -5,11 +5,11 @@
 int main()
 {
 
-    // testKillingTransformationForRFC();
-    // generateUnsteadyField(15, 20, 100, "../data/DebugRobust/", "train"); // 30000
-    // generateUnsteadyField(4, 20, 10, "../data/DebugRobust/", "validation"); // 800
-    generateUnsteadyField(1, 3, 3, "../data/DebugRobust/", "test");
-    //     testCriterion();
+    // generateUnsteadyFieldPathline(5, 1, 1, "../data/Pathline/", "train");
+    //  generateUnsteadyField(15, 20, 100, "../data/Robust/", "train"); // 30000
+    //  generateUnsteadyField(10, 10, 10, "../data/Robust/", "validation"); // 1000
+
+    generateUnsteadyField(2, 2, 2, "../data/Robust2/", "test"); // 2000
 
     // GenerateSteadyVortexBoundary(30, 60, "../data/Steady/", "train");
     // GenerateSteadyVortexBoundary(10, 20, "../data/Steady/", "validation");

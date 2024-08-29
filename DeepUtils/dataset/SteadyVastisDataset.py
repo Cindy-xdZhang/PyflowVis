@@ -13,7 +13,6 @@ class SteadyVastisDataset(torch.utils.data.Dataset):
         self.dataName=[]
         self.data=[]
         self.labelVortex=[]
-        self.transform=[]
         self.dastasetMetaInfo={}
         self.split=split
         self.preLoading(split)
@@ -32,10 +31,9 @@ class SteadyVastisDataset(torch.utils.data.Dataset):
         split_str =mode if mode!="val" else "validation"
         target_directory_path=os.path.join(self.directory_path,split_str) 
         
-        rc_n_subfoders=os.listdir(target_directory_path)
+        rc_n_subfoders=[os.path.join(target_directory_path,folder) for folder in os.listdir(target_directory_path) if os.path.isdir(os.path.join(target_directory_path, folder))]
         for folder_name in tqdm.tqdm(rc_n_subfoders) :           
-                sub_folder=os.path.join(target_directory_path,folder_name)
-                self.loadOneTaskFolder(sub_folder)          
+                self.loadOneTaskFolder(folder_name)          
         #logging dataset information    and time consuming of preloading data
         elapsed = time.time()
         elapsed = elapsed - start

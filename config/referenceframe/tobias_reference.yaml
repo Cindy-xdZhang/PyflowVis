@@ -1,0 +1,52 @@
+
+model:
+  NAME: BaseCls
+  encoder_args:
+    NAME: TobiasReferenceFrameCNN
+    in_channels: 2
+    DataSizeX: 16
+    DataSizeY: 16
+    TimeSteps: 5
+    out_channels: 6
+  criterion_args:
+    NAME: MSELoss
+   
+
+# ---------------------------------------------------------------------------- #
+# Training cfgs of TobiasVortexBoundaryCNN
+# ---------------------------------------------------------------------------- #
+# Training parameters
+
+lr: 0.0005
+second_lr: 0.00001
+epochs: 300
+batch_size: 256
+warmup_epochs: 100 
+scheduler: TwoStep
+random_seed: 3328
+# wandb: True 
+
+
+
+dataloader:
+  num_workers: 0
+dataset:
+  NAME: UnsteadyVastisDataset
+  data_dir: 'CppProjects/data/Robust/X16_Y16_T5_no_mixture'
+
+datatransforms:
+  train: [WhiteNoise,MinMaxNormalization]  # rotation does not help
+  val: [WhiteNoise,MinMaxNormalization]
+  test: [WhiteNoise,MinMaxNormalization]
+  kwargs:
+    noiseMaginitude: 0.01
+  
+
+
+test_tasks:
+      tasks: ["TestLoss","TestRandomSamples","TestReconstructSteadyField"]
+      kwargs:
+          data_dir: 'CppProjects/data/rotatingZeroField'
+     
+   
+

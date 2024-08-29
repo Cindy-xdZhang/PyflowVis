@@ -18,10 +18,8 @@ def concat_collate_fn(datas):
             'o': torch.IntTensor(offset)}
     return data
 
-
 class Compose(object):
     """Composes several transforms together."""
-
     def __init__(self, transforms):
         self.transforms = transforms
 
@@ -29,12 +27,9 @@ class Compose(object):
         for t in self.transforms:
             args = t(args)
         return args
-
-
 class ListCompose(object):
     def __init__(self, transforms):
         self.transforms = transforms
-
     def __call__(self, coord, feat, label):
         for t in self.transforms:
             coord, feat, label = t(coord, feat, label)
