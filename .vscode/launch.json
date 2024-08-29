@@ -13,7 +13,7 @@
             "args": [
                 "--config",
                 // "config/classification/vortexboundary.yaml"
-                "config/referenceframe/tobias_reference.yaml"
+                "config/classification/vortexboundary_unet.yaml"
             ]
         }
     ]

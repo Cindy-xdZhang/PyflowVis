@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from FLowUtils.VectorField2d import *
-from DeepUtils.dataset.rawflowReader import loadOneFlowEntryRawData,read_rootMetaGridresolution
+from  .data_utils import loadOneFlowEntryRawData,read_rootMetaGridresolution
 import torch,time,tqdm
 from .build import DATASETS
 from .data_utils import *

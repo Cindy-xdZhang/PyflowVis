@@ -1,9 +1,10 @@
 
 model:
-  NAME: BaseCls
+  NAME: BaseSeg
   encoder_args:
-    NAME: TobiasVortexBoundaryCNN
+    NAME: TobiasVortexBoundaryUnet
     in_channels: 2
+    out_channels: 2
     DataSizeX: 16
     DataSizeY: 16
   criterion_args:
@@ -14,21 +15,20 @@ model:
 # Training cfgs of TobiasVortexBoundaryCNN
 # ---------------------------------------------------------------------------- #
 # Training parameters
-
+# random_seed: 4259
+# wandb: True 
 lr: 0.001
-second_lr: 0.0001
-epochs: 100
-warmup_epochs: 80 
+epochs: 300
 scheduler: TwoStep
-random_seed: 4259
-wandb: True 
+warmup_epochs: 100 
+second_lr: 0.0001
 
 
 
 dataloader:
   num_workers: 0
 dataset:
-  NAME: SteadyVastisClassification
+  NAME: SteadyVastisSegmentation
   data_dir: 'CppProjects/data/Steady/X16_Y16_Steady'
 
 datatransforms:
@@ -40,7 +40,7 @@ datatransforms:
   
 
 test_tasks:
-      tasks: ["TestClassification","TestRandomSamples","TestRotatingZeroField"] 
+      tasks: ["TestSegmentation"] 
 
 
 

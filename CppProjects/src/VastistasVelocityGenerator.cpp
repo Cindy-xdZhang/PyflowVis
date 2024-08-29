@@ -3,7 +3,7 @@
 #include <cmath>
 #include <corecrt_math_defines.h>
 #include <random>
-
+std::mt19937 rng(static_cast<unsigned int>(std::time(0)));
 VastistasVelocityGenerator::VastistasVelocityGenerator(int Xdim, int Ydim, Eigen::Vector2d minBondary, Eigen::Vector2d maxBondary, double rc, double n)
     : mgridDim_x(Xdim)
     , mgridDim_y(Ydim)
@@ -73,7 +73,7 @@ SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField_VortexBounda
 SteadyVectorField2D VastistasVelocityGenerator::generateSteadyFieldMixture(int mixture) const noexcept
 {
     std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d { 0.0, 0.0 }));
-    std::mt19937 rng(static_cast<unsigned int>(std::time(0)));
+
     std::normal_distribution<double> genTx(0.0, 0.59);
     std::normal_distribution<double> genTy(0.0, 0.62);
     std::normal_distribution<double> genCx(0.0, 0.49);
@@ -81,9 +81,12 @@ SteadyVectorField2D VastistasVelocityGenerator::generateSteadyFieldMixture(int m
     std::normal_distribution<double> genCy(0.0, 0.47);
     std::normal_distribution<double> genDy(0.0, 0.25);
 
+    std::normal_distribution<double> dist_rc(1.87, 0.37); // mean = 1.87, stddev = 0.34
+    std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
     // random generate mixture pairs of sx,sy, theta
-    std::vector<Eigen::Matrix2d> mixturesParams;
+    std::vector<Eigen::Matrix2d> mixturesdeformMats;
     std::vector<Eigen::Vector2d> txyParams;
+    std::vector<Eigen::Vector2d> n_rcParams;
     for (int i = 0; i < mixture; i++) {
         double tx = genTx(rng);
         double ty = genTy(rng);
@@ -92,25 +95,29 @@ SteadyVectorField2D VastistasVelocityGenerator::generateSteadyFieldMixture(int m
         double cy = genCy(rng);
         double dy = genDy(rng);
 
+        Eigen::Vector2d tmp_n_rc;
+        tmp_n_rc(0) = dist_n(rng);
+        tmp_n_rc(1) = dist_rc(rng);
+        n_rcParams.emplace_back(tmp_n_rc);
+
         Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
         deformMat(0, 0) = dx;
         deformMat(0, 1) = cx;
         deformMat(1, 0) = -cy;
         deformMat(1, 1) = dy;
-        mixturesParams.emplace_back(deformMat);
+        mixturesdeformMats.emplace_back(deformMat);
         txyParams.emplace_back(Eigen::Vector2d(tx, ty));
     }
 
-    auto lambdaFunc = [this, mixturesParams, txyParams](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
-        const int mixtureCount = mixturesParams.size();
+    auto lambdaFunc = [this, mixturesdeformMats, txyParams, n_rcParams, mixture](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
         Eigen::Vector2d result = Eigen::Vector2d::Zero();
+        for (int i = 0; i < mixture; i++) {
+            const auto tmp_n_rc = n_rcParams[i];
+            const auto deformMat = mixturesdeformMats[i];
+            const auto critial_point = txyParams[i];
 
-        for (int i = 0; i < mixtureCount; i++) {
-            auto deformMat = mixturesParams[i];
-            auto deformPos = deformMat.inverse() * pos;
-            auto critial_point = txyParams[i];
-            Eigen::Vector2d xy_txy = deformPos - critial_point;
-            const double vastis = NormalizedVastistasV0(xy_txy.norm());
+            Eigen::Vector2d xy_txy = pos - critial_point;
+            const double vastis = NormalizedVastistasV0_Fn(xy_txy.norm(), tmp_n_rc(0), tmp_n_rc(1));
             auto vp = deformMat * xy_txy * vastis; // eq (6) of paper Robust Reference Frame Extraction
             result += vp;
         }

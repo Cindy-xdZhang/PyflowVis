@@ -13,12 +13,15 @@ def print_args(args, printer=print):
         printer("{}:{}".format(arg, content))
     printer("==========     args END    =============")
 
-def set_seed(seed):
+def set_seed(seed,force_determinsitic=False):
     torch.manual_seed(seed)  # Sets the seed for CPU
     torch.cuda.manual_seed(seed)  # Sets the seed for all GPU devices
     torch.cuda.manual_seed_all(seed)  # If you’re using multiple GPUs
     np.random.seed(seed)
     random.seed(seed)
+    if force_determinsitic:
+        # Ensures that the CUDA algorithms are deterministic, potentially at the cost of performance
+        torch.backends.cudnn.deterministic=True
 
 
 def runNameTagGenerator(config) ->(str,list[:str]):
@@ -37,7 +40,7 @@ def CollectWandbLogfiles(arti_code):
     fileList0=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]
     saveFolder="./FlowUtils/"
     fileList1=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]    
-    fileList0.append("train_vector_field.py")
+    fileList0.append("train.py")
 
     for file in fileList0:
         arti_code.add_file(file, name= file)
@@ -150,5 +153,8 @@ def argParseAndPrepareConfig():
 
     if 'random_seed' not in cfg:
         cfg['random_seed']=np.random.randint(0,5000)
-    set_seed(cfg['random_seed'])
+        set_seed(cfg['random_seed'])
+    else:
+        set_seed(cfg['random_seed'],force_determinsitic=True)
+
     return cfg

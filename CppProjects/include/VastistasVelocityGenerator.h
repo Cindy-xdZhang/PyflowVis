@@ -39,6 +39,14 @@ enum class VastisVortexType : unsigned char {
     center_cw = 1,
     center_ccw = 2,
 };
+// one VastisParamter is Eigen::Vector2d rc_n, Eigen::Vector2d tx_ty,Eigen::Vector3d sxsytheta, int si.
+using VastisParamter = std::tuple<Eigen::Vector2d, Eigen::Vector2d, Eigen::Vector3d, int>;
+
+inline auto NormalizedVastistasV0_Fn(const double r, const double in_n, const double in_rc)
+{
+    const auto v0_r = r / (2 * M_PI * (in_rc * in_rc) * std::pow(std::pow(r / in_rc, 2 * in_n) + 1, 1 / in_n));
+    return v0_r / (r);
+}
 class VastistasVelocityGenerator {
 public:
     VastistasVelocityGenerator(int Xdim, int Ydim, Eigen::Vector2d minBondary, Eigen::Vector2d maxBondary, double rc, double n);

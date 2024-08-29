@@ -4,7 +4,7 @@ from DeepUtils.dataset import build_dataloader_from_cfg
 import numpy as np
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 from DeepUtils.dataset import UnsteadyVastisDataset
-import copy
+import os
 class TestLoss(object):
     """ TestLoss is the default test task.  """
     def __init__(self, device,**kwargs):
@@ -222,8 +222,100 @@ class TestReconstructSteadyField(object):
             total_error+=diff.mean()
         print(f"reconstruct  totaldiff ={total_error}")
         return None    
+    
+def save_segmentation_as_png(vortexsegmentationLabel, filename, upSample=1.0):
+    from PIL import Image
+    """
+    Saves a 2D binary segmentation as a PNG file.
+
+    Parameters:
+        vortexsegmentationLabel (numpy.ndarray): The segmentation array of shape (Ydim, Xdim, 2).
+        filename (str): The filename to save the PNG image.
+        upSample (float): Upsampling factor to resize the image. Default is 1.0 (no scaling).
+    """
+    # Create the directory if it does not exist
+    folder = os.path.dirname(filename)  # Extract the folder path from the filename
+    if folder and not os.path.exists(folder):  # Ensure folder is non-empty and doesn't exist
+        os.makedirs(folder)
+        print(f"Created directory: {folder}")
+    
+    # Convert the segmentation to a binary mask
+    binary_mask = np.where(vortexsegmentationLabel[..., 1] >= 0.5, 255, 0).astype(np.uint8)
+    
+    # Create an image from the binary mask
+    image = Image.fromarray(binary_mask, mode='L')  # 'L' mode for (8-bit pixels, black and white)
+    
+    # Apply upsampling if needed
+    if upSample != 1.0:
+        new_size = (int(image.width * upSample), int(image.height * upSample))
+        image = image.resize(new_size, Image.NEAREST)  # Use NEAREST for upsampling binary images
+    
+    # Save the image
+    image.save(filename)
+def segmentationCriteria(pred, gt):
+    """
+    Computes precision, recall, F1 score, and Intersection over Union (IoU) for segmentation.
+    Parameters:
+        pred (numpy.ndarray): Predicted segmentation mask, shape [batch_size, width, height, 2].
+        gt (numpy.ndarray): Ground truth segmentation mask, shape [batch_size, width, height, 2].
+    Returns:
+        precision (float): Precision of the segmentation.
+        recall (float): Recall of the segmentation.
+        F1 (float): F1 score of the segmentation.
+        IoU (float): Intersection over Union (IoU) of the segmentation.
+    """
+    # Extract the binary segmentation mask (second channel)
+    pred_mask = pred[..., 1]  # shape [batch_size, width, height]
+    gt_mask = gt[..., 1]      # shape [batch_size, width, height]
+    
+    # Flatten the masks to compute metrics for the entire batch
+    pred_flat = pred_mask.flatten()
+    gt_flat = gt_mask.flatten()
+
+    # True positives, False positives, False negatives
+    TP = np.sum((pred_flat >= 0.5) & (gt_flat == 1))  # True Positive
+    FP = np.sum((pred_flat >= 0.5) & (gt_flat == 0))  # False Positive
+    FN = np.sum((pred_flat < 0.5) & (gt_flat == 1))  # False Negative
+
+    # Precision: TP / (TP + FP)
+    precision = TP / (TP + FP) if (TP + FP) > 0 else 0.0
+
+    # Recall: TP / (TP + FN)
+    recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
+
+    # F1 Score: 2 * (Precision * Recall) / (Precision + Recall)
+    F1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    # Intersection over Union (IoU): TP / (TP + FP + FN)
+    IoU = TP / (TP + FP + FN) if (TP + FP + FN) > 0 else 0.0
+
+    return precision, recall, F1, IoU
+
+class TestSegmentation(object):
+    """ TestSegmentation  is the default test task for Segmentation tasks """
+    def __init__(self, device,samples=5,**kwargs):
+          self.device=device
+          self.samples=samples
 
 
+    def __call__(self, model,test_data_loader):
+        device=self.device
+        #random select  samples to visualize
+        for i in range(self.samples):
+            sample=random.randint(0,len(test_data_loader.dataset)-1)
+            vectorFieldImage, labelVortex=test_data_loader.dataset[sample]
+            vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
+            predictition= model(vectorFieldImage)
+            predictition=predictition[0].cpu().numpy()
+            labelVortex=labelVortex.cpu().numpy()
+            name=test_data_loader.dataset.getSampleName(sample)
+            save_segmentation_as_png(predictition,f"./testOutput/pred_{name}.png",upSample=10.0)
+            save_segmentation_as_png(labelVortex,f"./testOutput/gt_{name}.png",upSample=10.0)
+            precision, recall, F1, IoU=segmentationCriteria(predictition,labelVortex)
+            print(f"precision, recall, F1, IoU={precision},{recall},{F1},{IoU}")
+
+
+  
 
 def test_model(model,cfg):
     device = cfg['device']

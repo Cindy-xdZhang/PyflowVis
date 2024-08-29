@@ -30,7 +30,7 @@ constexpr int LicImageSize = 64;
 Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
 constexpr int LicSaveFrequency = 1; // every 2 time steps save one
-const double stepSize = 0.01;
+const double stepSize = 0.012;
 const int maxLICIteratioOneDirection = 256;
 #if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
 auto policy = std::execution::seq;
@@ -1377,6 +1377,178 @@ void generateUnsteadyFieldPathline(int Nparamters, int samplePerParameters, int 
             } // for (size_t observerIndex = 0..)
 
         } // for sample
+    });
+
+    // create Root meta json file, save plane information here instead of every sample's meta file
+    string taskFolder_rootMetaFilename = root_folder + "meta.json";
+    // save root meta info:
+    std::ofstream root_jsonOut(taskFolder_rootMetaFilename);
+    if (!root_jsonOut.good()) {
+        printf("couldn't open file: %s", taskFolder_rootMetaFilename.c_str());
+        return;
+    } else {
+        cereal::JSONOutputArchive archive_o(root_jsonOut);
+        archive_o(CEREAL_NVP(Xdim));
+        archive_o(CEREAL_NVP(Ydim));
+        archive_o(CEREAL_NVP(unsteadyFieldTimeStep));
+        archive_o(CEREAL_NVP(domainMinBoundary));
+        archive_o(CEREAL_NVP(domainMaxBoundary));
+        archive_o(CEREAL_NVP(tmin));
+        archive_o(CEREAL_NVP(tmax));
+        // save min and max
+        archive_o(cereal::make_nvp("minV", minMagintude));
+        archive_o(cereal::make_nvp("maxV", maxMagintude));
+    }
+}
+
+// reproduce paper : Robust Reference Frame Extraction from Unsteady 2D Vector
+Fields with Convolutional Neural Networks void generateUnsteadyFieldMixture(int Nfield, int observerPerField, const std::string in_root_fodler, const std::string dataSetSplitTag)
+{
+
+    // check datasplittag is "train"/"test"/"validation"
+    if (dataSetSplitTag != "train" && dataSetSplitTag != "test" && dataSetSplitTag != "validation") {
+        printf("dataSetSplitTag should be \"train\"/\"test\"/\"validation\"");
+        return;
+    }
+
+    int numVelocityFields = Nfield; // num of fields per n, rc parameter setting
+    std::string root_folder = in_root_fodler + "/X" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "_mixture/" + dataSetSplitTag + "/";
+    if (!filesystem::exists(root_folder)) {
+        filesystem::create_directories(root_folder);
+    }
+
+    Eigen::Vector2d gridInterval = {
+        (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
+        (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
+    };
+
+    // std::random_device rd;
+    // std::mt19937 rng(rd());
+    // std::normal_distribution<double> genTheta(0.0, 0.50); // rotation angle's distribution
+    //// normal distribution from supplementary material of Vortex Boundary Identification Paper
+    // std::normal_distribution<double> genSx(0, 3.59);
+    // std::normal_distribution<double> genSy(0, 2.24);
+    // std::normal_distribution<double> genTx(0.0, 1.34);
+    // std::normal_distribution<double> genTy(0.0, 1.27);
+    // std::uniform_int_distribution<int> dist_int(0, 2);
+    double minMagintude = INFINITY;
+    double maxMagintude = -INFINITY;
+
+    const string Major_task_foldername = "velocity_mix/";
+    const string Major_task_Licfoldername = Major_task_foldername + "/LIC/";
+
+    std::string task_folder = root_folder + Major_task_foldername;
+    if (!filesystem::exists(task_folder)) {
+        filesystem::create_directories(task_folder);
+    }
+    std::string task_licfolder = root_folder + Major_task_Licfoldername;
+    if (!filesystem::exists(task_licfolder)) {
+        filesystem::create_directories(task_licfolder);
+    }
+
+    std::vector<int> threadRange(Nfield);
+    std::generate(threadRange.begin(), threadRange.end(), [n = 0]() mutable { return n++; });
+    for_each(policy, threadRange.begin(), threadRange.end(), [&](const int threadID) {
+        int totalSamplesThisThread = observerPerField;
+
+        VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, 0.0, 0.0);
+        auto steadyMixture = generator.generateSteadyFieldMixture(3);
+
+        for (size_t observerIndex = 0; observerIndex < observerPerField; observerIndex++) {
+            printf(".");
+
+            const int taskSampleId = threadID * totalSamplesThisThread + observerIndex;
+
+            const string sample_tag_name
+                = "sample_" + to_string(taskSampleId);
+            string metaFilename = task_folder + sample_tag_name + "meta.json";
+            string velocityFilename = task_folder + sample_tag_name + ".bin";
+            const std::vector<float> rawSteadyData = flatten2DAs1Dfloat(steadyMixture.field);
+            const auto& observerParameters = generateRandomABCVectors();
+            const auto& abc = observerParameters.first;
+            const auto& abc_dot = observerParameters.second;
+            /* auto func = KillingComponentFunctionFactory::arbitrayObserver(abc, abc_dot);
+           KillingAbcField observerfieldDeform(  func, unsteadyFieldTimeStep, tmin, tmax);*/
+            auto unsteady_field = Tobias_ObserverTransformation(steadyMixture, abc, abc_dot, tmin, tmax, unsteadyFieldTimeStep);
+            // reconstruct unsteady field from observer field
+            auto reconstruct_field = Tobias_reconstructUnsteadyField(unsteady_field, abc, abc_dot);
+#ifdef VALIDATE_RECONSTRUCTION_RESULT
+
+            // //validate reconstruction result
+            for (size_t rec = 0; rec < unsteadyFieldTimeStep; rec++) {
+                const auto& reconstruct_slice = reconstruct_field.field[rec];
+                // compute reconstruct slice difference with steady field
+                double diffSum = 0.0;
+                for (size_t y = 1; y < Ydim - 1; y++)
+                    for (size_t x = 1; x < Xdim - 1; x++) {
+                        auto diff = reconstruct_slice[y][x] - steadyMixture.field[y][x];
+                        diffSum += diff.norm();
+                    }
+                double tolerance = (Xdim - 2) * (Ydim - 2) * 0.0001;
+                // has debug, major reason for reconstruction failure is velocity too big make observer transformation query value from region out of boundary
+                if (diffSum > tolerance) {
+                    printf("\n\n");
+                    printf("\n reconstruct field not equal to steady field at step %u\n", (unsigned int)rec);
+                    printf("\n\n");
+                }
+            }
+#endif
+#ifdef RENDERING_LIC_SAVE_DATA
+
+            {
+                auto outputSteadyTexture = LICAlgorithm(steadyMixture, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+
+                string steadyField_name = "steady_";
+                string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
+                saveAsPNG(outputSteadyTexture, licFilename0);
+
+                auto outputTextures = LICAlgorithm_UnsteadyField(unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+                auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+
+                for (size_t i = 0; i < outputTextures.size(); i += LicSaveFrequency) {
+                    string tag_name = sample_tag_name + "deformed_" + std::to_string(i);
+                    string licFilename = task_licfolder + tag_name + "lic.png";
+
+                    saveAsPNG(outputTextures[i], licFilename);
+
+                    string tag_name_rec = sample_tag_name + "reconstruct_" + std::to_string(i);
+                    string licFilename_rec = task_licfolder + tag_name_rec + "lic.png";
+                    saveAsPNG(outputTexturesReconstruct[i], licFilename_rec);
+                }
+                auto rawUnsteadyFieldData = flatten3DAs1Dfloat(unsteady_field.field);
+                auto [minV, maxV] = computeMinMax(rawUnsteadyFieldData);
+                if (minV < minMagintude) {
+                    minMagintude = minV;
+                }
+                if (maxV > maxMagintude) {
+                    maxMagintude = maxV;
+                }
+                // save meta info:
+                std::ofstream jsonOut(metaFilename);
+                if (!jsonOut.good()) {
+                    printf("couldn't open file: %s", metaFilename.c_str());
+                    return;
+                }
+                {
+                    cereal::JSONOutputArchive archive_o(jsonOut);
+
+                    archive_o(cereal::make_nvp("observer_abc", abc));
+                    archive_o(cereal::make_nvp("observer_abc_dot", abc_dot));
+                }
+                // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
+                jsonOut.close();
+                std::ofstream outBin(velocityFilename, std::ios::binary);
+                if (!outBin.good()) {
+                    printf("couldn't open file: %s", velocityFilename.c_str());
+                    return;
+                }
+
+                cereal::BinaryOutputArchive archive_Binary(outBin);
+                archive_Binary(rawUnsteadyFieldData);
+                outBin.close();
+            }
+#endif
+        } // for (size_t observerIndex = 0..)
     });
 
     // create Root meta json file, save plane information here instead of every sample's meta file

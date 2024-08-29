@@ -22,7 +22,7 @@ dataloader:
 random_seed: 754
 
 dataset:
-  NAME: SteadyVastisDataset
+  NAME: SteadyVastisClassification
   data_dir: 'CppProjects/data/Steady/X16_Y16_Steady'
  
 datatransforms:

@@ -5,22 +5,19 @@ import torch,time,tqdm
 from .build import DATASETS
 from .data_utils import *
 
-
-@DATASETS.register_module()
-class SteadyVastisDataset(torch.utils.data.Dataset):
+class SteadyVastis(torch.utils.data.Dataset):
     def __init__(self, data_dir,split, transform,**kwargs):
         self.directory_path=data_dir
         self.dataName=[]
         self.data=[]
-        self.labelVortex=[]
+        self.label=[]
         self.dastasetMetaInfo={}
         self.split=split
         self.preLoading(split)
         self.transform = transform
 
     def getSampleName(self,sampleIdx):        
-        return self.dataName[sampleIdx]
-    
+        return self.dataName[sampleIdx]    
     
     def preLoading(self,mode):                
         print(f"Preloading [{mode}] data......")
@@ -40,6 +37,27 @@ class SteadyVastisDataset(torch.utils.data.Dataset):
         print(f"Preloading  [{mode}] data......done")
         print(f"Total number of [{mode}] data:{len(self.data)}, took {elapsed} seconds")
 
+    def __len__(self):
+        return len(self.data)
+    def __getitem__(self, idx):
+        data=self.data[idx]
+        if self.transform is not None:
+            data = self.transform(data)
+        return data , self.label[idx]
+    
+
+    def loadOneTaskFolder(self,sub_folder:str):
+        """son class need to overwrite this function
+        """
+        pass
+            
+            
+        
+@DATASETS.register_module()
+class SteadyVastisClassification(SteadyVastis):
+    def __init__(self, data_dir,split, transform,**kwargs):
+        super().__init__( data_dir,split, transform,**kwargs)
+
     def loadOneTaskFolder(self,sub_folder:str):
         Xdim,Ydim=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"]
         #find all *.bin data in this subfoder
@@ -49,15 +67,27 @@ class SteadyVastisDataset(torch.utils.data.Dataset):
             loadField,label=loadOneFlowEntryRawDataSteady(binPath, Xdim,Ydim)
             dataSlice=torch.tensor(loadField).transpose(0, -1)
             self.data.append(dataSlice)
-            self.labelVortex.append(torch.tensor(label))
+            self.label.append(torch.tensor(label))
             if self.split=="test":
                 self.dataName.append(keep_path_last_n_names(binPath,2))
-            
+
+
         
-    def __len__(self):
-        return len(self.data)
-    def __getitem__(self, idx):
-        data=self.data[idx]
-        if self.transform is not None:
-            data = self.transform(data)
-        return data , self.labelVortex[idx]
+@DATASETS.register_module()
+class SteadyVastisSegmentation(SteadyVastis):
+    def __init__(self, data_dir,split, transform,**kwargs):
+        super().__init__( data_dir,split, transform,**kwargs)
+
+    def loadOneTaskFolder(self,sub_folder:str):
+        Xdim,Ydim=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"]
+        dm_min,dm_max=self.dastasetMetaInfo["domainMinBoundary"],self.dastasetMetaInfo["domainMaxBoundary"]
+        #find all *.bin data in this subfoder
+        binFiles = [f for f in os.listdir(sub_folder) if f.endswith('.bin')]
+        for binFile in binFiles:
+            binPath=os.path.join(sub_folder,binFile)
+            loadField,label=loadOneFlowEntrySteadySegmentation(binPath, Xdim,Ydim,domainMinBoundary=dm_min,dominMaxBoundary=dm_max)
+            dataSlice=torch.tensor(loadField).transpose(0, -1)
+            self.data.append(dataSlice)
+            self.label.append(torch.tensor(label))
+            if self.split=="test":
+                self.dataName.append(keep_path_last_n_names(binPath,2))                
