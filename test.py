@@ -5,6 +5,10 @@ import numpy as np
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 from DeepUtils.dataset import UnsteadyVastisDataset
 import os
+from PIL import Image
+from FLowUtils.vortexCriteria import *
+
+
 class TestLoss(object):
     """ TestLoss is the default test task.  """
     def __init__(self, device,**kwargs):
@@ -224,7 +228,7 @@ class TestReconstructSteadyField(object):
         return None    
     
 def save_segmentation_as_png(vortexsegmentationLabel, filename, upSample=1.0):
-    from PIL import Image
+
     """
     Saves a 2D binary segmentation as a PNG file.
 
@@ -240,7 +244,7 @@ def save_segmentation_as_png(vortexsegmentationLabel, filename, upSample=1.0):
         print(f"Created directory: {folder}")
     
     # Convert the segmentation to a binary mask
-    binary_mask = np.where(vortexsegmentationLabel[..., 1] >= 0.5, 255, 0).astype(np.uint8)
+    binary_mask = np.where(vortexsegmentationLabel[..., 1] > 0.5, 255, 0).astype(np.uint8)
     
     # Create an image from the binary mask
     image = Image.fromarray(binary_mask, mode='L')  # 'L' mode for (8-bit pixels, black and white)
@@ -252,6 +256,7 @@ def save_segmentation_as_png(vortexsegmentationLabel, filename, upSample=1.0):
     
     # Save the image
     image.save(filename)
+
 def segmentationCriteria(pred, gt):
     """
     Computes precision, recall, F1 score, and Intersection over Union (IoU) for segmentation.
@@ -259,10 +264,7 @@ def segmentationCriteria(pred, gt):
         pred (numpy.ndarray): Predicted segmentation mask, shape [batch_size, width, height, 2].
         gt (numpy.ndarray): Ground truth segmentation mask, shape [batch_size, width, height, 2].
     Returns:
-        precision (float): Precision of the segmentation.
-        recall (float): Recall of the segmentation.
-        F1 (float): F1 score of the segmentation.
-        IoU (float): Intersection over Union (IoU) of the segmentation.
+        np.array( [TP,FP,FN, precision, recall, F1, IoU],dtype=np.float32) 
     """
     # Extract the binary segmentation mask (second channel)
     pred_mask = pred[..., 1]  # shape [batch_size, width, height]
@@ -271,10 +273,11 @@ def segmentationCriteria(pred, gt):
     # Flatten the masks to compute metrics for the entire batch
     pred_flat = pred_mask.flatten()
     gt_flat = gt_mask.flatten()
+    total_samples=gt_flat.shape[0]
 
     # True positives, False positives, False negatives
-    TP = np.sum((pred_flat >= 0.5) & (gt_flat == 1))  # True Positive
-    FP = np.sum((pred_flat >= 0.5) & (gt_flat == 0))  # False Positive
+    TP = np.sum((pred_flat > 0.5) & (gt_flat == 1))  # True Positive
+    FP = np.sum((pred_flat > 0.5) & (gt_flat == 0))  # False Positive
     FN = np.sum((pred_flat < 0.5) & (gt_flat == 1))  # False Negative
 
     # Precision: TP / (TP + FP)
@@ -289,30 +292,57 @@ def segmentationCriteria(pred, gt):
     # Intersection over Union (IoU): TP / (TP + FP + FN)
     IoU = TP / (TP + FP + FN) if (TP + FP + FN) > 0 else 0.0
 
-    return precision, recall, F1, IoU
+    TP=TP/float(total_samples)
+    FP=FP/float(total_samples)
+    FN=FN/float(total_samples)
+    return np.array( [TP,FP,FN, precision, recall, F1, IoU],dtype=np.float32) 
+
+
+
+
 
 class TestSegmentation(object):
     """ TestSegmentation  is the default test task for Segmentation tasks """
-    def __init__(self, device,samples=5,**kwargs):
+    def __init__(self, device,samples=10,**kwargs):
           self.device=device
           self.samples=samples
 
 
     def __call__(self, model,test_data_loader):
         device=self.device
+        segError=0.0
+        meta_=test_data_loader.dataset.dastasetMetaInfo
+        Xdim,Ydim=meta_["Xdim"],meta_["Ydim"]
+        dm_min,dm_max=meta_["domainMinBoundary"],meta_["domainMaxBoundary"]
+        grid_dx,grid_dy=(dm_max[0]-dm_min[0])/float( Xdim-1),(dm_max[1]-dm_min[1])/float( Ydim-1)
+
+        for batch_idx, (data, label) in enumerate(test_data_loader):
+            data,label = data.to(device), label.to(device)
+            predictition= model(data)                
+            segError_=segmentationCriteria(predictition.cpu().numpy(),label.cpu().numpy())
+            segError+=segError_
+
+        segError /= len(test_data_loader)
+        TP,FP,FN, precision, recall, F1, IoU=segError[0],segError[1],segError[2],segError[3],segError[4],segError[5],segError[6]
+        print(f"TP,FP,FN, precision, recall, F1, IoU={TP},{FP},{FN}, {precision},{recall},{F1},{IoU}")
+
         #random select  samples to visualize
         for i in range(self.samples):
             sample=random.randint(0,len(test_data_loader.dataset)-1)
             vectorFieldImage, labelVortex=test_data_loader.dataset[sample]
-            vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
-            predictition= model(vectorFieldImage)
+            batch_vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
+            predictition= model(batch_vectorFieldImage)
             predictition=predictition[0].cpu().numpy()
             labelVortex=labelVortex.cpu().numpy()
             name=test_data_loader.dataset.getSampleName(sample)
-            save_segmentation_as_png(predictition,f"./testOutput/pred_{name}.png",upSample=10.0)
-            save_segmentation_as_png(labelVortex,f"./testOutput/gt_{name}.png",upSample=10.0)
-            precision, recall, F1, IoU=segmentationCriteria(predictition,labelVortex)
-            print(f"precision, recall, F1, IoU={precision},{recall},{F1},{IoU}")
+            save_segmentation_as_png(predictition,f"./testOutput/{name}_pred.png",upSample=10.0)
+            save_segmentation_as_png(labelVortex,f"./testOutput/{name}_gt.png",upSample=10.0)
+            rawVectorField=vectorFieldImage.transpose(0,-1).cpu().numpy()
+            qCriterion=computeQcriterion(rawVectorField,grid_dx,grid_dy)
+            ivd=computeIVD(rawVectorField,grid_dx,grid_dy)
+            saveCriteriaPicture(qCriterion,f"./testOutput/{name}_q_cri.png",upSample=10.0)
+            saveCriteriaPicture(ivd,f"./testOutput/{name}_ivd.png",upSample=10.0)
+            # precision, recall, F1, IoU=segmentationCriteria(predictition,labelVortex)
 
 
   
@@ -326,6 +356,7 @@ def test_model(model,cfg):
                                         split='test'                                             
                                         )
     print(f"length of test dataset: {len(test_data_loader.dataset)}")
+    model.to(cfg['device'])
     model.eval()
     #building test tasks
     test_cfg=cfg['test_tasks']
@@ -347,7 +378,13 @@ def test_model(model,cfg):
             retValues[key]=t(model,test_data_loader)
     
 
-    retLoss=retValues["TestLoss"] if "TestLoss" in retValues else retValues["TestClassification"]
+    if "TestLoss" in retValues:
+        retLoss=retValues["TestLoss"]
+    elif "TestClassification" in retValues:
+        retLoss=retValues["TestClassification"]
+    else :
+        retLoss=(None,None,None)
+
     test_loss,min_loss,max_loss=retLoss
     return test_loss,min_loss,max_loss
 

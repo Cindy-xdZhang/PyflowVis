@@ -9,7 +9,7 @@ from DeepUtils.models import build_model_from_cfg
 from DeepUtils.optim import build_optimizer_from_cfg
 from DeepUtils.dataset import build_dataloader_from_cfg,getDatasetRootaMeta
 from DeepUtils.scheduler import build_scheduler_from_cfg
-from test_tasks import test_model
+from test import test_model
 
 GLOBAL_WANDB_PROJECT_NAME="DeepVortexExtraction"
 initLogging()

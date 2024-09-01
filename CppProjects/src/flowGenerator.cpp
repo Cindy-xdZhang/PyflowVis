@@ -1275,134 +1275,8 @@ void GenerateSteadyVortexBoundary(int Nparamters, int samplePerParameters, const
     }
 }
 
-// number of result traing data = Nparamters * samplePerParameters * observerPerSetting;dataSetSplitTag should be "train"/"test"/"validation"
-void generateUnsteadyFieldPathline(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string in_root_fodler, const std::string dataSetSplitTag)
-{
-
-    // check datasplittag is "train"/"test"/"validation"
-    if (dataSetSplitTag != "train" && dataSetSplitTag != "test" && dataSetSplitTag != "validation") {
-        printf("dataSetSplitTag should be \"train\"/\"test\"/\"validation\"");
-        return;
-    }
-
-    int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
-    std::string root_folder = in_root_fodler + "/X" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "_no_mixture/" + dataSetSplitTag + "/";
-    if (!filesystem::exists(root_folder)) {
-        filesystem::create_directories(root_folder);
-    }
-
-    Eigen::Vector2d gridInterval = {
-        (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
-        (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
-    };
-
-    const auto paramters = generateNParamters(Nparamters, dataSetSplitTag);
-
-    std::normal_distribution<double> genTheta(0.0, 0.50); // rotation angle's distribution
-    // normal distribution from supplementary material of Vortex Boundary Identification Paper
-    std::normal_distribution<double> genSx(0, 3.59);
-    std::normal_distribution<double> genSy(0, 2.24);
-    std::normal_distribution<double> genTx(0.0, 1.34);
-    std::normal_distribution<double> genTy(0.0, 1.27);
-    double minMagintude = INFINITY;
-    double maxMagintude = -INFINITY;
-
-    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
-        const double rc = params.first;
-        const double n = params.second;
-        std::string str_Rc = trimNumString(std::to_string(rc));
-        std::string str_n = trimNumString(std::to_string(n));
-
-        VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
-        int totalSamples = numVelocityFields * observerPerSetting;
-        printf("generate %d sample for rc=%f , n=%f \n", totalSamples, rc, n);
-
-        const string Major_task_foldername = "velocity_rc_" + str_Rc + "n_" + str_n + "/";
-        const string Major_task_Licfoldername = Major_task_foldername + "/LIC/";
-        std::string task_folder = root_folder + Major_task_foldername;
-        if (!filesystem::exists(task_folder)) {
-            filesystem::create_directories(task_folder);
-        }
-        std::string task_licfolder = root_folder + Major_task_Licfoldername;
-        if (!filesystem::exists(task_licfolder)) {
-            filesystem::create_directories(task_licfolder);
-        }
-
-        std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
-        for (size_t sample = 0; sample < numVelocityFields; sample++) {
-            // the type of this sample(divergence,cw vortex, cc2 vortex)
-            auto Si = static_cast<VastisVortexType>(sample % 3);
-
-            const auto theta = genTheta(rngSample);
-            auto sx = genSx(rngSample);
-            auto sy = genSy(rngSample);
-            while (sx * sy == 0.0) {
-                sx = genSx(rngSample);
-                sy = genSy(rngSample);
-            }
-
-            auto tx = genTx(rngSample);
-            auto ty = genTy(rngSample);
-            // clamp tx ty to 0.5*domian
-            tx = std::clamp(tx, 0.3 * domainMinBoundary.x(), 0.3 * domainMaxBoundary.x());
-            ty = std::clamp(ty, 0.3 * domainMinBoundary.y(), 0.3 * domainMaxBoundary.y());
-            Eigen::Vector2d txy = { tx, ty };
-
-            Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
-            const SteadyVectorField2D steadyField = generator.generateSteadyField_VortexBoundaryVIS2020(tx, ty, sx, sy, theta, Si);
-            const auto& steadyFieldResData = steadyField.field;
-            for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
-                printf(".");
-
-                const int taskSampleId = sample * observerPerSetting + observerIndex;
-
-                const string vortexTypeName = string { magic_enum::enum_name<VastisVortexType>(Si) };
-                const string sample_tag_name
-                    = "sample_" + to_string(taskSampleId) + vortexTypeName;
-                string metaFilename = task_folder + sample_tag_name + "meta.json";
-                string velocityFilename = task_folder + sample_tag_name + ".bin";
-                const std::vector<float> rawSteadyData = flatten2DAs1Dfloat(steadyFieldResData);
-                const auto& observerParameters = generateRandomABCVectors();
-                const auto& abc = observerParameters.first;
-                const auto& abc_dot = observerParameters.second;
-                /* auto func = KillingComponentFunctionFactory::arbitrayObserver(abc, abc_dot);
-               KillingAbcField observerfieldDeform(  func, unsteadyFieldTimeStep, tmin, tmax);*/
-                UnSteadyVectorField2D unsteady_field = Tobias_ObserverTransformation(steadyField, abc, abc_dot, tmin, tmax, unsteadyFieldTimeStep);
-                Eigen::Vector2d txy0 = { tx, ty };
-                std::vector<Eigen::Vector2d> pathVelocitys;
-                std::vector<Eigen::Vector3d> pathPositions;
-                auto suc = PathhlineIntegrationRK4(txy0, unsteady_field, 0, tmax, tmax / 100.0, pathVelocitys, pathPositions);
-                assert(suc);
-
-            } // for (size_t observerIndex = 0..)
-
-        } // for sample
-    });
-
-    // create Root meta json file, save plane information here instead of every sample's meta file
-    string taskFolder_rootMetaFilename = root_folder + "meta.json";
-    // save root meta info:
-    std::ofstream root_jsonOut(taskFolder_rootMetaFilename);
-    if (!root_jsonOut.good()) {
-        printf("couldn't open file: %s", taskFolder_rootMetaFilename.c_str());
-        return;
-    } else {
-        cereal::JSONOutputArchive archive_o(root_jsonOut);
-        archive_o(CEREAL_NVP(Xdim));
-        archive_o(CEREAL_NVP(Ydim));
-        archive_o(CEREAL_NVP(unsteadyFieldTimeStep));
-        archive_o(CEREAL_NVP(domainMinBoundary));
-        archive_o(CEREAL_NVP(domainMaxBoundary));
-        archive_o(CEREAL_NVP(tmin));
-        archive_o(CEREAL_NVP(tmax));
-        // save min and max
-        archive_o(cereal::make_nvp("minV", minMagintude));
-        archive_o(cereal::make_nvp("maxV", maxMagintude));
-    }
-}
-
-// reproduce paper : Robust Reference Frame Extraction from Unsteady 2D Vector
-Fields with Convolutional Neural Networks void generateUnsteadyFieldMixture(int Nfield, int observerPerField, const std::string in_root_fodler, const std::string dataSetSplitTag)
+// reproduce paper : Robust Reference Frame Extraction from Unsteady 2D Vector Fields with Convolutional Neural Networks 
+void generateUnsteadyFieldMixture(int Nfield, int observerPerField, const std::string in_root_fodler, const std::string dataSetSplitTag)
 {
 
     // check datasplittag is "train"/"test"/"validation"
@@ -1549,6 +1423,136 @@ Fields with Convolutional Neural Networks void generateUnsteadyFieldMixture(int 
             }
 #endif
         } // for (size_t observerIndex = 0..)
+    });
+
+    // create Root meta json file, save plane information here instead of every sample's meta file
+    string taskFolder_rootMetaFilename = root_folder + "meta.json";
+    // save root meta info:
+    std::ofstream root_jsonOut(taskFolder_rootMetaFilename);
+    if (!root_jsonOut.good()) {
+        printf("couldn't open file: %s", taskFolder_rootMetaFilename.c_str());
+        return;
+    } else {
+        cereal::JSONOutputArchive archive_o(root_jsonOut);
+        archive_o(CEREAL_NVP(Xdim));
+        archive_o(CEREAL_NVP(Ydim));
+        archive_o(CEREAL_NVP(unsteadyFieldTimeStep));
+        archive_o(CEREAL_NVP(domainMinBoundary));
+        archive_o(CEREAL_NVP(domainMaxBoundary));
+        archive_o(CEREAL_NVP(tmin));
+        archive_o(CEREAL_NVP(tmax));
+        // save min and max
+        archive_o(cereal::make_nvp("minV", minMagintude));
+        archive_o(cereal::make_nvp("maxV", maxMagintude));
+    }
+}
+
+
+
+
+
+// number of result traing data = Nparamters * samplePerParameters * observerPerSetting;dataSetSplitTag should be "train"/"test"/"validation"
+void generateUnsteadyFieldPathline(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string in_root_fodler, const std::string dataSetSplitTag)
+{
+
+    // check datasplittag is "train"/"test"/"validation"
+    if (dataSetSplitTag != "train" && dataSetSplitTag != "test" && dataSetSplitTag != "validation") {
+        printf("dataSetSplitTag should be \"train\"/\"test\"/\"validation\"");
+        return;
+    }
+
+    int numVelocityFields = samplePerParameters; // num of fields per n, rc parameter setting
+    std::string root_folder = in_root_fodler + "/X" + to_string(Xdim) + "_Y" + to_string(Ydim) + "_T" + to_string(unsteadyFieldTimeStep) + "_no_mixture/" + dataSetSplitTag + "/";
+    if (!filesystem::exists(root_folder)) {
+        filesystem::create_directories(root_folder);
+    }
+
+    Eigen::Vector2d gridInterval = {
+        (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
+        (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
+    };
+
+    const auto paramters = generateNParamters(Nparamters, dataSetSplitTag);
+
+    std::normal_distribution<double> genTheta(0.0, 0.50); // rotation angle's distribution
+    // normal distribution from supplementary material of Vortex Boundary Identification Paper
+    std::normal_distribution<double> genSx(0, 3.59);
+    std::normal_distribution<double> genSy(0, 2.24);
+    std::normal_distribution<double> genTx(0.0, 1.34);
+    std::normal_distribution<double> genTy(0.0, 1.27);
+    double minMagintude = INFINITY;
+    double maxMagintude = -INFINITY;
+
+    for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
+        const double rc = params.first;
+        const double n = params.second;
+        std::string str_Rc = trimNumString(std::to_string(rc));
+        std::string str_n = trimNumString(std::to_string(n));
+
+        VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, rc, n);
+        int totalSamples = numVelocityFields * observerPerSetting;
+        printf("generate %d sample for rc=%f , n=%f \n", totalSamples, rc, n);
+
+        const string Major_task_foldername = "velocity_rc_" + str_Rc + "n_" + str_n + "/";
+        const string Major_task_Licfoldername = Major_task_foldername + "/LIC/";
+        std::string task_folder = root_folder + Major_task_foldername;
+        if (!filesystem::exists(task_folder)) {
+            filesystem::create_directories(task_folder);
+        }
+        std::string task_licfolder = root_folder + Major_task_Licfoldername;
+        if (!filesystem::exists(task_licfolder)) {
+            filesystem::create_directories(task_licfolder);
+        }
+
+        std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
+        for (size_t sample = 0; sample < numVelocityFields; sample++) {
+            // the type of this sample(divergence,cw vortex, cc2 vortex)
+            auto Si = static_cast<VastisVortexType>(sample % 3);
+
+            const auto theta = genTheta(rngSample);
+            auto sx = genSx(rngSample);
+            auto sy = genSy(rngSample);
+            while (sx * sy == 0.0) {
+                sx = genSx(rngSample);
+                sy = genSy(rngSample);
+            }
+
+            auto tx = genTx(rngSample);
+            auto ty = genTy(rngSample);
+            // clamp tx ty to 0.5*domian
+            tx = std::clamp(tx, 0.3 * domainMinBoundary.x(), 0.3 * domainMaxBoundary.x());
+            ty = std::clamp(ty, 0.3 * domainMinBoundary.y(), 0.3 * domainMaxBoundary.y());
+            Eigen::Vector2d txy = { tx, ty };
+
+            Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
+            const SteadyVectorField2D steadyField = generator.generateSteadyField_VortexBoundaryVIS2020(tx, ty, sx, sy, theta, Si);
+            const auto& steadyFieldResData = steadyField.field;
+            for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
+                printf(".");
+
+                const int taskSampleId = sample * observerPerSetting + observerIndex;
+
+                const string vortexTypeName = string { magic_enum::enum_name<VastisVortexType>(Si) };
+                const string sample_tag_name
+                    = "sample_" + to_string(taskSampleId) + vortexTypeName;
+                string metaFilename = task_folder + sample_tag_name + "meta.json";
+                string velocityFilename = task_folder + sample_tag_name + ".bin";
+                const std::vector<float> rawSteadyData = flatten2DAs1Dfloat(steadyFieldResData);
+                const auto& observerParameters = generateRandomABCVectors();
+                const auto& abc = observerParameters.first;
+                const auto& abc_dot = observerParameters.second;
+                /* auto func = KillingComponentFunctionFactory::arbitrayObserver(abc, abc_dot);
+               KillingAbcField observerfieldDeform(  func, unsteadyFieldTimeStep, tmin, tmax);*/
+                UnSteadyVectorField2D unsteady_field = Tobias_ObserverTransformation(steadyField, abc, abc_dot, tmin, tmax, unsteadyFieldTimeStep);
+                Eigen::Vector2d txy0 = { tx, ty };
+                std::vector<Eigen::Vector2d> pathVelocitys;
+                std::vector<Eigen::Vector3d> pathPositions;
+                auto suc = PathhlineIntegrationRK4(txy0, unsteady_field, 0, tmax, tmax / 100.0, pathVelocitys, pathPositions);
+                assert(suc);
+
+            } // for (size_t observerIndex = 0..)
+
+        } // for sample
     });
 
     // create Root meta json file, save plane information here instead of every sample's meta file

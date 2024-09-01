@@ -18,9 +18,9 @@ model:
 # random_seed: 4259
 # wandb: True 
 lr: 0.001
-epochs: 300
+epochs: 100
 scheduler: TwoStep
-warmup_epochs: 100 
+warmup_epochs: 80 
 second_lr: 0.0001
 
 
@@ -31,10 +31,11 @@ dataset:
   NAME: SteadyVastisSegmentation
   data_dir: 'CppProjects/data/Steady/X16_Y16_Steady'
 
+#add WhiteNoise will boost vortex_unet 's performance
 datatransforms:
-  train: [ToTensor,WhiteNoise]  # rotation does not help
-  val: [ToTensor,WhiteNoise]
-  test: [ToTensor,WhiteNoise]
+  train: [WhiteNoise]  # rotation does not help
+  val: [WhiteNoise]
+  test: [WhiteNoise]
   kwargs:
     noiseMaginitude: 0.01
   
