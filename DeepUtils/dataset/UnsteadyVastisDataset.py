@@ -1,50 +1,17 @@
 import numpy as np
 import os
 from FLowUtils.VectorField2d import *
-from  .data_utils import loadOneFlowEntryRawData,read_rootMetaGridresolution
+from  .data_utils import loadOneFlowEntryRawData
 import torch,time,tqdm
 from .build import DATASETS
 from .data_utils import *
-
+from .SteadyVastisDataset import VastisDataset
+from .transforms.basic_transform import PathlineJittorCubic
 
 @DATASETS.register_module()
-class UnsteadyVastisDataset(torch.utils.data.Dataset):
+class UnsteadyVastisDataset(VastisDataset):
     def __init__(self, data_dir,split, transform,**kwargs):
-        self.directory_path=data_dir
-        self.dataName=[]
-        self.data=[]
-        self.label=[]
-        self.transform=transform
-        self.dastasetMetaInfo={}
-        self.mode=split
-        self.preLoading(split)
-
-
-    def getSampleName(self,sampleIdx):        
-        return self.dataName[sampleIdx]
-
-    def readRootMetaInfo(self,rootFolder):
-        if self.dastasetMetaInfo=={}:
-            folder_meta_file = os.path.join(rootFolder, 'meta.json')
-            #   {"Xdim":Xdim,"Ydim":Ydim,"time_steps":time_steps,"dominMinBoundary":dominMinBoundary,"dominMaxBoundary":dominMaxBoundary,"tmin":tmin,"tmax":tmax}
-            self.dastasetMetaInfo=read_rootMetaGridresolution(folder_meta_file)          
-        
-    def preLoading(self,mode):                
-        print(f"Preloading [{mode}] data......")
-        start = time.time()         
-        #self.directory_path should have meta.json
-        self.dastasetMetaInfo=read_rootMetaGridresolution(os.path.join(self.directory_path, 'meta.json'))
-        #train_directory_path should be  the direct parent folder of all "rc_xxxx_n_xxx"  folders
-        split_str =mode if mode!="val" else "validation"
-        target_directory_path=os.path.join(self.directory_path,split_str) 
-        rc_n_subfoders=[os.path.join(target_directory_path,folder) for folder in os.listdir(target_directory_path) if os.path.isdir(os.path.join(target_directory_path, folder))]
-        for folder_name in tqdm.tqdm(rc_n_subfoders) :           
-                self.loadOneTaskFolder(folder_name)          
-        #logging dataset information    and time consuming of preloading data
-        elapsed = time.time()
-        elapsed = elapsed - start
-        print(f"Preloading  [{mode}] data......done")
-        print(f"Total number of [{mode}] data:{len(self.data)}, took {elapsed} seconds")
+        super().__init__( data_dir,split, transform,**kwargs)
 
     def loadOneTaskFolder(self,sub_folder:str):
         Xdim,Ydim,time_steps=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"],self.dastasetMetaInfo["unsteadyFieldTimeStep"]
@@ -60,17 +27,42 @@ class UnsteadyVastisDataset(torch.utils.data.Dataset):
             dataSlice=torch.tensor(loadField).transpose(0, -1)
             self.data.append(dataSlice)
             self.label.append(torch.tensor(labelReferenceFrame))
-            if self.mode=="test":
-                self.dataName.append(keep_path_last_n_names(binPath,2))
-
-    def __len__(self):
-        return len(self.data)
-    
-    def __getitem__(self, idx):
-        data=self.data[idx]
-        if self.transform is not None:
-            data = self.transform(data)
-        return data , self.label[idx]
+            if self.split=="test":
+                self.dataName.append(keep_path_last_n_names(binPath,2))    
   
 
 
+@DATASETS.register_module()
+class UnsteadyVastisPathlineSeg(VastisDataset):
+    def __init__(self, data_dir,split, transform,**kwargs):
+        super().__init__( data_dir,split, transform,**kwargs)
+        self.lineTransform=PathlineJittorCubic()
+    
+    def __getitem__(self, idx):
+        data,pathlines=self.data[idx]
+        if self.transform is not None:
+            data = self.transform(data)   
+        pathlines = self.lineTransform(pathlines)
+        return (data,pathlines) , self.label[idx]
+
+    def loadOneTaskFolder(self,sub_folder:str):
+        Xdim,Ydim,time_steps=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"],self.dastasetMetaInfo["unsteadyFieldTimeStep"]
+        #find all *.bin data in this subfoder
+        metaFiles = [f for f in os.listdir(sub_folder) if f.endswith('.json')]
+        minV,maxV=   self.dastasetMetaInfo['minV'],self.dastasetMetaInfo['maxV']
+        oneFolderData=[None]*len(metaFiles)
+        oneFolderLabel=[None]*len(metaFiles)
+        for idx,metaFile in enumerate(metaFiles) :
+            metaPath=os.path.join(sub_folder,metaFile)
+            data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,domainMinBoundary=self.dastasetMetaInfo["domainMinBoundary"],dominMaxBoundary=self.dastasetMetaInfo["domainMaxBoundary"] ) 
+            fieldData,pathlineData=data
+            fieldData=torch.tensor(fieldData).transpose(0, -1)
+            pathlineData=torch.tensor(pathlineData)
+            oneFolderData[idx]=(fieldData,pathlineData)
+            oneFolderLabel[idx]=torch.tensor(label)
+            
+            if self.split=="test":
+                self.dataName.append(keep_path_last_n_names(metaPath,2))    
+                
+        self.data.extend(oneFolderData)
+        self.label.extend(oneFolderLabel)

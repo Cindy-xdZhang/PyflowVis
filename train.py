@@ -35,9 +35,21 @@ def validate(model, val_data_loader, device) -> float:
     val_loss = 0
     # val_rec_loss = 0
     with torch.no_grad():
-        for batch_idx, (vectorFieldImage, label) in enumerate(val_data_loader):
-                vectorFieldImage,label = vectorFieldImage.to(device), label.to(device)
-                predictition= model(vectorFieldImage)                
+         for batch_idx, (data, label) in enumerate(val_data_loader):
+                if isinstance(data, list):
+                    # Unpack the tuple
+                    vectorFieldImage, pathlines = data
+                    # Move each element to the device
+                    vectorFieldImage = vectorFieldImage.to(device)
+                    pathlines = pathlines.to(device)
+                    label = label.to(device)
+                    # Repack into a tuple if needed
+                    data = (vectorFieldImage, pathlines)
+                else:
+                    # If data is not a tuple, directly move to the device
+                    data = data.to(device)
+                    label = label.to(device)    
+                predictition= model(data)                
                 loss=model.get_loss(predictition,label)
                 val_loss += loss.item()
     val_loss /= len(val_data_loader)
@@ -55,9 +67,21 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
     for epoch in range(epochs):
         epoch_loss = 0
         try:
-            for batch_idx, (vectorFieldImage, label) in enumerate(data_loader):
-                vectorFieldImage,label = vectorFieldImage.to(device), label.to(device)
-                predictition= model(vectorFieldImage)                
+            for batch_idx, (data, label) in enumerate(data_loader):
+                if isinstance(data, list):
+                    # Unpack the tuple
+                    vectorFieldImage, pathlines = data
+                    # Move each element to the device
+                    vectorFieldImage = vectorFieldImage.to(device)
+                    pathlines = pathlines.to(device)
+                    label = label.to(device)
+                    # Repack into a tuple if needed
+                    data = (vectorFieldImage, pathlines)
+                else:
+                    # If data is not a tuple, directly move to the device
+                    data = data.to(device)
+                    label = label.to(device)    
+                predictition= model(data)                
                 loss=model.get_loss(predictition,label)
                 optimizer.zero_grad()
                 loss.backward()
@@ -142,11 +166,10 @@ def train_pipeline():
         model.to(cfg['device'])
         # build dataset        
         rootInfo=getDatasetRootaMeta(cfg.dataset['data_dir'])
-        if "unsteadyFieldTimeStep" not in rootInfo:            
-            torchsummary.summary(model, (2, rootInfo["Xdim"], rootInfo["Ydim"]))
-        else:
-            torchsummary.summary(model, (2, rootInfo["Xdim"], rootInfo["Ydim"],rootInfo["unsteadyFieldTimeStep"]))
-
+        # if "unsteadyFieldTimeStep" not in rootInfo:            
+        #     torchsummary.summary(model, (2, rootInfo["Xdim"], rootInfo["Ydim"]))
+        # else:
+        #     torchsummary.summary(model, (2, rootInfo["Xdim"], rootInfo["Ydim"],rootInfo["unsteadyFieldTimeStep"]))
 
         if isinstance(cfg.datatransforms['kwargs'], dict):   
             cfg.datatransforms['kwargs'].update(rootInfo) 

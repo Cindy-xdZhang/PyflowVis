@@ -315,28 +315,57 @@ class TestSegmentation(object):
         Xdim,Ydim=meta_["Xdim"],meta_["Ydim"]
         dm_min,dm_max=meta_["domainMinBoundary"],meta_["domainMaxBoundary"]
         grid_dx,grid_dy=(dm_max[0]-dm_min[0])/float( Xdim-1),(dm_max[1]-dm_min[1])/float( Ydim-1)
-
+        test_loss=0
         for batch_idx, (data, label) in enumerate(test_data_loader):
-            data,label = data.to(device), label.to(device)
-            predictition= model(data)                
+            if isinstance(data, list):
+                # Unpack the tuple
+                vectorFieldImage, pathlines = data
+                # Move each element to the device
+                vectorFieldImage = vectorFieldImage.to(device)
+                pathlines = pathlines.to(device)
+                label = label.to(device)
+                # Repack into a tuple if needed
+                data = (vectorFieldImage, pathlines)
+            else:
+                # If data is not a tuple, directly move to the device
+                data = data.to(device)
+                label = label.to(device)    
+            predictition= model(data)
+            loss=model.get_loss(predictition,label)
+            test_loss += loss.item()                
             segError_=segmentationCriteria(predictition.cpu().numpy(),label.cpu().numpy())
             segError+=segError_
 
         segError /= len(test_data_loader)
         TP,FP,FN, precision, recall, F1, IoU=segError[0],segError[1],segError[2],segError[3],segError[4],segError[5],segError[6]
-        print(f"TP,FP,FN, precision, recall, F1, IoU={TP},{FP},{FN}, {precision},{recall},{F1},{IoU}")
+        print(f"TP,FP,FN={TP},{FP},{FN}")
+        print(f"precision, recall, F1, IoU={precision},{recall},{F1},{IoU}")
 
-        #random select  samples to visualize
+        # #random select  samples to visualize
         for i in range(self.samples):
             sample=random.randint(0,len(test_data_loader.dataset)-1)
-            vectorFieldImage, labelVortex=test_data_loader.dataset[sample]
-            batch_vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
-            predictition= model(batch_vectorFieldImage)
+            data, label=test_data_loader.dataset[sample]
+            if isinstance(data, list):
+                # Unpack the tuple
+                vectorFieldImage, pathlines = data
+                # Move each element to the device
+                batch_vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
+                pathlines = pathlines.unsqueeze(0).to(device)
+                label = label.to(device)
+                # Repack into a tuple if needed
+                data = (batch_vectorFieldImage, pathlines)
+            else:
+                # If data is not a tuple, directly move to the device
+                data = data.to(device)
+                label = label.to(device)    
+
+            
+            predictition= model(data)
             predictition=predictition[0].cpu().numpy()
-            labelVortex=labelVortex.cpu().numpy()
+            label=label.cpu().numpy()
             name=test_data_loader.dataset.getSampleName(sample)
             save_segmentation_as_png(predictition,f"./testOutput/{name}_pred.png",upSample=10.0)
-            save_segmentation_as_png(labelVortex,f"./testOutput/{name}_gt.png",upSample=10.0)
+            save_segmentation_as_png(label,f"./testOutput/{name}_gt.png",upSample=10.0)
             rawVectorField=vectorFieldImage.transpose(0,-1).cpu().numpy()
             qCriterion=computeQcriterion(rawVectorField,grid_dx,grid_dy)
             ivd=computeIVD(rawVectorField,grid_dx,grid_dy)

@@ -12,6 +12,8 @@
 #include <corecrt_math_defines.h>
 #include <string>
 #include <vector>
+// save 3d position, vorticity,IVD,distance(to start seeding point)
+using PathlinePointInfo = std::vector<double>;
 
 namespace cereal {
 
@@ -85,8 +87,8 @@ private:
 class AnalyticalFlowCreator {
 public:
     AnalyticalFlowCreator(Eigen::Vector2i grid_size, int time_steps,
-        Eigen::Vector2d domainBoundaryMin = Eigen::Vector2d(-2.0, -2.0),
-        Eigen::Vector2d domainBoundaryMax = Eigen::Vector2d(2.0, 2.0), double tmin = 0.0f, double tmax = 2 * M_PI);
+        Eigen::Vector2d domainBoundaryMin,
+        Eigen::Vector2d domainBoundaryMax, double tmin = 0.0f, double tmax = 2 * M_PI);
 
     // Method to create the flow field using a lambda function
     UnSteadyVectorField2D sampleAnalyticalFunctionAsFlowField(AnalyticalFlowFunc2D lambda_func);

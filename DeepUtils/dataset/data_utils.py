@@ -1,6 +1,7 @@
 import os
 import json
 import numpy as np
+from scipy.interpolate import CubicSpline
 
 def keep_path_last_n_names(path,n):
     """
@@ -33,30 +34,12 @@ def read_binary_file(filepath, dtype=np.float32) -> np.ndarray:
 
 
 def read_json_file(filepath):
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"File not found: {filepath}")
+    # if not os.path.exists(filepath):
+    #     raise FileNotFoundError(f"File not found: {filepath}")
     with open(filepath, 'r') as file:
         data = json.load(file)
     return data
 
-def read_rootMetaGridresolution(meta_file):
-    metaINFo = read_json_file(meta_file)
-    if 'tmin' in metaINFo:          
-        tmin=metaINFo['tmin']
-        dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"],tmin] 
-    else:
-        dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"]]
-    if 'tmax' in metaINFo:
-        tmax=metaINFo['tmax']    
-        dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"],tmax]
-    else:
-        dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"]]
-    metaINFo['domainMinBoundary']=dominMinBoundary
-    metaINFo['domainMaxBoundary']=dominMaxBoundary
-    return metaINFo
-
-def getDatasetRootaMeta(root_directory):
-    return read_rootMetaGridresolution(os.path.join(root_directory, 'meta.json'))
 
 
 
@@ -127,3 +110,103 @@ def loadOneFlowEntryRawData(binPath,Xdim,Ydim,time_steps):
 
 
 
+def pad_or_truncate_pathlines(pathlineClusters, L):
+    K = len(pathlineClusters)  
+    C = len(pathlineClusters[0][0]) if pathlineClusters and pathlineClusters[0] else 0  
+
+    result = np.zeros((L, K , C), dtype=np.float32)
+    for i, pathline in enumerate(pathlineClusters):
+        pathline_length = min(len(pathline), L)  
+        for step in range(pathline_length):
+            result[step, i,:] = np.array(pathline[step])
+    result[0,:,-1]=0.0
+    return result
+
+
+    
+def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,domainMinBoundary,dominMaxBoundary):
+    #get meta information
+    # meta_file = binPath.replace('.bin', 'meta.json')
+    # metaINFo=read_json_file(meta_file)
+    # n,rc,si=metaINFo['n_rc_Si']["value0"],metaINFo['n_rc_Si']["value1"],metaINFo['n_rc_Si']["value2"]
+    # txy=np.array([metaINFo['txy']["value0"],metaINFo['txy']["value1"]]  )  
+    # theta,sx,sy=metaINFo['deform_theta_sx_sy']["value0"],metaINFo['deform_theta_sx_sy']["value1"],metaINFo['deform_theta_sx_sy']["value2"]
+    # deformMatA=np.array([
+    #                 [sx*np.cos(theta), -sy*np.sin(theta)],
+    #                 [sx*np.sin(theta), sy*np.cos(theta)]])
+    # InvA= np.linalg.inv(deformMatA)
+    
+    vortexsegmentationLabel = np.zeros((Ydim, Xdim,2),dtype=np.float32)
+    if "saddle" in metaPath:
+        vortexsegmentationLabel[:, :, 0] = 1.0
+    else:
+        # vortexsegLabel=np.array(metaINFo["segmentation"]) 
+        segmentationBinarypath= metaPath.replace('meta.json', '_segmentation.bin')
+        vortexsegLabel=read_binary_file(segmentationBinarypath).reshape(Ydim,Xdim)
+        vortexsegmentationLabel[:, :, 0] = 1 - vortexsegLabel
+        vortexsegmentationLabel[:, :, 1] = vortexsegLabel
+
+    rawBinaryPath= metaPath.replace('meta.json', '.bin')
+    raw_Binary = read_binary_file(rawBinaryPath)
+    fieldData = raw_Binary.reshape(time_steps, Ydim,Xdim, 2)
+    # pathlineClusters= np.array(metaINFo["ClusterPathlines"],dtype=np.float32)
+    
+    pathlineBinarypath= metaPath.replace('meta.json', '_pathline.bin')
+    pathlineClusters=read_binary_file(pathlineBinarypath).reshape(192,24,5)
+    
+    # Permute pathline clusters first and second axis
+    pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))[:,:,0:3]
+    pathlineClusters[:,:,2]=pathlineClusters[:,:,2]/(0.5*np.pi)
+    return (fieldData,pathlineClusters),vortexsegmentationLabel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Generate grid of positions
+    # x_coords = np.linspace(domainMinBoundary[0], dominMaxBoundary[0], Xdim)
+    # y_coords = np.linspace(domainMinBoundary[1], dominMaxBoundary[1], Ydim)
+    # X, Y = np.meshgrid(x_coords, y_coords)
+
+    # # Create the position vectors
+    # pos = np.stack([X, Y], axis=-1)  # Shape: (Ydim, Xdim, 2)
+    
+    # # Transform positions
+    # transformed_pos = np.dot(pos - txy, InvA.T)  # Shape: (Ydim, Xdim, 2)
+
+    # # Compute distances from the vortex center
+    # distances = np.linalg.norm(transformed_pos, axis=-1)  # Shape: (Ydim, Xdim)
+
+    # # Determine labels based on distance
+    # inside_vortex = (rc > distances)
+    # vortexsegmentationLabel[:, :, 1] = inside_vortex.astype(np.float32)
+    # vortexsegmentationLabel[:, :, 0] = (~inside_vortex).astype(np.float32)
+    
+# vortexsegmentationLabel2 = np.zeros((Ydim, Xdim,2),dtype=np.float32)       
+# gridInterval=[ float(dominMaxBoundary[0]-domainMinBoundary[0])/float(Xdim-1),
+#               float(dominMaxBoundary[0]-domainMinBoundary[0])/float(Ydim-1)    ]
+# if si==0.0:
+#     vortexsegmentationLabel[:, :, 0] = 1.0
+# else:
+#     for y in range(Ydim):
+#         for x in range(Xdim):
+#             # Extract position vector from fieldData
+#             pos=np.array([domainMinBoundary[0]+x*gridInterval[0],domainMinBoundary[1]+y*gridInterval[1]])
+#             transformed_pos=np.dot(InvA, (pos-txy))
+#             dx=rc- np.linalg.norm(transformed_pos)  
+#             #dx>0 ->rc >distance->inside vortex->label to one()[0,1]
+#             vortexsegmentationLabel[y, x] = np.array([0.0,1.0],dtype=np.float32) if dx>0.0 else np.array([1.0,0.0],dtype=np.float32) 

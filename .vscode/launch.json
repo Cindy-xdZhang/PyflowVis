@@ -14,7 +14,7 @@
             "args": [
                 "--config",
                 // "config/classification/vortexboundary.yaml"
-                "config/segmentation/vortexboundary_unet.yaml"
+                "config/segmentation/pathline_transformer.yaml"
             ]
         }
     ]

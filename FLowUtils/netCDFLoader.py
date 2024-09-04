@@ -1,8 +1,7 @@
 import numpy as np
-import torch
 import netCDF4 as nc
 from .VectorField2d import UnsteadyVectorField2D, SteadyVectorField2D
-
+import os
 class IVectorField3D:
     def __init__(self, Xdim: int, Ydim: int, Zdim: int, domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0], time_steps: int = 1, tmin: float = 0.0, tmax: float = 2 * np.pi):
         self.Xdim = Xdim
@@ -25,7 +24,7 @@ class SteadyVectorField3D(IVectorField3D):
 class UnsteadyVectorField3D(IVectorField3D):
     def __init__(self, Xdim: int, Ydim: int, Zdim: int, time_steps: int, domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0], tmin: float = 0.0, tmax: float = 2 * np.pi):
         super(UnsteadyVectorField3D, self).__init__(Xdim, Ydim, Zdim, domainMinBoundary, domainMaxBoundary, time_steps, tmin, tmax)
-        self.field = torch.randn(time_steps, Zdim, Ydim, Xdim, 3)
+        # self.field = torch.randn(time_steps, Zdim, Ydim, Xdim, 3)
         self.gridInterval = [
             (domainMaxBoundary[0] - domainMinBoundary[0]) / (Xdim - 1),
             (domainMaxBoundary[1] - domainMinBoundary[1]) / (Ydim - 1),
@@ -57,17 +56,24 @@ class UnsteadyVectorField3D(IVectorField3D):
 class NetCDFLoader:
     @staticmethod
     def load_vector_field2d(file_path: str) -> UnsteadyVectorField2D|SteadyVectorField2D:
+        if not os.path.exists(file_path)  or not os.path.isfile(file_path):
+            raise ValueError(f"url wrong")
+            
         with nc.Dataset(file_path, 'r') as dataset:
             # Check dimensions
             dimensions = list(dataset.dimensions.keys())
-            has_time = 'time' in dimensions
-            spatial_dims = [dim for dim in dimensions if dim not in ['time']]
+            time_axis_name=None
+            for dim in dimensions:
+                if str(dim).lower()  in ["time", "tdim"]:
+                    time_axis_name=dim
+
+            spatial_dims = [dim for dim in dimensions if str(dim).lower() not in ['time',"const","tdim"]]
 
             if len(spatial_dims) != 2:
                 raise ValueError(f"Expected 2 spatial dimensions, found {len(spatial_dims)}")
 
             Ydim, Xdim = [len(dataset.dimensions[dim]) for dim in spatial_dims]
-            time_steps = len(dataset.dimensions['time']) if has_time else 1
+            time_steps = len(dataset.dimensions[time_axis_name]) if time_axis_name is not None else 1
 
             # Extract domain boundaries
             x = dataset.variables[spatial_dims[1]][:]
@@ -76,8 +82,8 @@ class NetCDFLoader:
             domainMaxBoundary = [x.max(), y.max()]
 
             # Extract time information
-            if has_time:
-                time = dataset.variables['time'][:]
+            if time_axis_name is not None:
+                time = dataset.variables[time_axis_name][:]
                 tmin, tmax = time.min(), time.max()
             else:
                 tmin, tmax = 0, 1
@@ -97,9 +103,9 @@ class NetCDFLoader:
             field_data = None
             for names in component_names:
                 if all(name in dataset.variables for name in names):
-                    field_data = np.zeros((time_steps, Ydim, Xdim, 2))
+                    field_data = np.zeros((time_steps,  Xdim,Ydim, 2))
                     for i, var_name in enumerate(names):
-                        if has_time:
+                        if time_axis_name is not None:
                             field_data[:, :, :, i] = dataset.variables[var_name][:]
                         else:
                             field_data[0, :, :, i] = dataset.variables[var_name][:]
@@ -108,7 +114,7 @@ class NetCDFLoader:
             if field_data is None:
                 raise ValueError("Could not find vector components in the NetCDF file")
 
-            vector_field.field = torch.tensor(field_data)
+            vector_field.field = field_data.transpose(1,2)
 
         return vector_field
     
@@ -184,3 +190,4 @@ class NetCDFLoader:
 
         return vector_field
     
+

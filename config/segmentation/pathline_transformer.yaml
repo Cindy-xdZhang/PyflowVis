@@ -2,11 +2,15 @@
 model:
   NAME: BaseSeg
   encoder_args:
-    NAME: TobiasVortexBoundaryUnet
+    NAME: SimpleTransformer
+    # d_model: 1152 
+    num_encoder_layers: 3
+    seqLength: 12
+    Kpathlines: 192
     in_channels: 2
-    out_channels: 2
-    DataSizeX: 16
-    DataSizeY: 16
+    DataSizeX: 32
+    DataSizeY: 32
+    TimeSteps: 7
   criterion_args:
     NAME: BCELoss
    
@@ -16,26 +20,29 @@ model:
 # ---------------------------------------------------------------------------- #
 # Training parameters
 # random_seed: 4259
-wandb: True 
+# wandb: True 
+batch_size: 256
 lr: 0.0001
-epochs: 100
+epochs: 200
 scheduler: TwoStep
 warmup_epochs: 80 
-second_lr: 0.0001
-
+second_lr: 0.00001
+optimizer:
+ NAME: 'adamw'
+ weight_decay: 0.000001
 
 
 dataloader:
-  num_workers: 0
+  num_workers: 1
 dataset:
-  NAME: SteadyVastisSegmentation
-  data_dir: 'CppProjects/data/Steady/X16_Y16_Steady'v
+  NAME: UnsteadyVastisPathlineSeg
+  data_dir: 'CppProjects/data/Pathline2/X32_Y32_T7_no_mixture'
 
 #add WhiteNoise will boost vortex_unet 's performance
 datatransforms:
-  train: [WhiteNoise]  # rotation does not help
-  val: [WhiteNoise]
-  test: [WhiteNoise]
+  train: [MinMaxNormalization,WhiteNoise]  # rotation does not help
+  val: [MinMaxNormalization,WhiteNoise]
+  test: [MinMaxNormalization]
   kwargs:
     noiseMaginitude: 0.01
   

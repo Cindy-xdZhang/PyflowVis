@@ -5,6 +5,7 @@
 #include "cereal/archives/binary.hpp"
 #include "cereal/archives/json.hpp"
 #include "cereal/types/array.hpp"
+#include "cereal/types/tuple.hpp"
 #include "cereal/types/vector.hpp"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
@@ -22,21 +23,30 @@
 
 using namespace std;
 namespace {
+constexpr int Xdim = 32, Ydim = 32;
+constexpr int unsteadyFieldTimeStep = 7;
 constexpr double tmin = 0.0;
-constexpr double tmax = M_PI * 0.25;
-constexpr int Xdim = 16, Ydim = 16;
-constexpr int unsteadyFieldTimeStep = 5;
-constexpr int LicImageSize = 64;
-Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
+constexpr double tmax = M_PI * 0.5;
+Eigen::Vector2d domainMinBoundary = { 0.0, 0.0 };
 Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
+constexpr int outputPathlineLength = 24;
+
+// lic parameters
+constexpr int LicImageSize = 64;
 constexpr int LicSaveFrequency = 1; // every 2 time steps save one
 const double stepSize = 0.012;
 const int maxLICIteratioOneDirection = 256;
 #if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
-auto policy = std::execution::seq;
+auto policy
+    = std::execution::seq;
 #else
-auto policy = std::execution::par_unseq;
+auto policy
+    = std::execution::par_unseq;
 #endif
+// Create a random number generator
+std::random_device rd;
+std::mt19937 rng(rd());
+
 }
 inline std::string trimNumString(const std::string& numString)
 {
@@ -117,7 +127,7 @@ void saveAsPNG(const std::vector<std::vector<Eigen::Vector3d>>& data, const std:
 }
 
 // Function to flatten a 2D vector to a 1D vector
-std::vector<float> flatten2DAs1Dfloat(const std::vector<std::vector<Eigen::Vector2d>>& x2D)
+std::vector<float> flatten2DVectorsAs1Dfloat(const std::vector<std::vector<Eigen::Vector2d>>& x2D)
 {
     const size_t ydim = x2D.size();
     assert(ydim > 0);
@@ -132,8 +142,10 @@ std::vector<float> flatten2DAs1Dfloat(const std::vector<std::vector<Eigen::Vecto
 
     return result;
 }
-std::vector<float> flatten3DAs1Dfloat(const std::vector<std::vector<std::vector<Eigen::Vector2d>>>& x3D)
+
+std::vector<float> flatten3DVectorsAs1Dfloat(const std::vector<std::vector<std::vector<Eigen::Vector2d>>>& x3D)
 {
+
     const size_t tdim = x3D.size();
     assert(tdim > 0);
     const size_t ydim = x3D[0].size();
@@ -146,6 +158,40 @@ std::vector<float> flatten3DAs1Dfloat(const std::vector<std::vector<std::vector<
             for (size_t j = 0; j < xdim; j++) {
                 result[2 * ((t * ydim + i) * xdim + j)] = static_cast<float>(x3D[t][i][j](0));
                 result[2 * ((t * ydim + i) * xdim + j) + 1] = static_cast<float>(x3D[t][i][j](1));
+            }
+
+    return result;
+}
+template <typename T>
+std::vector<float> flatten2DAs1Dfloat(const std::vector<std::vector<T>>& x2D)
+{
+
+    const size_t tdim = x2D.size();
+    assert(tdim > 0);
+    const size_t ydim = x2D[0].size();
+    assert(ydim > 0);
+    std::vector<float> result(ydim * tdim);
+    for (size_t t = 0; t < tdim; t++)
+        for (size_t i = 0; i < ydim; i++)
+            result[t * ydim + i] = static_cast<float>(x2D[t][i]);
+
+    return result;
+}
+
+template <typename T>
+std::vector<float> flatten3DAs1Dfloat(const std::vector<std::vector<std::vector<T>>>& x3D)
+{
+
+    const size_t tdim = x3D.size();
+    assert(tdim > 0);
+    const size_t ydim = x3D[0].size();
+    assert(ydim > 0);
+    const size_t xdim = x3D[0][0].size();
+    std::vector<float> result(xdim * ydim * tdim);
+    for (size_t t = 0; t < tdim; t++)
+        for (size_t i = 0; i < ydim; i++)
+            for (size_t j = 0; j < xdim; j++) {
+                result[(t * ydim + i) * xdim + j] = static_cast<float>(x3D[t][i][j]);
             }
 
     return result;
@@ -170,14 +216,15 @@ struct pair_hash {
     }
 };
 std::vector<std::pair<double, double>> presetRCNParameters = {
+    { 0.5, 1.0 },
     { 0.25, 2.0 },
+    { 0.8, 2.0 },
     { 1.0, 2.0 },
     { 1.0, 3.0 },
     { 1.0, 5.0 },
-    { 2.0, 1.0 },
+    { 1.5, 2.0 },
+    { 1.87, 10.0 },
     { 2.0, 2.0 },
-    { 2.0, 3.0 },
-    { 2.0, 10.0 },
 };
 
 std::vector<std::pair<double, double>> generateNParamters(int n, std::string mode)
@@ -187,8 +234,8 @@ std::vector<std::pair<double, double>> generateNParamters(int n, std::string mod
     std::vector<std::pair<double, double>> parameters;
 
     std::random_device rd;
-    std::mt19937 rng(rd());
-    std::normal_distribution<double> dist_rc(1.87, 0.37); // mean = 1.87, stddev = 0.34
+
+    std::normal_distribution<double> dist_rc(1.87 * 0.5, 0.37); // mean = 1.87, stddev = 0.34 our domain now change from [-2,2] ->[0,2], thus radius rc mulptile 0.5 otherwise its two large.
     std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
 
     int i = 0;
@@ -615,7 +662,8 @@ UnSteadyVectorField2D Tobias_reconstructUnsteadyField(const UnSteadyVectorField2
         return {};
     }
 }
-void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inputLicImage, const SteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn, const Eigen::Vector2d& translation_t, const Eigen::Matrix2d& deformMat)
+
+void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inputLicImage, const SteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn, const Eigen::Vector2d& txy, const Eigen::Matrix2d& deformMat)
 {
     // if si=0 then no vortex
     if (meta_n_rc_si.z() == 0.0) {
@@ -624,8 +672,8 @@ void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inp
     const auto rc = meta_n_rc_si(1);
     const auto deformInverse = deformMat.inverse();
 
-    auto judgeVortex = [rc, translation_t, deformInverse](const Eigen::Vector2d& pos) -> bool {
-        auto originalPos = deformInverse * (pos - translation_t);
+    auto judgeVortex = [rc, txy, deformInverse](const Eigen::Vector2d& pos) -> bool {
+        auto originalPos = deformInverse * (pos - txy);
         auto dx = rc - originalPos.norm();
         return dx > 0;
     };
@@ -650,77 +698,18 @@ void addSegmentationVisualization(std::vector<std::vector<Eigen::Vector3d>>& inp
             if (judgeVortex(pos)) {
                 auto preColor = inputLicImage[j][i];
                 // red for critial point(coreline)
-                auto velocity = vectorField.getVector(pos.x(), pos.y());
+                // auto velocity = vectorField.getVector(pos.x(), pos.y());
                 // !note: because txy is random core line center, then critical point==txy(velocity ==0.0) might not  lie on any grid points
-                if (velocity.norm() < 1e-7)
-                    [[unlikely]] {
-                    inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 0.0, 0.0);
-                } else {
-                    // yellow for vortex region
-                    inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 1.0, 0.0);
-                }
+                /*     if (velocity.norm() < 1e-7)
+                         [[unlikely]] {
+                         inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 0.0, 0.0);
+                     } else {*/
+                // yellow for vortex region
+                inputLicImage[j][i] = 0.4 * preColor + 0.6 * Eigen::Vector3d(1.0, 1.0, 0.0);
+                //}
             }
         }
     }
-}
-void addSegmentationVisualization(std::vector<std::vector<std::vector<Eigen::Vector3d>>>& inputLicImages, const UnSteadyVectorField2D& vectorField, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& domainMax, const Eigen::Vector2d& domainMIn, const Eigen::Vector2d& txy, const Eigen::Matrix2d& deformMat)
-{
-    //// if si=0 then no vortex
-    // if (meta_n_rc_si.z() == 0.0) {
-    //     return;
-    // }
-    // const auto rc = meta_n_rc_si(1);
-    // const auto deformInverse = deformMat.inverse();
-
-    // auto judgeVortex = [rc, translation_t = txy, deformInverse](const Eigen::Vector2d& pos) -> bool {
-    //     auto originalPos = deformInverse * (pos - translation_t);
-    //     auto dx = rc - originalPos.norm();
-    //     return dx > 0;
-    // };
-    // const int licImageSizeY = inputLicImages[0].size();
-    // const int licImageSizeX = inputLicImages[0][0].size();
-    // const auto domainRange = domainMax - domainMIn;
-    // const auto dx = domainRange(0) / licImageSizeX;
-    // const auto dy = domainRange(1) / licImageSizeY;
-    // const auto maxDistanceAnyPoint2gridPoints = sqrt((0.5 * dx) * (0.5 * dx) + (0.5 * dy) * (0.5 * dy));
-
-    // assert(vectorField.Q_t.size() == vectorField.timeSteps);
-    // assert(vectorField.c_t.size() == vectorField.timeSteps);
-    // double dt = (vectorField.tmax - vectorField.tmin) / double(vectorField.timeSteps - 1);
-    // for (size_t t = 0; t < vectorField.timeSteps; t++) {
-    //     auto& inputLicImage = inputLicImages[t];
-    //     auto Q_inverse = vectorField.Q_t[t].transpose();
-    //     auto c_t = vectorField.c_t[t];
-    //     double time = vectorField.tmin + t * dt;
-    //     for (size_t i = 0; i < licImageSizeX; i++) {
-    //         for (size_t j = 0; j < licImageSizeY; j++) {
-    //             // map position from texture image grid coordinate to vector field
-    //             double ratio_x = (double)((double)i / (double)licImageSizeX);
-    //             double ratio_y = (double)((double)j / (double)licImageSizeY);
-
-    //            Eigen::Vector3d posInObserverFrame = { ratio_x * domainRange(0) + domainMIn(0),
-    //                ratio_y * domainRange(1) + domainMIn(1), 1.0 };
-
-    //            Eigen ::Vector3d F_inverse_x = Q_inverse * (posInObserverFrame - c_t);
-    //            F_inverse_x /= F_inverse_x(2);
-    //            Eigen::Vector2d posInOriginalFrame = { F_inverse_x(0), F_inverse_x(1) };
-
-    //            if (judgeVortex(posInOriginalFrame)) {
-    //                auto preColor = inputLicImage[j][i];
-    //                // red for critial point(coreline)
-    //                auto velocity = vectorField.getVector(posInObserverFrame.x(), posInObserverFrame.y(), time);
-    //                // !note: because txy is random core line center, then critical point==txy(velocity ==0.0) might not  lie on any grid points
-    //                if (velocity.norm() < 1e-7)
-    //                    [[unlikely]] {
-    //                    inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 0.0, 0.0);
-    //                } else {
-    //                    // yellow for vortex region
-    //                    inputLicImage[j][i] = 0.3 * preColor + 0.7 * Eigen::Vector3d(1.0, 1.0, 0.0);
-    //                }
-    //            }
-    //        }
-    //    }
-    //}
 }
 
 // this function is similar to but 0different from killingABCtransformation, this function assume inputField is some unsteady field get deformed by an observer represented by
@@ -864,7 +853,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     = "sample_" + to_string(taskSampleId) + vortexTypeName;
                 string metaFilename = task_folder + sample_tag_name + "meta.json";
                 string velocityFilename = task_folder + sample_tag_name + ".bin";
-                const std::vector<float> rawSteadyData = flatten2DAs1Dfloat(steadyFieldResData);
+                const std::vector<float> rawSteadyData = flatten2DVectorsAs1Dfloat(steadyFieldResData);
                 const auto& observerParameters = generateRandomABCVectors();
                 const auto& abc = observerParameters.first;
                 const auto& abc_dot = observerParameters.second;
@@ -904,14 +893,14 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                     deformMat(0, 1) = -sy * sin(theta);
                     deformMat(1, 0) = sx * sin(theta);
                     deformMat(1, 1) = sy * cos(theta);
-                    addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy, deformMat);
+                    // addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy, deformMat);
                     string steadyField_name = "steady_beforeTransformation_";
                     string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
                     saveAsPNG(outputSteadyTexture, licFilename0);
 
                     auto outputTextures = LICAlgorithm_UnsteadyField(unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
                     auto outputTexturesReconstruct = LICAlgorithm_UnsteadyField(reconstruct_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
-                    addSegmentationVisualization(outputTextures, unsteady_field, n_rc_si, domainMaxBoundary, domainMinBoundary, txy, deformMat);
+                    /*        addSegmentationVisualization(outputTextures, unsteady_field, n_rc_si, domainMaxBoundary, domainMinBoundary, txy, deformMat);*/
                     for (size_t i = 0; i < outputTextures.size(); i += LicSaveFrequency) {
                         string tag_name = sample_tag_name + "killing_deformed_" + std::to_string(i);
                         string licFilename = task_licfolder + tag_name + "lic.png";
@@ -922,7 +911,7 @@ void generateUnsteadyField(int Nparamters, int samplePerParameters, int observer
                         string licFilename_rec = task_licfolder + tag_name_rec + "lic.png";
                         saveAsPNG(outputTexturesReconstruct[i], licFilename_rec);
                     }
-                    auto rawUnsteadyFieldData = flatten3DAs1Dfloat(unsteady_field.field);
+                    auto rawUnsteadyFieldData = flatten3DVectorsAs1Dfloat(unsteady_field.field);
                     auto [minV, maxV] = computeMinMax(rawUnsteadyFieldData);
                     if (minV < minMagintude) {
                         minMagintude = minV;
@@ -1211,7 +1200,7 @@ void GenerateSteadyVortexBoundary(int Nparamters, int samplePerParameters, const
                 string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
                 saveAsPNG(outputSteadyTexture, licFilename0);
 
-                auto rawSteadyFieldData = flatten2DAs1Dfloat(steadyField.field);
+                auto rawSteadyFieldData = flatten2DVectorsAs1Dfloat(steadyField.field);
                 auto [minV, maxV] = computeMinMax(rawSteadyFieldData);
                 if (minV < minMagintude) {
                     minMagintude = minV;
@@ -1275,7 +1264,7 @@ void GenerateSteadyVortexBoundary(int Nparamters, int samplePerParameters, const
     }
 }
 
-// reproduce paper : Robust Reference Frame Extraction from Unsteady 2D Vector Fields with Convolutional Neural Networks 
+// reproduce paper : Robust Reference Frame Extraction from Unsteady 2D Vector Fields with Convolutional Neural Networks
 void generateUnsteadyFieldMixture(int Nfield, int observerPerField, const std::string in_root_fodler, const std::string dataSetSplitTag)
 {
 
@@ -1337,7 +1326,7 @@ void generateUnsteadyFieldMixture(int Nfield, int observerPerField, const std::s
                 = "sample_" + to_string(taskSampleId);
             string metaFilename = task_folder + sample_tag_name + "meta.json";
             string velocityFilename = task_folder + sample_tag_name + ".bin";
-            const std::vector<float> rawSteadyData = flatten2DAs1Dfloat(steadyMixture.field);
+            const std::vector<float> rawSteadyData = flatten2DVectorsAs1Dfloat(steadyMixture.field);
             const auto& observerParameters = generateRandomABCVectors();
             const auto& abc = observerParameters.first;
             const auto& abc_dot = observerParameters.second;
@@ -1389,7 +1378,7 @@ void generateUnsteadyFieldMixture(int Nfield, int observerPerField, const std::s
                     string licFilename_rec = task_licfolder + tag_name_rec + "lic.png";
                     saveAsPNG(outputTexturesReconstruct[i], licFilename_rec);
                 }
-                auto rawUnsteadyFieldData = flatten3DAs1Dfloat(unsteady_field.field);
+                auto rawUnsteadyFieldData = flatten3DVectorsAs1Dfloat(unsteady_field.field);
                 auto [minV, maxV] = computeMinMax(rawUnsteadyFieldData);
                 if (minV < minMagintude) {
                     minMagintude = minV;
@@ -1447,9 +1436,164 @@ void generateUnsteadyFieldMixture(int Nfield, int observerPerField, const std::s
     }
 }
 
+// since we are doing for lagrangian, T=5 is too small, now fix T=7.
+auto PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, /*int NClusters,*/ int KLines, const double pathline_dt_m, const Eigen::Matrix2d& deformMat, const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& txy)
+{
+    constexpr int maximumLength = 50; // pathline_dt=1/5 dt, thus total have 9*5=45 steps.
+    auto maxBound = inputField.getSpatialMaxBoundary();
+    auto minBound = inputField.getSpatialMinBoundary();
+    auto domainRange = maxBound - minBound;
 
+    auto Xdim = inputField.XdimYdim.x();
+    auto Ydim = inputField.XdimYdim.y();
 
+    auto generateSeedings = [](double xmin, double xmax, double ymin, double ymax, int K) -> std::vector<Eigen::Vector2d> {
+        assert(xmax - xmin > 0);
+        assert(ymax - ymin > 0);
+        std::vector<Eigen::Vector2d> seedings;
+        seedings.reserve(K);
 
+        // Define distributions for x and y coordinates within the rectangle
+        std::uniform_real_distribution<> disX(xmin, xmax);
+        std::uniform_real_distribution<> disY(ymin, ymax);
+
+        for (int i = 0; i < K; ++i) {
+            // Generate random (x, y) within the defined rectangle
+            double x = disX(rng);
+            double y = disY(rng);
+            seedings.emplace_back(x, y);
+        }
+
+        return seedings;
+    };
+
+    const double dt = (inputField.tmax - inputField.tmin) / (double)(inputField.timeSteps - 1);
+    const double pathline_dt = dt / pathline_dt_m;
+
+    // std::vector<std::vector<std::vector<double>>> curlFields(inputField.timeSteps);
+    std::vector<std::vector<std::vector<double>>> ivdFields(inputField.timeSteps);
+    // precompute vorticity and ivd field
+    for (size_t t = 0; t < inputField.timeSteps; t++) {
+
+        // auto curlField = ComputeCurl(inputField.field[t], Xdim, Ydim, inputField.spatialGridInterval(0), inputField.spatialGridInterval(1));
+        auto ivdField = ComputeIVD(inputField.field[t], Xdim, Ydim, inputField.spatialGridInterval(0), inputField.spatialGridInterval(1));
+        // curlFields[t] = curlField;
+        ivdFields[t] = ivdField;
+    }
+
+    // generate random window D as a local cluster in the physical domain near grid point P; or 4 clusters divide the whole domain
+    //
+    // generate  K(7?9?) random samples inside D
+    // K pathlines, padding to equal length, stepsize makes to 1/m *dt->in total generate K*M points per cluster
+    // every path line information will store position,time, vorticity,IVD.
+    // the segmentation of steady vasts is an objective quantity, and should not change no matter what observer is applied.
+    std::vector<std::vector<PathlinePointInfo>> clusterPathlines;
+    constexpr int NClusters = 4;
+    std::array<Eigen::Vector2d, 4> domainCenters {
+        Eigen::Vector2d(0.25 * domainRange.x() + domainMinBoundary.x(), 0.25 * domainRange.y() + domainMinBoundary.y()), //-1,-1
+        Eigen::Vector2d(0.25 * domainRange.x() + domainMinBoundary.x(), 0.75 * domainRange.y() + domainMinBoundary.y()), // 1,1
+        Eigen::Vector2d(0.75 * domainRange.x() + domainMinBoundary.x(), 0.25 * domainRange.y() + domainMinBoundary.y()), // 1,-1
+        Eigen::Vector2d(0.75 * domainRange.x() + domainMinBoundary.x(), 0.75 * domainRange.y() + domainMinBoundary.y()) //-1,1
+    };
+
+    clusterPathlines.resize(NClusters * KLines);
+    for (int i = 0; i < NClusters; i++) {
+        // the domain d is 1/5*range,(1/10 in one direction).
+        Eigen::Vector2d domainCenter = domainCenters[i];
+
+        auto Domain_minx = std::max(domainCenter.x() - 0.25 * domainRange.x(), minBound.x());
+        auto Domain_maxx = std::min(domainCenter.x() + 0.25 * domainRange.x(), maxBound.x());
+        auto Domain_miny = std::max(domainCenter.y() - 0.25 * domainRange.y(), minBound.y());
+        auto Domain_maxy = std::min(domainCenter.y() + 0.25 * domainRange.y(), maxBound.y());
+        auto seedings = generateSeedings(Domain_minx, Domain_maxx, Domain_miny, Domain_maxy, KLines);
+        for (size_t k = 0; k < KLines; k++) {
+            int thisPathlineGlobalId = i * KLines + k;
+            clusterPathlines[thisPathlineGlobalId].reserve(maximumLength * 4);
+
+            std::vector<Eigen::Vector3d> pathlinePositions;
+            auto suc = PathhlineIntegrationRK4v2(seedings[k], inputField, 0, tmax, pathline_dt, pathlinePositions);
+            while (suc == false) {
+                seedings[k] = generateSeedings(Domain_minx, Domain_maxx, Domain_miny, Domain_maxy, 1)[0];
+                suc = PathhlineIntegrationRK4v2(seedings[k], inputField, 0, tmax, pathline_dt, pathlinePositions);
+            }
+
+            const auto startPoint = seedings[k];
+            for (int step = 0; step < pathlinePositions.size(); step++) {
+                auto px = pathlinePositions[step].x();
+                auto py = pathlinePositions[step].y();
+                auto time = pathlinePositions[step].z();
+                double floatIndexX = (px - domainMinBoundary.x()) / inputField.spatialGridInterval(0);
+                double floatIndexY = (py - domainMinBoundary.y()) / inputField.spatialGridInterval(1);
+                double floatIndexT = (time - inputField.tmin) / dt;
+
+                auto ivd = trilinear_interpolate(ivdFields, floatIndexX, floatIndexY, floatIndexT);
+                auto distance = sqrt((px - startPoint.x()) * (px - startPoint.x()) + (py - startPoint.y()) * (py - startPoint.y()));
+
+                std::vector<double> pathlinePointAndInfo = { px, py, time, ivd, distance };
+
+                clusterPathlines[thisPathlineGlobalId].emplace_back(pathlinePointAndInfo);
+            }
+        }
+    }
+
+    // auto rc = meta_n_rc_si.y();
+    // auto si = meta_n_rc_si.z();
+    // const auto deformInverse = deformMat.inverse();
+    // auto judgeVortex = [si, rc, txy, deformInverse](const Eigen::Vector2d& pos) -> double {
+    //     if (si == 1.0 || si == 2.0) {
+    //         auto originalPos = deformInverse * (pos - txy);
+    //         auto dx = rc - originalPos.norm();
+    //         return dx > 0 ? 1.0 : 0.0;
+    //     }
+    //     return 0.0;
+    // };
+    std::vector PadValue = { -100.0, -100.0, -100.0, -100.0, -100.0 };
+    // the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
+    for (auto& pathline : clusterPathlines) {
+        /*     Eigen::Vector2d pos = { pathline.at(0).at(0), pathline.at(0).at(1) };
+             pathline.at(0).at(4) = judgeVortex(pos);*/
+        pathline.resize(outputPathlineLength, PadValue);
+    }
+
+    return clusterPathlines;
+}
+
+auto generateSegmentation(const Eigen::Vector3d& meta_n_rc_si, const Eigen::Vector2d& txy, const Eigen::Matrix2d& deformMat, const int Xdim, const int Ydim, const Eigen::Vector2d& gridInterval, const Eigen::Vector2d& domainMin)
+{
+    auto rc = meta_n_rc_si.y();
+    auto si = meta_n_rc_si.z();
+    const auto deformInverse = deformMat.inverse();
+    if (si == 0.0) [[unlikely]] {
+        std::vector<std::vector<uint8_t>> empty;
+        return empty;
+    }
+    auto judgeVortex = [si, rc, txy, deformInverse](const Eigen::Vector2d& pos) -> uint8_t {
+        auto originalPos = deformInverse * (pos - txy);
+        auto dx = rc - originalPos.norm();
+        return dx > 0 ? 1 : 0;
+    };
+
+    std::vector<std::vector<uint8_t>> segmentation(Ydim, std::vector<uint8_t>(Xdim, 0));
+    for (size_t gy = 0; gy < Ydim; gy++)
+        for (size_t gx = 0; gx < Xdim; gx++) {
+            Eigen::Vector2d pos = { domainMin.x() + gridInterval.x() * gx, domainMin.y() + gridInterval.y() * gy };
+            segmentation[gy][gx] = judgeVortex(pos);
+        }
+    return segmentation;
+}
+
+template <typename T>
+auto cerealBinaryOut(T data, const std::string& dest)
+{
+    std::ofstream outBin(dest, std::ios::binary);
+    if (!outBin.good()) [[unlikely]] {
+        printf("couldn't open file: %s", dest.c_str());
+        return;
+    }
+    cereal::BinaryOutputArchive archive_Binary(outBin);
+    archive_Binary(data);
+    outBin.close();
+}
 
 // number of result traing data = Nparamters * samplePerParameters * observerPerSetting;dataSetSplitTag should be "train"/"test"/"validation"
 void generateUnsteadyFieldPathline(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string in_root_fodler, const std::string dataSetSplitTag)
@@ -1467,6 +1611,7 @@ void generateUnsteadyFieldPathline(int Nparamters, int samplePerParameters, int 
         filesystem::create_directories(root_folder);
     }
 
+    const Eigen::Vector2d domainRange = domainMaxBoundary - domainMinBoundary;
     Eigen::Vector2d gridInterval = {
         (domainMaxBoundary(0) - domainMinBoundary(0)) / (Xdim - 1),
         (domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
@@ -1478,10 +1623,19 @@ void generateUnsteadyFieldPathline(int Nparamters, int samplePerParameters, int 
     // normal distribution from supplementary material of Vortex Boundary Identification Paper
     std::normal_distribution<double> genSx(0, 3.59);
     std::normal_distribution<double> genSy(0, 2.24);
-    std::normal_distribution<double> genTx(0.0, 1.34);
-    std::normal_distribution<double> genTy(0.0, 1.27);
+    std::normal_distribution<double> genTx(1.0, 1.34);
+    std::normal_distribution<double> genTy(1.0, 1.27);
+
     double minMagintude = INFINITY;
     double maxMagintude = -INFINITY;
+    auto genTxty = [&]() -> Eigen::Vector2d {
+        auto tx = genTx(rng);
+        auto ty = genTy(rng);
+        // clamp tx, ty into valid domain
+        tx = std::clamp(tx, domainMinBoundary.x() + 0.05 * domainRange(0), domainMinBoundary.x() + 0.95 * domainRange(0));
+        ty = std::clamp(ty, domainMinBoundary.y() + 0.05 * domainRange(1), domainMinBoundary.y() + 0.95 * domainRange(1));
+        return { tx, ty };
+    };
 
     for_each(policy, paramters.begin(), paramters.cend(), [&](const std::pair<double, double>& params) {
         const double rc = params.first;
@@ -1504,29 +1658,34 @@ void generateUnsteadyFieldPathline(int Nparamters, int samplePerParameters, int 
             filesystem::create_directories(task_licfolder);
         }
 
-        std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
         for (size_t sample = 0; sample < numVelocityFields; sample++) {
             // the type of this sample(divergence,cw vortex, cc2 vortex)
             auto Si = static_cast<VastisVortexType>(sample % 3);
 
-            const auto theta = genTheta(rngSample);
-            auto sx = genSx(rngSample);
-            auto sy = genSy(rngSample);
+            const auto theta = genTheta(rng);
+            auto sx = genSx(rng);
+            auto sy = genSy(rng);
             while (sx * sy == 0.0) {
-                sx = genSx(rngSample);
-                sy = genSy(rngSample);
+                sx = genSx(rng);
+                sy = genSy(rng);
             }
-
-            auto tx = genTx(rngSample);
-            auto ty = genTy(rngSample);
-            // clamp tx ty to 0.5*domian
-            tx = std::clamp(tx, 0.3 * domainMinBoundary.x(), 0.3 * domainMaxBoundary.x());
-            ty = std::clamp(ty, 0.3 * domainMinBoundary.y(), 0.3 * domainMaxBoundary.y());
-            Eigen::Vector2d txy = { tx, ty };
-
+            Eigen::Vector2d txy = genTxty();
+            Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
+            deformMat(0, 0) = sx * cos(theta);
+            deformMat(0, 1) = -sy * sin(theta);
+            deformMat(1, 0) = sx * sin(theta);
+            deformMat(1, 1) = sy * cos(theta);
             Eigen::Vector3d n_rc_si = { n, rc, (double)Si };
-            const SteadyVectorField2D steadyField = generator.generateSteadyField_VortexBoundaryVIS2020(tx, ty, sx, sy, theta, Si);
+            const SteadyVectorField2D steadyField = generator.generateSteadyField_VortexBoundaryVIS2020(txy.x(), txy.y(), sx, sy, theta, Si);
             const auto& steadyFieldResData = steadyField.field;
+
+            string licFilename0 = task_licfolder + to_string(sample * observerPerSetting) + "_" + to_string((sample + 1) * observerPerSetting - 1) + "steady_lic.png";
+            auto outputSteadyTexture = LICAlgorithm(steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+            if (Si != VastisVortexType::saddle) {
+                addSegmentationVisualization(outputSteadyTexture, steadyField, n_rc_si, domainMaxBoundary, domainMinBoundary, txy, deformMat);
+            }
+            saveAsPNG(outputSteadyTexture, licFilename0);
+
             for (size_t observerIndex = 0; observerIndex < observerPerSetting; observerIndex++) {
                 printf(".");
 
@@ -1535,24 +1694,58 @@ void generateUnsteadyFieldPathline(int Nparamters, int samplePerParameters, int 
                 const string vortexTypeName = string { magic_enum::enum_name<VastisVortexType>(Si) };
                 const string sample_tag_name
                     = "sample_" + to_string(taskSampleId) + vortexTypeName;
-                string metaFilename = task_folder + sample_tag_name + "meta.json";
-                string velocityFilename = task_folder + sample_tag_name + ".bin";
-                const std::vector<float> rawSteadyData = flatten2DAs1Dfloat(steadyFieldResData);
+
                 const auto& observerParameters = generateRandomABCVectors();
                 const auto& abc = observerParameters.first;
                 const auto& abc_dot = observerParameters.second;
                 /* auto func = KillingComponentFunctionFactory::arbitrayObserver(abc, abc_dot);
                KillingAbcField observerfieldDeform(  func, unsteadyFieldTimeStep, tmin, tmax);*/
                 UnSteadyVectorField2D unsteady_field = Tobias_ObserverTransformation(steadyField, abc, abc_dot, tmin, tmax, unsteadyFieldTimeStep);
-                Eigen::Vector2d txy0 = { tx, ty };
-                std::vector<Eigen::Vector2d> pathVelocitys;
-                std::vector<Eigen::Vector3d> pathPositions;
-                auto suc = PathhlineIntegrationRK4(txy0, unsteady_field, 0, tmax, tmax / 100.0, pathVelocitys, pathPositions);
-                assert(suc);
+                // the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
+                std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, 48, 4.0, deformMat, n_rc_si, txy);
 
+                auto rawUnsteadyFieldData = flatten3DVectorsAs1Dfloat(unsteady_field.field);
+                auto [minV, maxV] = computeMinMax(rawUnsteadyFieldData);
+                if (minV < minMagintude) {
+                    minMagintude = minV;
+                }
+                if (maxV > maxMagintude) {
+                    maxMagintude = maxV;
+                }
+
+                string metaFilename = task_folder + sample_tag_name + "meta.json";
+
+                // save meta info:
+                std::ofstream jsonOut(metaFilename);
+                if (!jsonOut.good()) [[unlikely]] {
+                    printf("couldn't open file: %s", metaFilename.c_str());
+                    return;
+                }
+                {
+                    cereal::JSONOutputArchive archive_o(jsonOut);
+                    Eigen::Vector3d deform = { theta, sx, sy };
+                    archive_o(cereal::make_nvp("n_rc_Si", n_rc_si));
+                    archive_o(cereal::make_nvp("txy", txy));
+                    archive_o(cereal::make_nvp("deform_theta_sx_sy", deform));
+
+                    /*archive_o(cereal::make_nvp("ClusterPathlines", ClusterPathlines));*/
+                }
+                // do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
+                jsonOut.close();
+
+                // output binary of vector field, segmentation, pathlines
+                string velocityFilename = task_folder + sample_tag_name + ".bin";
+                string pathlineFilename = task_folder + sample_tag_name + "_pathline.bin";
+                string segmentationFilename = task_folder + sample_tag_name + "_segmentation.bin";
+                cerealBinaryOut(rawUnsteadyFieldData, velocityFilename);
+                cerealBinaryOut(flatten3DAs1Dfloat(ClusterPathlines), pathlineFilename);
+                if (Si != VastisVortexType::saddle) {
+                    auto seg = generateSegmentation(n_rc_si, txy, deformMat, Xdim, Ydim, gridInterval, domainMinBoundary);
+                    cerealBinaryOut(flatten2DAs1Dfloat(seg), segmentationFilename);
+                }
             } // for (size_t observerIndex = 0..)
 
-        } // for sample
+        } // for n,rc sample
     });
 
     // create Root meta json file, save plane information here instead of every sample's meta file

@@ -9,9 +9,9 @@ int main()
     //  generateUnsteadyField(15, 20, 100, "../data/Robust/", "train"); // 30000
     //  generateUnsteadyField(10, 10, 10, "../data/Robust/", "validation"); // 1000
 
-    generateUnsteadyFieldMixture(100, 30, "../data/RobustMix/", "train"); // 3000
-    generateUnsteadyFieldMixture(10, 20, "../data/RobustMix/", "validation"); // 200
-    generateUnsteadyFieldMixture(10, 20, "../data/RobustMix/", "test"); // 200
+    generateUnsteadyFieldPathline(40, 30, 50, "../data/Pathline2/", "train");
+    generateUnsteadyFieldPathline(3, 20, 20, "../data/Pathline2/", "validation"); // 200
+    generateUnsteadyFieldPathline(3, 20, 20, "../data/Pathline2/", "test"); // 200
 
     // GenerateSteadyVortexBoundary(30, 60, "../data/Steady/", "train");
     // GenerateSteadyVortexBoundary(10, 20, "../data/Steady/", "validation");

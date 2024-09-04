@@ -5,7 +5,34 @@ import torch,time,tqdm
 from .build import DATASETS
 from .data_utils import *
 
-class SteadyVastis(torch.utils.data.Dataset):
+def getDatasetRootaMeta(root_directory):
+    try_path0=os.path.join(root_directory, 'meta.json')
+    try_path1=os.path.join(root_directory, 'train/meta.json')
+    if os.path.exists(try_path0):
+        return read_rootMetaGridresolution(try_path0)
+    elif os.path.exists(try_path1):
+        return read_rootMetaGridresolution(try_path1)
+    else:
+        raise ValueError("no root meta file found.")
+
+
+def read_rootMetaGridresolution(meta_file):
+    metaINFo = read_json_file(meta_file)
+    if 'tmin' in metaINFo:          
+        tmin=metaINFo['tmin']
+        dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"],tmin] 
+    else:
+        dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"]]
+    if 'tmax' in metaINFo:
+        tmax=metaINFo['tmax']    
+        dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"],tmax]
+    else:
+        dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"]]
+    metaINFo['domainMinBoundary']=dominMinBoundary
+    metaINFo['domainMaxBoundary']=dominMaxBoundary
+    return metaINFo
+
+class VastisDataset(torch.utils.data.Dataset):
     def __init__(self, data_dir,split, transform,**kwargs):
         self.directory_path=data_dir
         self.dataName=[]
@@ -23,7 +50,7 @@ class SteadyVastis(torch.utils.data.Dataset):
         print(f"Preloading [{mode}] data......")
         start = time.time()         
         #self.directory_path should have meta.json
-        self.dastasetMetaInfo=read_rootMetaGridresolution(os.path.join(self.directory_path, 'meta.json'))
+        self.dastasetMetaInfo=getDatasetRootaMeta(self.directory_path)
         #train_directory_path should be  the direct parent folder of all "rc_xxxx_n_xxx"  folders
         split_str =mode if mode!="val" else "validation"
         target_directory_path=os.path.join(self.directory_path,split_str) 
@@ -54,7 +81,7 @@ class SteadyVastis(torch.utils.data.Dataset):
             
         
 @DATASETS.register_module()
-class SteadyVastisClassification(SteadyVastis):
+class SteadyVastisClassification(VastisDataset):
     def __init__(self, data_dir,split, transform,**kwargs):
         super().__init__( data_dir,split, transform,**kwargs)
 
@@ -74,7 +101,7 @@ class SteadyVastisClassification(SteadyVastis):
 
         
 @DATASETS.register_module()
-class SteadyVastisSegmentation(SteadyVastis):
+class SteadyVastisSegmentation(VastisDataset):
     def __init__(self, data_dir,split, transform,**kwargs):
         super().__init__( data_dir,split, transform,**kwargs)
 

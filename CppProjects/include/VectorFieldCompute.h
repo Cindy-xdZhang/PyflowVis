@@ -8,6 +8,7 @@
 using AnalyticalFlowFunc2D = std::function<Eigen::Vector2d(const Eigen::Vector2d&, double)>;
 using AnalyticalFlowFunc3D = std::function<Eigen::Vector3d(const Eigen::Vector3d&, double)>;
 using velocityFieldData = std::vector<std::vector<Eigen::Vector2d>>;
+
 template <int Component>
 __forceinline int VecComponentAddressTrans(const int x, const int y, const int mgridDim_x)
 {
@@ -43,6 +44,19 @@ T bilinear_interpolate(const std::vector<std::vector<T>>& vector_field, double x
     T b = v10 * (1 - tx) + v11 * tx;
     return a * (1 - ty) + b * ty;
 }
+
+template <typename T>
+T trilinear_interpolate(const std::vector<std::vector<std::vector<T>>>& vector_field, double x, double y, double t)
+{
+    int t0 = std::clamp(t, double(0), double(vector_field[0].size() - 1));
+    int t1 = std::min(t0 + 1, static_cast<int>(vector_field[0].size() - 1));
+    auto value_t0 = bilinear_interpolate(vector_field[t0], x, y);
+    auto value_t1 = bilinear_interpolate(vector_field[t1], x, y);
+    double tx = t - t0;
+    auto retValue = value_t0 * (1 - tx) + value_t1 * (tx);
+    return retValue;
+}
+
 template <typename T, int N>
 T bilinear_interpolate(const std::array<std::array<T, N>, N>& vector_field, double x, double y)
 {
@@ -445,6 +459,7 @@ std::pair<T, T> computeMinMax(const std::array<std::array<T, N>, N>& values)
 
     return { minVal, maxVal };
 }
+
 inline std::vector<std::vector<double>> ComputeCurl(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
 {
     std::vector<std::vector<double>> curl(Ydim, std::vector<double>(Xdim, 0.0f));
@@ -726,4 +741,5 @@ std::vector<std::vector<std::vector<Eigen::Vector3d>>> LICAlgorithm_UnsteadyFiel
 
 bool PathhlineIntegrationRK4(const Eigen::Vector2d& StartPosition, const IUnsteadField2D& inputField, const double tstart, const double tend, const double dt_, std::vector<Eigen::Vector2d>& pathVelocitys, std::vector<Eigen::Vector3d>& pathPositions);
 
+bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnsteadField2D& inputField, const double tstart, const double targetIntegrationTime, const double dt_, std::vector<Eigen::Vector3d>& pathPositions);
 #endif

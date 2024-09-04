@@ -294,3 +294,131 @@ bool PathhlineIntegrationRK4(const Eigen::Vector2d& StartPosition, const IUnstea
     bool suc = pathPositions.size() > 1 && pathVelocitys.size() == pathPositions.size();
     return suc;
 }
+
+bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnsteadField2D& inputField, const double tstart, const double targetIntegrationTime, const double dt_, std::vector<Eigen::Vector3d>& pathPositions)
+{
+    auto integratePathlineOneStep_RK4 = [](const IUnsteadField2D& observerfield, double x, double y, double t, double dt) -> Eigen::Vector2d {
+        // RK4 integration step
+        Eigen::Vector2d odeStepStartPoint = { x, y };
+
+        const double h = dt;
+
+        // coefficients
+        constexpr double a21 = 0.5;
+        constexpr double a31 = 0.;
+        constexpr double a32 = 0.5;
+        constexpr double a41 = 0.;
+        constexpr double a42 = 0.;
+        constexpr double a43 = 1.;
+
+        constexpr double c2 = 0.5;
+        constexpr double c3 = 0.5;
+        constexpr double c4 = 1.;
+        constexpr double b1 = 1. / 6.;
+        constexpr double b2 = 1. / 3.;
+        constexpr double b3 = b2;
+        constexpr double b4 = b1;
+
+        // 4 stages of 2 equations (i.e., 2 dimensions of the manifold and the tangent vector space)
+
+        // stage 1
+        Eigen::Vector2d k1 = observerfield.getVector(odeStepStartPoint, t);
+
+        // stage 2
+        Eigen::Vector2d stagePoint = odeStepStartPoint + k1 * a21 * h;
+        Eigen::Vector2d k2 = observerfield.getVector(stagePoint, t + c2 * h);
+
+        // stage 3
+        stagePoint = odeStepStartPoint + (a31 * k1 + a32 * k2) * h;
+        Eigen::Vector2d k3 = observerfield.getVector(stagePoint, t + c3 * h);
+
+        // stage 4
+        stagePoint = odeStepStartPoint + (a41 * k1 + a42 * k2 + a43 * k3) * h;
+        Eigen::Vector2d k4 = observerfield.getVector(stagePoint, t + c4 * h);
+
+        Eigen::Vector2d result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
+
+        return result_p;
+    };
+
+    const double startTime = tstart;
+    const int maxIterationCount = 5000;
+    const double spaceConversionRatio = 1.0;
+
+    pathPositions.reserve(1024);
+
+    bool integrationOutOfDomainBounds = false;
+    bool outOfIntegrationTimeBounds = false;
+    int iterationCount = 0;
+    // dt
+    double dt = dt_;
+    double integrationTimeStepSize = dt;
+    if (targetIntegrationTime < startTime) {
+        // we integrate back in time
+        integrationTimeStepSize *= -1.0;
+    }
+
+    const Eigen::Vector2d minDomainBounds = inputField.getSpatialMinBoundary();
+    const Eigen::Vector2d maxDomainBounds = inputField.getSpatialMaxBoundary();
+    // This function checks if the current point is in the domain
+    std::function<bool(const Eigen::Vector2d& point)> checkIfOutOfDomain = [&minDomainBounds, &maxDomainBounds](const Eigen::Vector2d& point) {
+        if (point(0) <= minDomainBounds(0))
+            return true;
+        if (point(0) >= maxDomainBounds(0))
+            return true;
+        if (point(1) <= minDomainBounds(1))
+            return true;
+        if (point(1) >= maxDomainBounds(1))
+            return true;
+        return false;
+    };
+
+    Eigen::Vector2d currentPoint = StartPosition;
+
+    integrationOutOfDomainBounds = checkIfOutOfDomain(currentPoint);
+
+    // do integration
+    auto currentTime = startTime;
+
+    // push init_velocity  &start point
+    Eigen::Vector3d pointAndTime = { currentPoint(0), currentPoint(1), currentTime };
+    pathPositions.emplace_back(pointAndTime);
+    auto init_velocity = inputField.getVector(currentPoint, currentTime);
+
+    // integrate until either
+    // - we reached the max iteration count
+    // - we reached the upper limit of the time domain
+    // - we ran out of spatial domain
+    while ((!integrationOutOfDomainBounds) && (!outOfIntegrationTimeBounds) && (pathPositions.size() < maxIterationCount)) {
+
+        // advance to a new point in the chart
+        Eigen::Vector2d newPoint = integratePathlineOneStep_RK4(inputField, currentPoint(0), currentPoint(1), currentTime, dt);
+        integrationOutOfDomainBounds = checkIfOutOfDomain(newPoint);
+        if (!integrationOutOfDomainBounds) {
+            auto newTime = currentTime + integrationTimeStepSize;
+            // check if currentTime is out of the time domain -> we are done
+            if ((targetIntegrationTime > startTime) && (newTime >= targetIntegrationTime)) {
+                outOfIntegrationTimeBounds = true;
+            } else if ((targetIntegrationTime < startTime) && (newTime <= targetIntegrationTime)) {
+                outOfIntegrationTimeBounds = true;
+            } else {
+                if (std::isnan(newPoint(0)) || std::isnan(newPoint(1))) {
+                    // Handle the case where newPoint(0) is NaN
+                    printf("nan.");
+                    break;
+                }
+
+                // add  current point to the result list and set currentPoint to newPoint -> everything fine -> continue with the while loop
+                Eigen::Vector3d new_pointAndTime = { newPoint(0), newPoint(1), newTime };
+                pathPositions.emplace_back(new_pointAndTime);
+                auto velocity = inputField.getVector(newPoint, newTime);
+
+                currentPoint = newPoint;
+                currentTime = newTime;
+                iterationCount++;
+            }
+        }
+    }
+    bool suc = pathPositions.size() > 1;
+    return suc;
+}

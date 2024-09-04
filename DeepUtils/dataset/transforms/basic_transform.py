@@ -15,6 +15,22 @@ class ToTensor(object):
         return data
 
 
+
+class PathlineJittorCubic(object):
+    def __init__(self, **kwargs):
+        """PathlineJittorCubic assume pathline has been interpolated from L steps to interpolatedL steps, now it will jittor it by random down-sample it to L steps.
+        """
+        pass
+    def __call__(self, interpolated_data):
+        interpolatedL, K, C = interpolated_data.shape
+        L=12
+       # Randomly downsample back to L steps
+        indices = np.sort(np.random.choice(interpolatedL, L, replace=False))
+        indices[0]=0
+        downsampled_data = interpolated_data[indices]
+        return downsampled_data
+
+
 @DataTransforms.register_module()
 class MinMaxNormalization(object):
     def __init__(self, minV,maxV, **kwargs):
@@ -28,7 +44,7 @@ class MinMaxNormalization(object):
 
 @DataTransforms.register_module()    
 class WhiteNoise(object):
-    def __init__(self, minV,maxV,noiseMaginitude,**kwargs):
+    def __init__(self, noiseMaginitude,minV=-1.0,maxV=1.0,**kwargs):
         self.range0=minV*noiseMaginitude
         self.range1=maxV*noiseMaginitude
        
