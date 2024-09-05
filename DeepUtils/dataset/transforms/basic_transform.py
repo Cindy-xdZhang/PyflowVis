@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from .transforms_factory import DataTransforms
-
+import  random
 
 @DataTransforms.register_module()
 class ToTensor(object):
@@ -23,7 +23,8 @@ class PathlineJittorCubic(object):
         pass
     def __call__(self, interpolated_data):
         interpolatedL, K, C = interpolated_data.shape
-        L=12
+        # L = random.randint(8, 12)
+        L=16
        # Randomly downsample back to L steps
         indices = np.sort(np.random.choice(interpolatedL, L, replace=False))
         indices[0]=0

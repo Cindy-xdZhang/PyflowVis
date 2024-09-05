@@ -350,9 +350,7 @@ bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnst
     bool integrationOutOfDomainBounds = false;
     bool outOfIntegrationTimeBounds = false;
     int iterationCount = 0;
-    // dt
-    double dt = dt_;
-    double integrationTimeStepSize = dt;
+    double integrationTimeStepSize = dt_;
     if (targetIntegrationTime < startTime) {
         // we integrate back in time
         integrationTimeStepSize *= -1.0;
@@ -392,7 +390,7 @@ bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnst
     while ((!integrationOutOfDomainBounds) && (!outOfIntegrationTimeBounds) && (pathPositions.size() < maxIterationCount)) {
 
         // advance to a new point in the chart
-        Eigen::Vector2d newPoint = integratePathlineOneStep_RK4(inputField, currentPoint(0), currentPoint(1), currentTime, dt);
+        Eigen::Vector2d newPoint = integratePathlineOneStep_RK4(inputField, currentPoint(0), currentPoint(1), currentTime, integrationTimeStepSize);
         integrationOutOfDomainBounds = checkIfOutOfDomain(newPoint);
         if (!integrationOutOfDomainBounds) {
             auto newTime = currentTime + integrationTimeStepSize;

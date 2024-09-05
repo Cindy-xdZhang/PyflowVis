@@ -3,18 +3,16 @@ imgui.ini
 config/config.yaml
 autosave/
 profile/profile.txt
+wandb/
+testOutput/
+
 
 CppProjects/PybindCppModules/__pycache__/
 CppProjects/PybindCppModules/Pyds/__pycache__/
 CppProjects/PybindCppModules/Pyds/*.pyd
 CppProjects/PybindCppModules/build/
-
-
 CppProjects/build/
 CppProjects/data/
 
 
 
-models/
-wandb/
-testOutput/

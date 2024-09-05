@@ -303,9 +303,10 @@ def segmentationCriteria(pred, gt):
 
 class TestSegmentation(object):
     """ TestSegmentation  is the default test task for Segmentation tasks """
-    def __init__(self, device,samples=10,**kwargs):
+    def __init__(self, device,run_name,samples=10,**kwargs):
           self.device=device
           self.samples=samples
+          self.runName=run_name
 
 
     def __call__(self, model,test_data_loader):
@@ -316,6 +317,7 @@ class TestSegmentation(object):
         dm_min,dm_max=meta_["domainMinBoundary"],meta_["domainMaxBoundary"]
         grid_dx,grid_dy=(dm_max[0]-dm_min[0])/float( Xdim-1),(dm_max[1]-dm_min[1])/float( Ydim-1)
         test_loss=0
+     
         for batch_idx, (data, label) in enumerate(test_data_loader):
             if isinstance(data, list):
                 # Unpack the tuple
@@ -340,12 +342,12 @@ class TestSegmentation(object):
         TP,FP,FN, precision, recall, F1, IoU=segError[0],segError[1],segError[2],segError[3],segError[4],segError[5],segError[6]
         print(f"TP,FP,FN={TP},{FP},{FN}")
         print(f"precision, recall, F1, IoU={precision},{recall},{F1},{IoU}")
-
+        
         # #random select  samples to visualize
         for i in range(self.samples):
             sample=random.randint(0,len(test_data_loader.dataset)-1)
             data, label=test_data_loader.dataset[sample]
-            if isinstance(data, list):
+            if isinstance(data, list) or isinstance(data, tuple) :
                 # Unpack the tuple
                 vectorFieldImage, pathlines = data
                 # Move each element to the device
@@ -364,13 +366,14 @@ class TestSegmentation(object):
             predictition=predictition[0].cpu().numpy()
             label=label.cpu().numpy()
             name=test_data_loader.dataset.getSampleName(sample)
-            save_segmentation_as_png(predictition,f"./testOutput/{name}_pred.png",upSample=10.0)
-            save_segmentation_as_png(label,f"./testOutput/{name}_gt.png",upSample=10.0)
+            save_segmentation_as_png(predictition,f"./testOutput/{self.runName}/{name}_pred.png",upSample=10.0)
+            save_segmentation_as_png(label,f"./testOutput/{self.runName}/{name}_gt.png",upSample=10.0)
             rawVectorField=vectorFieldImage.transpose(0,-1).cpu().numpy()
-            qCriterion=computeQcriterion(rawVectorField,grid_dx,grid_dy)
-            ivd=computeIVD(rawVectorField,grid_dx,grid_dy)
-            saveCriteriaPicture(qCriterion,f"./testOutput/{name}_q_cri.png",upSample=10.0)
-            saveCriteriaPicture(ivd,f"./testOutput/{name}_ivd.png",upSample=10.0)
+            
+            # qCriterion=computeQcriterion(rawVectorField,grid_dx,grid_dy)
+            # ivd=computeIVD(rawVectorField,grid_dx,grid_dy)
+            # saveCriteriaPicture(qCriterion,f"./testOutput/{run_name}/{name}_q_cri.png",upSample=10.0)
+            # saveCriteriaPicture(ivd,f"./testOutput/{run_name}/{name}_ivd.png",upSample=10.0)
             # precision, recall, F1, IoU=segmentationCriteria(predictition,labelVortex)
 
 
@@ -389,6 +392,7 @@ def test_model(model,cfg):
     model.eval()
     #building test tasks
     test_cfg=cfg['test_tasks']
+    test_cfg["run_name"]=cfg['run_name'] if "run_name" in cfg else "default"
     test_tasks=[]
     for  cfg_task_name in test_cfg['tasks']:
         task_init_fn=eval(cfg_task_name)

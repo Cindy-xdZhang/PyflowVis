@@ -64,6 +64,7 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
     epochs,device,valiate_every,run_Name,lossName=config['epochs'],config['device'],config['val_freq'],config['run_name'],config["model"]["criterion_args"]["NAME"]
     total_iterations,oom_time,best_val_loss=0,0,float('inf')
     model.to(device)
+    sched_on_epoch=getattr(config,"sched_on_epoch",True)
     for epoch in range(epochs):
         epoch_loss = 0
         try:
@@ -92,13 +93,16 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
                     lr=optimizer.param_groups[0]["lr"]
                     logging.info(f'Epoch {epoch+1}, iter {batch_idx+1}, total_iterations: {total_iterations}. {lossName}: {loss.item()},lr:{lr}.')
                     if config['wandb']:
-                        wandb.log({"train_loss": loss.item(),  "total_iterations": total_iterations})
+                        wandb.log({"train_loss": loss.item(),  "total_iterations": total_iterations,"lr":lr})
+                        
+                if scheduler is not None and not sched_on_epoch:
+                    scheduler.step(epoch)                   
+               
                 
-            if scheduler is not None:
-                scheduler.step(epoch)               
+            if scheduler is not None and sched_on_epoch:
+                scheduler.step(epoch)       
+                        
             epoch_loss /= len(data_loader)
-
-
             # Validate the model
             if (epoch+1) % valiate_every == 0:
                 val_loss = validate(model, validation_data_loader, device)  

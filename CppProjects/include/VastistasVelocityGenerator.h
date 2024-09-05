@@ -57,7 +57,10 @@ public:
     SteadyVectorField2D generateSteadyField_VortexBoundaryVIS2020(double tx, double ty, double sx, double sy, double theta, VastisVortexType Si) const noexcept;
 
     // support mixture of multiple Vastistas profile
-    SteadyVectorField2D generateSteadyFieldMixture(int mixture) const noexcept;
+    SteadyVectorField2D generateSteadyFieldMixtureRobustPaper(int mixture) const noexcept;
+
+    // only supprt ccw/cw vortex mix together, and we asking the center of two vortex is bigger than rc1 +rc2
+    SteadyVectorField2D generateSteadyFieldMixture(std::vector<VastisParamter>& vectorFieldMeta, int mixture) const noexcept;
 
     inline auto NormalizedVastistasV0(const double r) const noexcept
     {

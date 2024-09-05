@@ -152,7 +152,11 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,domainMin
     # pathlineClusters= np.array(metaINFo["ClusterPathlines"],dtype=np.float32)
     
     pathlineBinarypath= metaPath.replace('meta.json', '_pathline.bin')
-    pathlineClusters=read_binary_file(pathlineBinarypath).reshape(192,24,5)
+    pathlineClusters=read_binary_file(pathlineBinarypath)
+    if pathlineClusters.shape[0]==192*24*5:
+        pathlineClusters=pathlineClusters.reshape(192,24,5)
+    else:        
+        pathlineClusters=pathlineClusters.reshape(192,25,5)
     
     # Permute pathline clusters first and second axis
     pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))[:,:,0:3]

@@ -2,10 +2,9 @@
 model:
   NAME: BaseSeg
   encoder_args:
-    NAME: SimpleTransformer
+    NAME: PathlineTransformerWithCNNVecField
     # d_model: 1152 
-    num_encoder_layers: 3
-    seqLength: 12
+    num_encoder_layers: 4
     Kpathlines: 192
     in_channels: 2
     DataSizeX: 32
@@ -24,16 +23,27 @@ model:
 batch_size: 256
 lr: 0.0001
 epochs: 200
-scheduler: TwoStep
-warmup_epochs: 80 
-second_lr: 0.00001
+# scheduler: TwoStep
+# warmup_epochs: 80 
+# second_lr: 0.00001
 optimizer:
  NAME: 'adamw'
- weight_decay: 0.000001
+ weight_decay: 0.00001
 
+# scheduler
+scheduler: cosine
+warmup_epochs:  2
+warmup_lr_init: 1.0e-6
+min_lr: 0.00001
+
+
+
+# scheduler: TwoStep
+# warmup_epochs: 60 
+# second_lr: 0.000005
 
 dataloader:
-  num_workers: 1
+  num_workers: 0
 dataset:
   NAME: UnsteadyVastisPathlineSeg
   data_dir: 'CppProjects/data/Pathline2/X32_Y32_T7_no_mixture'
