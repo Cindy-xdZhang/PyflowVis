@@ -130,7 +130,7 @@ std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(
                     // Compute the normalized curl value
                     auto curlValue = curl[static_cast<int>(ratio_y * Ydim)][static_cast<int>(ratio_x * Xdim)];
                     double normalizedCurl = (curlValue - minCurl) / (maxCurl - minCurl);
-                    Eigen::Vector3d curlColor = { normalizedCurl, 0.1, 1.0 - normalizedCurl };
+                    Eigen::Vector3d curlColor = { normalizedCurl, 0.01, 1.0 - normalizedCurl };
 
                     auto whiteish = licValue;
                     whiteish = std::min(std::max(0.0, (whiteish - 0.4) * (1.5 / 0.4)), 1.0);
@@ -344,8 +344,8 @@ bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnst
     const double startTime = tstart;
     const int maxIterationCount = 5000;
     const double spaceConversionRatio = 1.0;
-
-    pathPositions.reserve(1024);
+    pathPositions.clear();
+    pathPositions.reserve(512);
 
     bool integrationOutOfDomainBounds = false;
     bool outOfIntegrationTimeBounds = false;
@@ -417,6 +417,6 @@ bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnst
             }
         }
     }
-    bool suc = pathPositions.size() > 1;
+    bool suc = pathPositions.size() > 3;
     return suc;
 }

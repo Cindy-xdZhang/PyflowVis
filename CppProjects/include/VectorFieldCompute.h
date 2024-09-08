@@ -388,6 +388,7 @@ enum class VORTEX_CRITERION {
     DELTA_CRITERION,
     SUJUDI_HAIMES_CRITERION,
     SOBEL_EDGE_DETECTION,
+    VELICITY_MAGINITUDE
     // LAVD wip
 };
 
@@ -667,6 +668,19 @@ inline std::vector<std::vector<double>> ComputeFTLE(
 
     return FTLE;
 }
+
+inline std::vector<std::vector<double>> ComputeVelocityMagniture(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim)
+{
+    std::vector<std::vector<double>> mag(Ydim, std::vector<double>(Xdim, 0.0f));
+    // Calculate curl (vorticity) of the vector field
+    for (int y = 0; y < Ydim; ++y) {
+        for (int x = 0; x < Xdim; ++x) {
+            mag[y][x] = vecfieldData[y][x].norm();
+        }
+    }
+    return mag;
+}
+
 // Function to compute the Sobel edge detection for a 2D vector field slice
 inline std::vector<std::vector<double>> ComputeSobelEdge(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim)
 {
@@ -728,6 +742,8 @@ inline auto computeTargetCrtierion(const std::vector<std::vector<Eigen::Vector2d
         return ComputeSujudiHaimes(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
     case VORTEX_CRITERION::SOBEL_EDGE_DETECTION:
         return ComputeSobelEdge(vecfieldData, Xdim, Ydim);
+    case VORTEX_CRITERION::VELICITY_MAGINITUDE:
+        return ComputeVelocityMagniture(vecfieldData, Xdim, Ydim);
     case VORTEX_CRITERION::CURL:
     default:
         return ComputeCurl(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);

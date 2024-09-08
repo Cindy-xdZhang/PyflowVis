@@ -19,8 +19,8 @@ model:
 # ---------------------------------------------------------------------------- #
 # Training parameters
 # random_seed: 4259
-# wandb: True 
-batch_size: 256
+wandb: True 
+batch_size: 32
 lr: 0.0001
 epochs: 200
 # scheduler: TwoStep
@@ -33,8 +33,8 @@ optimizer:
 # scheduler
 scheduler: cosine
 warmup_epochs:  2
-warmup_lr_init: 1.0e-6
-min_lr: 0.00001
+warmup_lr_init: 5.0e-6
+min_lr: 0.00002
 
 
 

@@ -136,15 +136,25 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,domainMin
     #                 [sx*np.sin(theta), sy*np.cos(theta)]])
     # InvA= np.linalg.inv(deformMatA)
     
-    vortexsegmentationLabel = np.zeros((Ydim, Xdim,2),dtype=np.float32)
+    # vortexsegmentationLabel = np.zeros((Ydim, Xdim,2),dtype=np.float32)
+    # if "saddle" in metaPath:
+    #     vortexsegmentationLabel[:, :, 0] = 1.0
+    # else:
+    #     # vortexsegLabel=np.array(metaINFo["segmentation"]) 
+    #     segmentationBinarypath= metaPath.replace('meta.json', '_segmentation.bin')
+    #     vortexsegLabel=read_binary_file(segmentationBinarypath).reshape(Ydim,Xdim)
+    #     vortexsegmentationLabel[:, :, 0] = 1 - vortexsegLabel
+    #     vortexsegmentationLabel[:, :, 1] = vortexsegLabel
+    
+    #classfication of this patch
+    vortexsegmentationLabel = np.zeros((2),dtype=np.float32)
     if "saddle" in metaPath:
-        vortexsegmentationLabel[:, :, 0] = 1.0
+        vortexsegmentationLabel[0] = 1.0
     else:
-        # vortexsegLabel=np.array(metaINFo["segmentation"]) 
-        segmentationBinarypath= metaPath.replace('meta.json', '_segmentation.bin')
-        vortexsegLabel=read_binary_file(segmentationBinarypath).reshape(Ydim,Xdim)
-        vortexsegmentationLabel[:, :, 0] = 1 - vortexsegLabel
-        vortexsegmentationLabel[:, :, 1] = vortexsegLabel
+        vortexsegmentationLabel[0] = 0.0 
+        vortexsegmentationLabel[1] = 1.0
+
+
 
     rawBinaryPath= metaPath.replace('meta.json', '.bin')
     raw_Binary = read_binary_file(rawBinaryPath)
@@ -155,6 +165,8 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,domainMin
     pathlineClusters=read_binary_file(pathlineBinarypath)
     if pathlineClusters.shape[0]==192*24*5:
         pathlineClusters=pathlineClusters.reshape(192,24,5)
+        padding = np.ones((192, 1, 5), dtype=pathlineClusters.dtype)*-100
+        pathlineClusters = np.concatenate([pathlineClusters, padding], axis=1)
     else:        
         pathlineClusters=pathlineClusters.reshape(192,25,5)
     

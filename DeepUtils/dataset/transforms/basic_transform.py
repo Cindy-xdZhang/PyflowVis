@@ -22,10 +22,13 @@ class PathlineJittorCubic(object):
         """
         pass
     def __call__(self, interpolated_data):
+        assert(False)
         interpolatedL, K, C = interpolated_data.shape
         # L = random.randint(8, 12)
-        L=16
-       # Randomly downsample back to L steps
+        L=16  
+       # Randomly downsample back to L steps 
+        # !       you can not do the temporal sampling here, because now batch is not assembled, then within a batch every pathline has different timestamps, and 
+        # !       we should do this after a batch data is assembed then generate random  indices for temporal sampling.
         indices = np.sort(np.random.choice(interpolatedL, L, replace=False))
         indices[0]=0
         downsampled_data = interpolated_data[indices]

@@ -36,16 +36,20 @@ def runNameTagGenerator(config) ->(str,list[:str]):
 def CollectWandbLogfiles(arti_code):
     def match_file(path):    
         return path.endswith(".py") 
-    saveFolder="./DeepUtils/"
+    saveFolder="./DeepUtils/models/reconstruction"
     fileList0=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]
-    saveFolder="./FlowUtils/"
-    fileList1=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]    
+    # saveFolder="./DeepUtils/models/reconstruction"
+    # saveFolder="./FlowUtils/"
+    # fileList1=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]    
+    saveFolder="./DeepUtils/models/segmentation"
+    fileList2=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]    
+    fileList0.extend(fileList2)
     fileList0.append("train.py")
 
     for file in fileList0:
         arti_code.add_file(file, name= file)
-    for file in fileList1:
-        arti_code.add_file(file, name=file)
+    # for file in fileList1:
+    #     arti_code.add_file(file, name=file)
     return arti_code
 
 

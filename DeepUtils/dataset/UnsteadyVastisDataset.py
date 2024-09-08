@@ -36,13 +36,13 @@ class UnsteadyVastisDataset(VastisDataset):
 class UnsteadyVastisPathlineSeg(VastisDataset):
     def __init__(self, data_dir,split, transform,**kwargs):
         super().__init__( data_dir,split, transform,**kwargs)
-        self.lineTransform=PathlineJittorCubic()
+        # self.lineTransform=PathlineJittorCubic()
     
     def __getitem__(self, idx):
         data,pathlines=self.data[idx]
         if self.transform is not None:
             data = self.transform(data)   
-        pathlines = self.lineTransform(pathlines)
+        # pathlines = self.lineTransform(pathlines)
         return (data,pathlines) , self.label[idx]
 
     def loadOneTaskFolder(self,sub_folder:str):
