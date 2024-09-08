@@ -9,9 +9,13 @@ set(sources
 src/VastistasVelocityGenerator.cpp 
 include/VastistasVelocityGenerator.h
 include/VectorFieldCompute.h
+include/commonUtils.h
 src/VectorFieldCompute.cpp
+src/transformation.cpp
+src/transformation.h
 src/flowGenerator.cpp
 src/flowGenerator.h
+src/commonUtils.cpp
 src/main.cpp
 )
 
