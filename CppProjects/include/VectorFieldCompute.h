@@ -782,5 +782,8 @@ std::vector<std::vector<std::vector<Eigen::Vector3d>>> LICAlgorithm_UnsteadyFiel
 bool PathhlineIntegrationRK4(const Eigen::Vector2d& StartPosition, const IUnsteadField2D& inputField, const double tstart, const double tend, const double dt_, std::vector<Eigen::Vector2d>& pathVelocitys, std::vector<Eigen::Vector3d>& pathPositions);
 
 bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnsteadField2D& inputField, const double tstart, const double targetIntegrationTime, const double dt_, std::vector<Eigen::Vector3d>& pathPositions);
-std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, /*int NClusters,*/ int KLines, const double pathline_dt_m, const Eigen::Matrix2d& deformMat, const Eigen::Vector3d& meta_rc_n_si, const Eigen::Vector2d& txy, const int outputPathlineLength);
+
+std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const int outputPathlineLength);
+
+std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const Eigen::Matrix2d& deformMat, const Eigen::Vector3d& meta_rc_n_si, const Eigen::Vector2d& txy, const int outputPathlineLength);
 #endif

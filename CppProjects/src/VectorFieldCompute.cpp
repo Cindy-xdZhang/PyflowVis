@@ -427,7 +427,15 @@ bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnst
 
 
 
-std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const double pathline_dt_m, const Eigen::Matrix2d& deformMat, const Eigen::Vector3d& n_rc_si, const Eigen::Vector2d& txy, const int outputPathlineLength)
+std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const int outputPathlineLength)
+{
+	Eigen::Matrix2d tmp;
+	Eigen::Vector3d ttmp;
+	Eigen::Vector2d tttmp;
+	return PathlineIntegrationInfoCollect2D(inputField, KLines, tmp, ttmp, tttmp, outputPathlineLength);
+}
+
+std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const Eigen::Matrix2d& deformMat, const Eigen::Vector3d& n_rc_si, const Eigen::Vector2d& txy, const int outputPathlineLength)
 {
 	constexpr int maximumLength = 50; // pathline_dt=1/5 dt, thus total have 9*5=45 steps.
 	auto maxBound = inputField.getSpatialMaxBoundary();
@@ -459,7 +467,7 @@ std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(con
 		};
 
 	const double dt = (inputField.tmax - inputField.tmin) / (double)(inputField.timeSteps - 1);
-	const double pathline_dt = dt / pathline_dt_m;
+	const double pathline_dt = (inputField.tmax - inputField.tmin) / (double)(outputPathlineLength - 1);
 
 	// std::vector<std::vector<std::vector<double>>> curlFields(inputField.timeSteps);
 	std::vector<std::vector<std::vector<double>>> ivdFields(inputField.timeSteps);

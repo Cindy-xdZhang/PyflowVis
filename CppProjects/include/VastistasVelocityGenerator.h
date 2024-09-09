@@ -11,6 +11,7 @@
 #include <corecrt_math_defines.h>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 // one VastisParamter is Eigen::Vector2d rc_n, Eigen::Vector2d tx_ty,Eigen::Vector3d sxsytheta, int si.
 using VastisParamter = std::tuple<Eigen::Vector2d, Eigen::Vector2d, Eigen::Vector3d, int>;
@@ -95,6 +96,7 @@ public:
 	UnSteadyVectorField2D createUnsteadyGyre();
 	AnalyticalFlowFunc2D getAnalyticalFlowFieldFunction(const std::string& name, double tMin, double tMax, int numberOfTimeSteps);
 
+	std::unordered_map<std::string, UnSteadyVectorField2D >generateAnalyticalTestSuite();
 private:
 	Eigen::Vector2i grid_size;
 	int time_steps;

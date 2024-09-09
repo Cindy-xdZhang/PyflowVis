@@ -371,6 +371,7 @@ UnSteadyVectorField2D AnalyticalFlowCreator::sampleAnalyticalFunctionAsFlowField
 	vectorField2d.tmax = tmax;
 	vectorField2d.spatialGridInterval = { (domainBoundaryMax.x() - domainBoundaryMin.x()) / (grid_size.x() - 1),
 		(domainBoundaryMax.y() - domainBoundaryMin.y()) / (grid_size.y() - 1) };
+	vectorField2d.XdimYdim = grid_size;
 
 	vectorField2d.field.resize(time_steps, std::vector<std::vector<Eigen::Vector2d>>(grid_size.y(), std::vector<Eigen::Vector2d>(grid_size.x())));
 
@@ -644,4 +645,20 @@ AnalyticalFlowFunc2D AnalyticalFlowCreator::getAnalyticalFlowFieldFunction(const
 	}
 
 	return fieldFunction;
+}
+
+std::unordered_map<std::string, UnSteadyVectorField2D > AnalyticalFlowCreator::generateAnalyticalTestSuite()
+{
+	// Create the flow field
+	const auto rfc = this->createRFC();
+	const auto beads = this->createBeadsFlow();
+	const auto beadsNC = this->createBeadsFlowNoContraction();
+	const UnSteadyVectorField2D grye = this->createUnsteadyGyre();
+
+	std::unordered_map<std::string, UnSteadyVectorField2D > ret;
+	ret["rfc"] = rfc;
+	ret["beads"] = beads;
+	ret["beadsNC"] = beadsNC;
+	ret["grye"] = grye;
+	return ret;
 }
