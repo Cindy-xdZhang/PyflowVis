@@ -2,14 +2,66 @@
 #include <cmath>
 #include <corecrt_math_defines.h>
 #include <random>
-
+#include <unordered_set>
 
 
 namespace {
 
 	std::mt19937 rng(static_cast<unsigned int>(std::time(0)));
 }
+struct pair_hash {
+	template <class T1, class T2>
+	std::size_t operator()(const std::pair<T1, T2>& pair) const
+	{
+		return std::hash<T1>()(pair.first) ^ std::hash<T2>()(pair.second);
+	}
+};
+std::vector<std::pair<double, double>> generateVastisRC_NParamters(int n, std::string mode)
+{
+	static std::unordered_set<std::pair<double, double>, pair_hash> unique_params;
+	const static std::vector<std::pair<double, double>> presetRCNParameters = {
+	{ 0.5, 1.0 },
+	{ 0.25, 2.0 },
+	{ 0.8, 2.0 },
+	{ 1.0, 2.0 },
+	{ 1.0, 3.0 },
+	{ 1.0, 5.0 },
+	{ 1.5, 2.0 },
+	{ 1.87, 10.0 },
+	{ 2.0, 2.0 },
+	};
+	std::vector<std::pair<double, double>> parameters;
 
+	std::random_device rd;
+
+	std::normal_distribution<double> dist_rc(1.87 * 0.5, 0.37); // mean = 1.87, stddev = 0.34 our domain now change from [-2,2] ->[0,2], thus radius rc mulptile 0.5 otherwise its two large.
+	std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
+
+	int i = 0;
+	while (parameters.size() < n) {
+
+		if (i < presetRCNParameters.size() && mode == "train") {
+			std::pair<double, double> preset_pair = presetRCNParameters.at(i++);
+			if (unique_params.find(preset_pair) == unique_params.end()) {
+				parameters.emplace_back(preset_pair);
+				unique_params.insert(preset_pair);
+			}
+		}
+		else {
+
+			double rc = dist_rc(rng);
+			double n = static_cast<double>(dist_n(rng));
+			std::pair<double, double> new_pair = { rc, n };
+
+			if (unique_params.find(new_pair) == unique_params.end()) {
+				parameters.emplace_back(new_pair);
+				unique_params.insert(new_pair);
+			}
+		}
+	}
+
+	return parameters;
+}
 
 VastistasVelocityGenerator::VastistasVelocityGenerator(int Xdim, int Ydim, Eigen::Vector2d minBondary, Eigen::Vector2d maxBondary, double rc, double n)
 	: mgridDim_x(Xdim)
@@ -43,38 +95,65 @@ VastistasVelocityGenerator::VastistasVelocityGenerator(int Xdim, int Ydim, Eigen
 SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField_VortexBoundaryVIS2020(double tx, double ty, double sx, double sy, double theta, VastisVortexType Si) const noexcept
 {
 
-	std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d{ 0.0, 0.0 }));
-	Eigen::Matrix2d deformMatA = Eigen::Matrix2d::Identity();
-	deformMatA(0, 0) = sx * cos(theta);
-	deformMatA(0, 1) = -sy * sin(theta);
-	deformMatA(1, 0) = sx * sin(theta);
-	deformMatA(1, 1) = sy * cos(theta);
-	const auto SiMat22 = SiMatices_[static_cast<int>(Si)];
-	const Eigen::Vector2d translation_t = { tx, ty };
-
-	auto lambdaFunc = [this, SiMat22, translation_t, deformMatA](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
-		auto originalPos = deformMatA.inverse() * (pos - translation_t);
-		// get standard VastistasVelocity vector on originalPos (v(x=originalPos))
-		auto standardVastistasVelocity = SiMat22 * originalPos * NormalizedVastistasV0(originalPos.norm());
-		// get the transformed VastistasVelocity vector on pos (v(x=pos))
-		auto transformedVastistasVelocity = deformMatA * standardVastistasVelocity;
-		return transformedVastistasVelocity;
-		};
-
-	for (size_t i = 0; i < mgridDim_y; i++)
-		for (size_t j = 0; j < mgridDim_x; j++) {
-			auto pos = getPosition(j, i);
-			data_[i][j] = lambdaFunc(pos, 0.0);
-		}
 	Eigen::Vector2i XdimYdim = { mgridDim_x, mgridDim_y };
-	SteadyVectorField2D steadyField{
-		std::move(data_),
-		this->domainBoundaryMin,
-		this->domainBoundaryMax,
-		XdimYdim
-	};
-	steadyField.analyticalFlowfunc_ = lambdaFunc;
-	return steadyField;
+	std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d{ 0.0, 0.0 }));
+
+	if (Si == VastisVortexType::zero_field)
+	{
+		auto lambdaFuncZeroField = [this](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {return { 0.0,0.0 };	};
+
+		for (int i = 0; i < mgridDim_y; i++)
+			for (int j = 0; j < mgridDim_x; j++) {
+				auto pos = getPosition(j, i);
+				data_[i][j] = lambdaFuncZeroField(pos, 0.0);
+			}
+		SteadyVectorField2D steadyField{
+				std::move(data_),
+				this->domainBoundaryMin,
+				this->domainBoundaryMax,
+				XdimYdim
+		};
+		steadyField.analyticalFlowfunc_ = lambdaFuncZeroField;
+		return steadyField;
+	}
+	else
+	{
+
+		Eigen::Matrix2d deformMatA = Eigen::Matrix2d::Identity();
+		deformMatA(0, 0) = sx * cos(theta);
+		deformMatA(0, 1) = -sy * sin(theta);
+		deformMatA(1, 0) = sx * sin(theta);
+		deformMatA(1, 1) = sy * cos(theta);
+		const auto SiMat22 = SiMatices_[static_cast<int>(Si)];
+		const Eigen::Vector2d translation_t = { tx, ty };
+		auto lambdaFunc = [this, SiMat22, translation_t, deformMatA](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+			auto originalPos = deformMatA.inverse() * (pos - translation_t);
+			// get standard VastistasVelocity vector on originalPos (v(x=originalPos))
+			auto standardVastistasVelocity = SiMat22 * originalPos * NormalizedVastistasV0(originalPos.norm());
+			// get the transformed VastistasVelocity vector on pos (v(x=pos))
+			auto transformedVastistasVelocity = deformMatA * standardVastistasVelocity;
+			return transformedVastistasVelocity;
+			};
+
+		for (size_t i = 0; i < mgridDim_y; i++)
+			for (size_t j = 0; j < mgridDim_x; j++) {
+				auto pos = getPosition(j, i);
+				data_[i][j] = lambdaFunc(pos, 0.0);
+			}
+		SteadyVectorField2D steadyField{
+			std::move(data_),
+			this->domainBoundaryMin,
+			this->domainBoundaryMax,
+			XdimYdim
+		};
+		steadyField.analyticalFlowfunc_ = lambdaFunc;
+		return steadyField;
+	}
+}
+
+SteadyVectorField2D VastistasVelocityGenerator::generateSteadyField_VortexBoundaryVIS2020(const Eigen::Vector2d& txy, const Eigen::Vector3d sxsy_theta, VastisVortexType Si) const noexcept
+{
+	return generateSteadyField_VortexBoundaryVIS2020(txy.x(), txy.y(), sxsy_theta.x(), sxsy_theta.y(), sxsy_theta.z(), Si);
 }
 
 SteadyVectorField2D VastistasVelocityGenerator::generateSteadyFieldMixtureRobustPaper(int mixture) const noexcept
@@ -148,7 +227,7 @@ SteadyVectorField2D VastistasVelocityGenerator::generateSteadyFieldMixtureRobust
 	return steadyField;
 }
 
-SteadyVectorField2D VastistasVelocityGenerator::generateSteadyFieldMixture(std::vector<VastisParamter>& vectorFieldMeta, int mixture) const noexcept
+SteadyVectorField2D VastistasVelocityGenerator::generateSteadyMixtureOFVortexBoundaryPaper(std::vector<VastisParamter>& vectorFieldMeta, int mixture) const noexcept
 {
 	const Eigen::Vector2d domainRange = domainBoundaryMax - domainBoundaryMin;
 

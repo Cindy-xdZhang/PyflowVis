@@ -6,6 +6,8 @@
 #include <string>
 #include <random>
 #include <vector>
+#include "commonUtils.h"
+#include "VastistasVelocityGenerator.h"
 
 // void ConvertNoiseTextureImage2Text(const std::string& infilename, const std::string& outFile, int width, int height);
 
@@ -25,10 +27,10 @@ namespace DBG_TEST {
 
 class DataSetGenBase {
 public:
-	void GenDataset(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string in_root_fodler, double rateVal_Train = 0.1, double rateVal_Test = 0.1);
+	void GenDataset(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string& in_root_fodler, double rateVal_Train = 0.1, double rateVal_Test = 0.1);
 
 	//son class overwrite this
-	virtual void GenOneSplit(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string dataSetSplitTag) {}
+	virtual void GenOneSplit(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string& dataSetSplitTag) {}
 
 	double minV;
 	double maxV;
@@ -40,5 +42,11 @@ public:
 };
 
 class UnsteadyPathlneDataSetGenerator :public DataSetGenBase {
-	virtual  void GenOneSplit(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string dataSetSplitTag);
+public:
+	virtual  void GenOneSplit(int Nparamters, int samplePerParameters, int observerPerSetting, const std::string& dataSetSplitTag);
+
+	//using VastisParamter = std::tuple<Eigen::Vector2d, Eigen::Vector2d, Eigen::Vector3d, int>;
+	//direclty map one VastisParamter = std::tuple< Eigen::Vector2d rc_n, Eigen::Vector2d tx_ty,Eigen::Vector3d sxsytheta, int si>->to a data entry(for reproduce.`)
+	void DeSerialize(const std::string& dest_folder, VastisParamter v_param, const Eigen::Vector3d& ObserverAbc, const Eigen::Vector3d& ObserverAbcDot, std::string SampleName);
+	void classicalParamGeneration(std::string dst_folder);
 };

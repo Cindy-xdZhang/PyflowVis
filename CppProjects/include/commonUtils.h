@@ -13,6 +13,8 @@
 #include "VectorFieldCompute.h"
 void saveAsPNG(const std::vector<std::vector<Eigen::Vector3d>>& data, const std::string& filename);
 void NoramlizeSpinTensor(Eigen::Matrix3d& input);
+void ConvertImage2Text(const std::string& infilename, const std::string& outFile, const std::string& textureName, bool singleChannel = false);
+Color mapValueToColor(double value);
 double matrix2angle(const Eigen::Matrix2d& rotationMat);
 
 namespace cereal {
@@ -43,19 +45,13 @@ auto cerealBinaryOut(T data, const std::string& dest)
 	if (!outBin.good()) [[unlikely]] {
 		printf("couldn't open file: %s", dest.c_str());
 		return;
-	}
+		}
 	cereal::BinaryOutputArchive archive_Binary(outBin);
 	archive_Binary(data);
 	outBin.close();
 }
 
-struct pair_hash {
-	template <class T1, class T2>
-	std::size_t operator()(const std::pair<T1, T2>& pair) const
-	{
-		return std::hash<T1>()(pair.first) ^ std::hash<T2>()(pair.second);
-	}
-};
+
 // Function to flatten a 2D vector to a 1D vector
 inline std::vector<float> flatten2DVectorsAs1Dfloat(const std::vector<std::vector<Eigen::Vector2d>>& x2D)
 {

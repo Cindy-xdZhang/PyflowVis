@@ -2,10 +2,38 @@
 #ifndef OBSERVER_GENERATOR_H
 #define OBSERVER_GENERATOR_H
 #include <commonUtils.h>
+#include <array>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 #include "stb/stb_image_write.h"
+
+
+namespace {
+	//include bring in constexpr std::array<std::array<double, 3>, 709>colormap_tomPNG
+#include "colormap_tomPNG.hpp"
+}
+
+
+
+Color mapValueToColor(double value) {
+	// Ensure the value is within the [0, 1] range
+	value = std::clamp(value, 0.0, 1.0);
+
+	// Map value to corresponding index in colormap
+	size_t index = static_cast<size_t>(value * (colormap_tomPNG.size() - 1));
+
+	// Fetch the RGB values from the colormap
+	auto rgb = colormap_tomPNG[index];
+
+	return { rgb.at(0),rgb.at(1), rgb.at(2) };
+}
+
+
+
+
+
+
 // Function to convert a 2x2 rotation matrix to an angle
 double matrix2angle(const Eigen::Matrix2d& rotationMat)
 {
@@ -17,7 +45,7 @@ double matrix2angle(const Eigen::Matrix2d& rotationMat)
 	return theta;
 }
 
-std::vector<std::vector<double>> loadPngFile(const std::string& filename, int& width, int& height)
+std::vector<std::vector<double>> loadSinglechanelPngFile(const std::string& filename, int& width, int& height)
 {
 	int n;
 	unsigned char* data = stbi_load(filename.c_str(), &width, &height, &n, 1); // Load image in grayscale
@@ -38,6 +66,30 @@ std::vector<std::vector<double>> loadPngFile(const std::string& filename, int& w
 
 	return texture;
 }
+
+std::vector<std::vector<std::array<double, 3>>> loadPngFile(const std::string& filename, int& width, int& height)
+{
+	int n;
+	unsigned char* data = stbi_load(filename.c_str(), &width, &height, &n, 3); // Load image with 3 channels (RGB)
+	if (!data) {
+		std::cerr << "Failed to load image: " << filename << std::endl;
+		return {};
+	}
+
+	std::vector<std::vector<std::array<double, 3>>> texture(height, std::vector<std::array<double, 3>>(width));
+
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			texture[y][x][0] = data[(y * width + x) * 3 + 0] / 255.0; // Red channel
+			texture[y][x][1] = data[(y * width + x) * 3 + 1] / 255.0; // Green channel
+			texture[y][x][2] = data[(y * width + x) * 3 + 2] / 255.0; // Blue channel
+		}
+	}
+
+	stbi_image_free(data); // Free the image memory
+
+	return texture;
+}
 void NoramlizeSpinTensor(Eigen::Matrix3d& input)
 {
 	Eigen::Vector3d unitAngular;
@@ -49,30 +101,64 @@ void NoramlizeSpinTensor(Eigen::Matrix3d& input)
 	return;
 };
 
-void ConvertNoiseTextureImage2Text(const std::string& infilename, const std::string& outFile, int width, int height)
+void ConvertImage2Text(const std::string& infilename, const std::string& outFile, const std::string& textureName, bool SingleChannel)
 {
-	auto texture = loadPngFile(infilename, width, height);
-
-	std::ofstream out(outFile);
-	if (!out.is_open()) {
-		std::cerr << "Failed to open file for writing: " << outFile << std::endl;
-		return;
-	}
-	constexpr int precision = 6;
-	out << "constexpr std::array<std::array<double, 64>, 64> noiseTexture = {\n";
-	for (const auto& row : texture) {
-		std::string beginer_string = "    std::array<double," + std::to_string(width) + ">{";
-		out << beginer_string;
-		for (size_t x = 0; x < row.size(); ++x) {
-			out << std::fixed << std::setprecision(precision) << row[x];
-			if (x < row.size() - 1)
-				out << ", ";
+	int width, height;
+	if (SingleChannel)
+	{
+		auto texture = loadSinglechanelPngFile(infilename, width, height);
+		std::ofstream out(outFile);
+		if (!out.is_open()) {
+			std::cerr << "Failed to open file for writing: " << outFile << std::endl;
+			return;
 		}
-		out << " },\n";
-	}
-	out << "};\n";
+		constexpr int precision = 6;
 
-	out.close();
+		//out << "constexpr std::array<std::array<double, 64>, 64> noiseTexture = {\n";
+		out << "constexpr std::array<std::array<double, " << width << ">, " << height << "> " << textureName << " = {\n";
+		for (const auto& row : texture) {
+			std::string beginer_string = "    std::array<double," + std::to_string(width) + ">{";
+			out << beginer_string;
+			for (size_t x = 0; x < row.size(); ++x) {
+				out << std::fixed << std::setprecision(precision) << row[x];
+				if (x < row.size() - 1)
+					out << ", ";
+			}
+			out << " },\n";
+		}
+		out << "};\n";
+		out.close();
+	}
+	else
+	{
+		auto texture = loadPngFile(infilename, width, height); // Load RGB image
+		std::ofstream out(outFile);
+		if (!out.is_open()) {
+			std::cerr << "Failed to open file for writing: " << outFile << std::endl;
+			return;
+		}
+		constexpr int precision = 6;
+
+		out << "constexpr std::array<std::array<std::array<double, 3>, " << width << ">, " << height << "> " << textureName << " = {\n";
+		for (const auto& row : texture) {
+			std::string beginer_string = "    std::array<std::array<double, 3>, " + std::to_string(width) + ">{";
+			out << beginer_string;
+			for (size_t x = 0; x < row.size(); ++x) {
+				out << "std::array<double, 3>{";
+				out << std::fixed << std::setprecision(precision) << row[x][0] << ", "; // Red channel
+				out << std::fixed << std::setprecision(precision) << row[x][1] << ", "; // Green channel
+				out << std::fixed << std::setprecision(precision) << row[x][2];         // Blue channel
+				out << "}";
+				if (x < row.size() - 1)
+					out << ", ";
+			}
+			out << " },\n";
+		}
+		out << "};\n";
+		out.close();
+	}
+
+
 }
 
 // Function to save the 2D vector as a PNG image

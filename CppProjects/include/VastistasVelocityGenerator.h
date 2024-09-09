@@ -11,24 +11,35 @@
 #include <corecrt_math_defines.h>
 #include <string>
 #include <vector>
-// save 3d position, vorticity,IVD,distance(to start seeding point)
-using PathlinePointInfo = std::vector<double>;
+
+// one VastisParamter is Eigen::Vector2d rc_n, Eigen::Vector2d tx_ty,Eigen::Vector3d sxsytheta, int si.
+using VastisParamter = std::tuple<Eigen::Vector2d, Eigen::Vector2d, Eigen::Vector3d, int>;
+
+enum class VASTIS_PARAM : unsigned char {
+	VastisParamRC_N = 0,
+	VastisParamTXY = 1,
+	VastisParamSXSYTHETA = 2,
+	VastisParamSI = 3
+};
 
 
 enum class VastisVortexType : unsigned char {
 	saddle = 0,
 	center_cw = 1,
 	center_ccw = 2,
+	zero_field = 3
 };
-// one VastisParamter is Eigen::Vector2d rc_n, Eigen::Vector2d tx_ty,Eigen::Vector3d sxsytheta, int si.
-using VastisParamter = std::tuple<Eigen::Vector2d, Eigen::Vector2d, Eigen::Vector3d, int>;
 
+enum class VastisParamRC_N : unsigned char {
+	VastisParamRC = 0,
+	VastisParamN = 1,
+};
 inline auto NormalizedVastistasV0_Fn(const double r, const double in_n, const double in_rc)
 {
 	const auto v0_r = r / (2 * M_PI * (in_rc * in_rc) * std::pow(std::pow(r / in_rc, 2 * in_n) + 1, 1 / in_n));
 	return v0_r / (r);
 }
-
+std::vector<std::pair<double, double>> generateVastisRC_NParamters(int n, std::string mode);
 
 class VastistasVelocityGenerator {
 public:
@@ -36,12 +47,14 @@ public:
 
 	// generate a deformed steady velocity slice  following the paper: Vortex Boundary Identification using Convolutional Neural Network
 	SteadyVectorField2D generateSteadyField_VortexBoundaryVIS2020(double tx, double ty, double sx, double sy, double theta, VastisVortexType Si) const noexcept;
+	SteadyVectorField2D generateSteadyField_VortexBoundaryVIS2020(const Eigen::Vector2d& txy, const Eigen::Vector3d sxsy_theta, VastisVortexType Si) const noexcept;
+
 
 	// support mixture of multiple Vastistas profile
 	SteadyVectorField2D generateSteadyFieldMixtureRobustPaper(int mixture) const noexcept;
 
 	// only supprt ccw/cw vortex mix together, and we asking the center of two vortex is bigger than rc1 +rc2
-	SteadyVectorField2D generateSteadyFieldMixture(std::vector<VastisParamter>& vectorFieldMeta, int mixture) const noexcept;
+	SteadyVectorField2D generateSteadyMixtureOFVortexBoundaryPaper(std::vector<VastisParamter>& vectorFieldMeta, int mixture) const noexcept;
 
 	inline auto NormalizedVastistasV0(const double r) const noexcept
 	{
