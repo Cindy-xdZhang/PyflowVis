@@ -8,7 +8,8 @@
 #include <iomanip>
 #include <fstream>
 #include <iostream>
-#include "cereal/cereal.hpp"
+#include <cereal/types/tuple.hpp>
+#include <cereal/cereal.hpp>
 #include "stb/stb_image.h"
 #include "VectorFieldCompute.h"
 void saveAsPNG(const std::vector<std::vector<Eigen::Vector3d>>& data, const std::string& filename);
@@ -89,7 +90,7 @@ inline  std::vector<float> flatten3DVectorsAs1Dfloat(const std::vector<std::vect
 	return result;
 }
 template <typename T>
-inline  std::vector<float> flatten2DAs1Dfloat(const std::vector<std::vector<T>>& x2D)
+inline  std::vector<float> flatten2DvecAs1Dfloat(const std::vector<std::vector<T>>& x2D)
 {
 
 	const size_t tdim = x2D.size();
@@ -105,7 +106,7 @@ inline  std::vector<float> flatten2DAs1Dfloat(const std::vector<std::vector<T>>&
 }
 
 template <typename T>
-inline  std::vector<float> flatten3DAs1Dfloat(const std::vector<std::vector<std::vector<T>>>& x3D)
+inline  std::vector<float> flatten3DvecAs1Dfloat(const std::vector<std::vector<std::vector<T>>>& x3D)
 {
 
 	const size_t tdim = x3D.size();

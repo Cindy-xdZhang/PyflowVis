@@ -8,11 +8,12 @@
 int main()
 {
 
-	DBG_TEST::testCriterion();
 
 	auto generator = UnsteadyPathlneDataSetGenerator();
-	//generator.GenDataset(2, 2, 10, "../data/dbgPathline/");
-	//generator.classicalParamGeneration("../data/dbgPathline/train/DesSerialize/");
+	generator.classicalParametersDeserialization("../data/dbgPathline/DesSerialize/");
+	//generator.analyticalTestCasesGeneration("../data/dbgPathline/");
+	generator.GenDataset(30, 30, 40, "../data/dbgPathline/");
+	//generator.generateMixUnsteadyFieldPathline("../data/dbgPathline/", 10, 10);
 
 	//// generateUnsteadyFieldPathline(5, 1, 1, "../data/Pathline/", "train");
 	////  generateUnsteadyField(15, 20, 100, "../data/Robust/", "train"); // 30000

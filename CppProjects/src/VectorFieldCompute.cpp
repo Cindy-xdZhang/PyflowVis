@@ -471,6 +471,8 @@ std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(con
 
 	// std::vector<std::vector<std::vector<double>>> curlFields(inputField.timeSteps);
 	std::vector<std::vector<std::vector<double>>> ivdFields(inputField.timeSteps);
+	std::vector<std::vector<std::vector<Eigen::Matrix2d>>> nablaUfields(inputField.timeSteps);
+
 	// precompute vorticity and ivd field
 	for (size_t t = 0; t < inputField.timeSteps; t++) {
 
@@ -478,6 +480,7 @@ std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(con
 		auto ivdField = ComputeIVD(inputField.field[t], Xdim, Ydim, inputField.spatialGridInterval(0), inputField.spatialGridInterval(1));
 		// curlFields[t] = curlField;
 		ivdFields[t] = ivdField;
+		nablaUfields[t] = ComputeNablaU(inputField.field[t], Xdim, Ydim, inputField.spatialGridInterval(0), inputField.spatialGridInterval(1));
 	}
 
 	// generate random window D as a local cluster in the physical domain near grid point P; or 4 clusters divide the whole domain
@@ -526,10 +529,12 @@ std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(con
 				double floatIndexT = (time - inputField.tmin) / dt;
 
 				auto ivd = trilinear_interpolate(ivdFields, floatIndexX, floatIndexY, floatIndexT);
+				//auto nablau = trilinear_interpolate(nablaUfields, floatIndexX, floatIndexY, floatIndexT);
+
 				auto distance = sqrt((px - startPoint.x()) * (px - startPoint.x()) + (py - startPoint.y()) * (py - startPoint.y()));
 
+				//std::vector<double> pathlinePointAndInfo = { px, py, time, ivd, distance,nablau(0,0),nablau(0,1),nablau(1,0) ,nablau(1,1) };
 				std::vector<double> pathlinePointAndInfo = { px, py, time, ivd, distance };
-
 				clusterPathlines[thisPathlineGlobalId].emplace_back(pathlinePointAndInfo);
 			}
 		}

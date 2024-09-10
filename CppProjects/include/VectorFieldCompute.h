@@ -159,6 +159,34 @@ struct SteadyVectorField2D : public IUnsteadField2D {
 		assert(this->analyticalFlowfunc_);
 		return this->analyticalFlowfunc_(pos, t_is_useless);
 	}
+	inline bool resampleFromAnalyticalExpression()
+	{
+		if (this->analyticalFlowfunc_) [[likely]] {
+			const auto ydim = this->XdimYdim.y();
+			const auto xdim = this->XdimYdim.x();
+			this->field.resize(ydim);
+
+			for (int y = 0; y < ydim; y++) {
+				// y slice i
+				this->field[y].resize(xdim);
+				for (int x = 0; x < ydim; x++) {
+					// y slice
+					Eigen::Vector2d pos = { x * this->spatialGridInterval(0) + this->spatialDomainMinBoundary(0), y * this->spatialGridInterval(1) + this->spatialDomainMinBoundary(1) };
+					Eigen::Vector2d analyticalVec = this->analyticalFlowfunc_(pos, 0);
+
+					if (std::isnan(analyticalVec(0)) || std::isnan(analyticalVec(1))) {
+						printf("get nan during resampleFromAnalyticalExpression.");
+						return false;
+					}
+					this->field[y][x] = analyticalVec;
+				}
+			}
+
+			return true;
+			}
+		assert(false);
+		return false;
+	}
 };
 
 class UnSteadyVectorField2D : public IUnsteadField2D {
@@ -604,6 +632,27 @@ inline std::vector<std::vector<double>> ComputeIVD(const std::vector<std::vector
 	}
 	return IVD;
 }
+
+inline std::vector<std::vector<Eigen::Matrix2d>> ComputeNablaU(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
+{
+	std::vector<std::vector<Eigen::Matrix2d>> NablaU(Ydim, std::vector<Eigen::Matrix2d>(Xdim));
+	const double inverse_grid_interval_x = 1.0 / SpatialGridIntervalX;
+	const double inverse_grid_interval_y = 1.0 / SpatialGridIntervalY;
+
+	for (int y = 1; y < Ydim - 1; ++y) {
+		for (int x = 1; x < Xdim - 1; ++x) {
+			Eigen::Vector2d du_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5 * inverse_grid_interval_x;
+			Eigen::Vector2d dv_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5 * inverse_grid_interval_y;
+			Eigen::Matrix2d gradient;
+			gradient << du_dx(0), du_dx(1),
+				dv_dy(0), dv_dy(1);
+
+			NablaU[y][x] = gradient;
+		}
+	}
+	return NablaU;
+}
+
 inline std::vector<std::vector<double>> ComputeSujudiHaimes(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
 {
 	std::vector<std::vector<double>> sujudiHaimes(Ydim, std::vector<double>(Xdim, 0.0));

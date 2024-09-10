@@ -34,7 +34,7 @@ std::vector<std::pair<double, double>> generateVastisRC_NParamters(int n, std::s
 
 	std::random_device rd;
 
-	std::normal_distribution<double> dist_rc(1.87 * 0.5, 0.37); // mean = 1.87, stddev = 0.34 our domain now change from [-2,2] ->[0,2], thus radius rc mulptile 0.5 otherwise its two large.
+	std::normal_distribution<double> dist_rc(1.87, 0.37); // mean = 1.87, stddev = 0.34
 	std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
 
 	int i = 0;
@@ -227,112 +227,49 @@ SteadyVectorField2D VastistasVelocityGenerator::generateSteadyFieldMixtureRobust
 	return steadyField;
 }
 
-SteadyVectorField2D VastistasVelocityGenerator::generateSteadyMixtureOFVortexBoundaryPaper(std::vector<VastisParamter>& vectorFieldMeta, int mixture) const noexcept
+SteadyVectorField2D VastistasVelocityGenerator::generateSteadyMixtureOFVortexBoundaryPaper(const std::vector<VastisParamter>& vectorFieldMeta) const noexcept
 {
-	const Eigen::Vector2d domainRange = domainBoundaryMax - domainBoundaryMin;
-
 	std::vector<std::vector<Eigen::Vector2d>> data_(mgridDim_y, std::vector<Eigen::Vector2d>(mgridDim_x, Eigen::Vector2d{ 0.0, 0.0 }));
+	const int mix = vectorFieldMeta.size();
+	std::vector <std::function<Eigen::Vector2d(const Eigen::Vector2d& pos, double t) >>	fieldFunctions;
+	fieldFunctions.reserve(mix);
 
-	constexpr double meanOfVortexRc = 1.87 * 0.4;
-	constexpr double minimalDistanceOfTwoVortex = meanOfVortexRc * 1.5 + 0.01; //
-	static std::normal_distribution<double> genTx(0.0, 0.59);
-	static std::normal_distribution<double> genTy(0.0, 0.62);
-	static std::normal_distribution<double> genTheta(0.0, 0.50); // rotation angle's distribution
-	static std::normal_distribution<double> genSx(0, 3.59);
-	static std::normal_distribution<double> genSy(0, 2.24);
-	static std::normal_distribution<double> dist_rc(1.87 * 0.4, 0.37); // mean = 0.748, stddev = 0.34
-	static std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
+	for (size_t i = 0; i < mix; i++) {
+		const  auto& parm = vectorFieldMeta.at(i);
+		const int si = std::get<(int)VASTIS_PARAM::VastisParamSI >(parm);
+		const Eigen::Vector2d rc_n = std::get<(int)VASTIS_PARAM::VastisParamRC_N>(parm);
+		const double rc = rc_n.x();
+		const double n = rc_n.y();
+		const Eigen::Vector2d txy = std::get<(int)VASTIS_PARAM::VastisParamTXY>(parm);
+		const Eigen::Vector3d sxsytheta = std::get<(int)VASTIS_PARAM::VastisParamSXSYTHETA>(parm);
+		const double theta = sxsytheta.z();
+		const double sx = sxsytheta.x();
+		const double sy = sxsytheta.y();
+		Eigen::Matrix2d deformMatA = Eigen::Matrix2d::Identity();
+		deformMatA(0, 0) = sx * cos(theta);
+		deformMatA(0, 1) = -sy * sin(theta);
+		deformMatA(1, 0) = sx * sin(theta);
+		deformMatA(1, 1) = sy * cos(theta);
 
-	static std::uniform_int_distribution<> dis_vortexType(1, 2);
-	// random generate mixture pairs of sx,sy, theta
-	std::vector<Eigen::Matrix2d> mixturesdeformMats;
-	vectorFieldMeta.clear();
-	auto miniualtxydistance = [&](const Eigen::Vector2d& txy) -> double {
-		double minV = INFINITY;
-
-		for (const auto& mixtureParam : vectorFieldMeta) {
-			const Eigen::Vector2d txy0 = std::get<1>(mixtureParam);
-			double dis = (txy0 - txy).norm();
-			if (dis < minV) {
-				minV = dis;
-			}
-		}
-		return minV;
-		};
-
-	auto genTxty
-		= [&]() -> Eigen::Vector2d {
-		auto tx = genTx(rng);
-		auto ty = genTy(rng);
-		// clamp tx, ty into valid domain
-		tx = std::clamp(tx, this->domainBoundaryMin.x() + 0.05 * domainRange(0), domainBoundaryMin.x() + 0.95 * domainRange(0));
-		ty = std::clamp(ty, this->domainBoundaryMin.y() + 0.05 * domainRange(1), domainBoundaryMin.y() + 0.95 * domainRange(1));
-
-		// read previous txty
-		Eigen::Vector2d txy = { tx, ty };
-		while (miniualtxydistance(txy) < minimalDistanceOfTwoVortex) {
-			txy(0) = std::clamp(tx, this->domainBoundaryMin.x() + 0.05 * domainRange(0), domainBoundaryMin.x() + 0.95 * domainRange(0));
-			txy(1) = std::clamp(ty, this->domainBoundaryMin.y() + 0.05 * domainRange(1), domainBoundaryMin.y() + 0.95 * domainRange(1));
-		}
-
-		return txy;
-		};
-
-	for (int i = 0; i < mixture; i++) {
-		Eigen::Vector2d tmp_n_rc;
-		tmp_n_rc(0) = dist_n(rng);
-		tmp_n_rc(1) = dist_rc(rng);
-
-		auto txy = genTxty();
-		// make sure txty is in good range: that no vortex center are two close.
-
-		double theta = genTheta(rng);
-		double sx = genSx(rng);
-		double sy = genSy(rng);
-
-		Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
-		deformMat(0, 0) = sx * cos(theta);
-		deformMat(0, 1) = -sy * sin(theta);
-		deformMat(1, 0) = sx * sin(theta);
-		deformMat(1, 1) = sy * cos(theta);
-
-		mixturesdeformMats.emplace_back(deformMat);
-
-		Eigen::Vector3d sxsytheta = { sx, sy, theta };
-		int vortexTypeSi = dis_vortexType(rng);
-
-		auto parmas = std::make_tuple(tmp_n_rc,
-			txy,
-			sxsytheta,
-			vortexTypeSi);
-		vectorFieldMeta.emplace_back(parmas);
+		const auto SiMat22 = SiMatices_[static_cast<int>(si)];
+		auto lambdaFuncThisField = [this, SiMat22, rc, n, txy, deformMatA](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+			auto originalPos = deformMatA.inverse() * (pos - txy);
+			auto standardVastistasVelocity = SiMat22 * originalPos * NormalizedVastistasV0_Fn(originalPos.norm(), rc, n);
+			Eigen::Vector2d  transformedVastistasVelocity = deformMatA * standardVastistasVelocity;
+			return transformedVastistasVelocity;
+			};
+		fieldFunctions.emplace_back(lambdaFuncThisField);
 	}
 
-	auto lambdaFunc = [this, mixturesdeformMats, vectorFieldMeta, mixture](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
+	auto lambdaFunc = [this, fieldFunctions, mix](const Eigen::Vector2d& pos, double t) -> Eigen::Vector2d {
 		Eigen::Vector2d result = Eigen::Vector2d::Zero();
-
-		for (int i = 0; i < mixture; i++) {
-			const int Si = std::get<3>(vectorFieldMeta[i]);
-			const auto SiMat22 = SiMatices_[static_cast<int>(Si)];
-			const auto tmp_n_rc = std::get<0>(vectorFieldMeta[i]);
-
-			const auto deformMatA = mixturesdeformMats[i];
-			const auto txy = std::get<1>(vectorFieldMeta[i]);
-
-			auto originalPos = deformMatA.inverse() * (pos - txy);
-			auto standardVastistasVelocity = SiMat22 * originalPos * NormalizedVastistasV0(originalPos.norm());
-			auto transformedVastistasVelocity = deformMatA * standardVastistasVelocity;
-			result += transformedVastistasVelocity;
+		for (int i = 0; i < mix; i++) {
+			result += fieldFunctions[i](pos, t);
 		}
 		return result;
 		};
 
 	Eigen::Vector2i XdimYdim = { mgridDim_x, mgridDim_y };
-	for (size_t i = 0; i < mgridDim_y; i++)
-		for (size_t j = 0; j < mgridDim_x; j++) {
-			auto pos = getPosition(j, i);
-			data_[i][j] = lambdaFunc(pos, 0.0);
-		}
 
 	SteadyVectorField2D steadyField{
 		std::move(data_),
@@ -341,6 +278,7 @@ SteadyVectorField2D VastistasVelocityGenerator::generateSteadyMixtureOFVortexBou
 		XdimYdim
 	};
 	steadyField.analyticalFlowfunc_ = lambdaFunc;
+	steadyField.resampleFromAnalyticalExpression();
 	return steadyField;
 }
 

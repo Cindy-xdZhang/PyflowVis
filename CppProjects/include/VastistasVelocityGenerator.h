@@ -35,7 +35,7 @@ enum class VastisParamRC_N : unsigned char {
 	VastisParamRC = 0,
 	VastisParamN = 1,
 };
-inline auto NormalizedVastistasV0_Fn(const double r, const double in_n, const double in_rc)
+inline auto NormalizedVastistasV0_Fn(const double r, const double in_rc, const double in_n)
 {
 	const auto v0_r = r / (2 * M_PI * (in_rc * in_rc) * std::pow(std::pow(r / in_rc, 2 * in_n) + 1, 1 / in_n));
 	return v0_r / (r);
@@ -55,10 +55,11 @@ public:
 	SteadyVectorField2D generateSteadyFieldMixtureRobustPaper(int mixture) const noexcept;
 
 	// only supprt ccw/cw vortex mix together, and we asking the center of two vortex is bigger than rc1 +rc2
-	SteadyVectorField2D generateSteadyMixtureOFVortexBoundaryPaper(std::vector<VastisParamter>& vectorFieldMeta, int mixture) const noexcept;
+	SteadyVectorField2D generateSteadyMixtureOFVortexBoundaryPaper(const std::vector<VastisParamter>& vectorFieldMeta) const noexcept;
 
 	inline auto NormalizedVastistasV0(const double r) const noexcept
 	{
+		assert(rc > 0);
 		const auto v0_r = r / (2 * M_PI * (rc * rc) * std::pow(std::pow(r / rc, 2 * n) + 1, 1 / n));
 		return v0_r / (r);
 	}
