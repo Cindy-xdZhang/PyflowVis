@@ -240,7 +240,7 @@ class PointTransformeEncoder(nn.Module):
             feature = layer(feature,pos)
         return feature
 
-def PathlineSamplingLayer(pathline_src,keepKlines,temporal_sampling_range:list=[0.4,0.6]):
+def PathlineSamplingLayer(pathline_src,keepKlines,temporal_sampling_range:list=[0.9,1.0]):
         B, L_Full_length, K, C = pathline_src.shape
 
         L = torch.randint(int(temporal_sampling_range[0]*L_Full_length), int(temporal_sampling_range[1]*L_Full_length), (1,)).item()
@@ -384,6 +384,124 @@ class PathlineTransformerWithCNNVecField(nn.Module):
         #cls
         x=self.ln1(output).reshape(B,2)
         x=F.softmax(x,dim=-1)         
+        return x
+
+
+
+
+class PointTransformerLayerv2(nn.Module):
+    def __init__(self, dim, dropout=0.1,k=16):
+        super(PointTransformerLayerv2, self).__init__()
+        self.k = k
+        self.dim = dim
+
+        self.pos_mlp = nn.Sequential(
+            nn.Linear(3, dim),
+            nn.ReLU(),
+            nn.Linear(dim, dim)
+        )
+
+        self.attn_mlp = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.ReLU(),
+            nn.Linear(dim, dim)
+        )
+
+        self.linear_q = nn.Linear(dim, dim, bias=False)
+        self.linear_k = nn.Linear(dim, dim, bias=False)
+        self.linear_v = nn.Linear(dim, dim, bias=False)
+        self.dropout_1 = nn.Dropout(dropout)
+    
+        self.linear_out = nn.Linear(dim, dim)
+
+    def forward(self, x, pos):
+        # x: (B, N, C), pos: (B, N, 3)
+        B, N, C = x.shape
+
+        # Find k nearest neighbors
+        inner = -2 * torch.matmul(pos, pos.transpose(2, 1))
+        xx = torch.sum(pos**2, dim=2, keepdim=True)
+        pairwise_distance = -xx - inner - xx.transpose(2, 1)
+        idx = pairwise_distance.topk(k=self.k, dim=-1)[1]  # (B, N, k)
+
+        # Get the features and positions of k-neighbors
+        knn_feat = self.get_graph_feature(x, idx)  # (B, N, k, C)
+        knn_pos = self.get_graph_feature(pos, idx)  # (B, N, k, 3)
+        self.dropout_1(knn_feat) 
+     
+        pos_enc = self.pos_mlp(knn_pos - pos.unsqueeze(2))  # (B, N, k, C)
+
+        q = self.linear_q(x).unsqueeze(2)  # (B, N, 1, C)
+        k = self.linear_k(knn_feat)  # (B, N, k, C)
+        v = self.linear_v(knn_feat)  # (B, N, k, C)
+
+        energy = q - k + pos_enc  # (B, N, k, C)
+        attn = self.attn_mlp(energy)
+        attn = F.softmax(attn, dim=-2)  # (B, N, k, C)
+
+        out = torch.sum(attn * v, dim=2)  # (B, N, C)
+        out = self.linear_out(out)
+ 
+        return out
+
+    def get_graph_feature(self, x, idx):
+        batch_size, num_points, num_dims = x.size()
+        k = idx.size(2)
+        idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1) * num_points
+        idx = idx + idx_base
+        idx = idx.view(-1)
+        x = x.contiguous().view(batch_size * num_points, -1)[idx, :]
+        x = x.view(batch_size, num_points, k, num_dims)
+        return x
+
+@MODELS.register_module()
+class PointTransformer(nn.Module):
+    def __init__(self, in_channels, Kpathlines, num_classes=1, num_encoder_layers=4,dmodel=512,dropout=0.1,**kwargs):
+        super(PointTransformer, self).__init__()
+        self.input_dim = in_channels
+        self.dim = dmodel
+        self.keep_K = int(0.4* Kpathlines)
+        if self.keep_K % 8 != 0:
+            self.keep_K = (self.keep_K // 8) * 8
+        self.embedding = nn.Linear(in_channels, dmodel)
+        
+        self.transformer_layers = nn.ModuleList([
+            PointTransformerLayerv2(dmodel,dropout) for _ in range(num_encoder_layers)
+        ])
+
+        self.norm = nn.LayerNorm(dmodel)
+        self.fc = nn.Linear(dmodel, num_classes)
+        self.output=nn.Sigmoid()
+        # Sample usage of 
+        # batch_size = 32
+        # num_points = 1024
+        # input_dim = 6  # 3 for xyz coordinates + 3 for additional features
+        # num_classes = 10
+        # # Create a random point cloud with features
+        # input_data = torch.randn(batch_size, num_points, input_dim)
+        # # Initialize the model
+        # model = PointTransformer(input_dim, num_classes)
+        # # Forward pass
+        # output = model(input_data)
+        # print(f"Input shape: {input_data.shape}")
+        # print(f"Output shape: {output.shape}")
+        
+    def forward(self, data):
+        vector_field,pathline_src=data
+        sampled_pathline=PathlineSamplingLayer( pathline_src,self.keep_K )
+        B, L, K, C =sampled_pathline.shape
+        points=sampled_pathline.reshape(B,L*K,C)
+        # points: (B, N, 3+C)
+        pos = points[:, :, :3]
+        x = self.embedding(points)
+
+        for layer in self.transformer_layers:
+            x = x + layer(x, pos)
+
+        x = self.norm(x)
+        x = x.mean(dim=1)
+        x =  self.output(self.fc(x)) 
+
         return x
 
 

@@ -126,9 +126,8 @@ def pad_or_truncate_pathlines(pathlineClusters, L):
     
 def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,domainMinBoundary,dominMaxBoundary):
     #get meta information
-    # meta_file = binPath.replace('.bin', 'meta.json')
-    # metaINFo=read_json_file(meta_file)
-    # n,rc,si=metaINFo['n_rc_Si']["value0"],metaINFo['n_rc_Si']["value1"],metaINFo['n_rc_Si']["value2"]
+    metaINFo=read_json_file(metaPath)
+    n,rc,si=metaINFo['rc_n_si']["value0"],metaINFo['rc_n_si']["value1"],metaINFo['rc_n_si']["value2"]
     # txy=np.array([metaINFo['txy']["value0"],metaINFo['txy']["value1"]]  )  
     # theta,sx,sy=metaINFo['deform_theta_sx_sy']["value0"],metaINFo['deform_theta_sx_sy']["value1"],metaINFo['deform_theta_sx_sy']["value2"]
     # deformMatA=np.array([
@@ -147,12 +146,12 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,domainMin
     #     vortexsegmentationLabel[:, :, 1] = vortexsegLabel
     
     #classfication of this patch
-    vortexsegmentationLabel = np.zeros((2),dtype=np.float32)
-    if "saddle" in metaPath:
-        vortexsegmentationLabel[0] = 1.0
+    vortexsegmentationLabel = np.zeros((1),dtype=np.float32)
+    if si ==1.0 or si == 2.0 :
+        vortexsegmentationLabel[0] = 1.0        
     else:
-        vortexsegmentationLabel[0] = 0.0 
-        vortexsegmentationLabel[1] = 1.0
+        # vortexsegmentationLabel[0] = 0.0 
+        vortexsegmentationLabel[0] =0.0
 
 
 
@@ -163,16 +162,12 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,domainMin
     
     pathlineBinarypath= metaPath.replace('meta.json', '_pathline.bin')
     pathlineClusters=read_binary_file(pathlineBinarypath)
-    if pathlineClusters.shape[0]==192*24*5:
-        pathlineClusters=pathlineClusters.reshape(192,24,5)
-        padding = np.ones((192, 1, 5), dtype=pathlineClusters.dtype)*-100
-        pathlineClusters = np.concatenate([pathlineClusters, padding], axis=1)
-    else:        
-        pathlineClusters=pathlineClusters.reshape(192,25,5)
+    assert(pathlineClusters.shape[0]==100*9*5) 
+    pathlineClusters=pathlineClusters.reshape(100,9,5)
     
     # Permute pathline clusters first and second axis
-    pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))[:,:,0:3]
-    pathlineClusters[:,:,2]=pathlineClusters[:,:,2]/(0.5*np.pi)
+    pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))
+    pathlineClusters[:,:,2]=pathlineClusters[:,:,2]/(0.25*np.pi)
     return (fieldData,pathlineClusters),vortexsegmentationLabel
 
 

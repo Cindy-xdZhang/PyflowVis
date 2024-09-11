@@ -24,7 +24,7 @@ std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genSy(0.0, 2.2
 std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTx(0.0, 1.34);
 std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTy(0.0, 1.27);
 namespace {
-	constexpr int Xdim = 32, Ydim = 32;
+	constexpr int Xdim = 9, Ydim = 9;
 	constexpr double tmin = 0.0;
 	constexpr double tmax = M_PI * 0.25;
 	constexpr int unsteadyFieldTimeStep = 5;//dt of vector field = (pi*0.25)/(5-1)=pi/16
@@ -175,7 +175,7 @@ std::vector<std::vector<Eigen::Vector3d>> addPathlineVisualization(const std::ve
 		return (1.0 - time) * blue + time * white;
 		};
 
-	constexpr int randomPickKlinesToDraw = 48;
+	constexpr int randomPickKlinesToDraw = 96;
 	const Eigen::Vector2d domainRange = domainMax - domainMIn;
 	const int licImageSizeY = inputLicImage.size();
 	const int licImageSizeX = inputLicImage[0].size();
@@ -187,17 +187,27 @@ std::vector<std::vector<Eigen::Vector3d>> addPathlineVisualization(const std::ve
 	for (int i = 0; i < randomPickKlinesToDraw; i++) {
 		int lineIdx;
 		bool isFarEnough;
+		int failureTime = 0;
+		double distanceThreshold = 0.1;
 		do {
 			lineIdx = dist_int(rng);
 			isFarEnough = true;
 			const Eigen::Vector2d currentStartPoint(InputPathlines[lineIdx][0][0], InputPathlines[lineIdx][0][1]);
+			if (failureTime >= 10)
+			{
+				distanceThreshold *= 0.5;
+				failureTime = 0;
+			}
+
 			for (const auto& previousStartPoint : selectedStartingPoints) {
-				if ((currentStartPoint - previousStartPoint).norm() < 0.1) {
+				if ((currentStartPoint - previousStartPoint).norm() < distanceThreshold) {
 					isFarEnough = false;
+					failureTime++;
 					break;
 				}
 			}
 		} while (!isFarEnough);
+
 
 		selectedStartingPoints.push_back(Eigen::Vector2d(InputPathlines[lineIdx][0][0], InputPathlines[lineIdx][0][1]));
 		auto unique_pathline = InputPathlines[lineIdx];

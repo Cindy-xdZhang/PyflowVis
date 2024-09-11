@@ -2,14 +2,15 @@
 model:
   NAME: BaseSeg
   encoder_args:
-    NAME: PathlineTransformerWithCNNVecField
+    NAME: PointTransformer
     # d_model: 1152 
     num_encoder_layers: 4
     Kpathlines: 192
-    in_channels: 2
-    DataSizeX: 32
-    DataSizeY: 32
-    TimeSteps: 7
+    in_channels: 5
+    dropout: 0.01
+    # DataSizeX: 32
+    # DataSizeY: 32
+    # TimeSteps: 5
   criterion_args:
     NAME: BCELoss
    
@@ -46,13 +47,13 @@ dataloader:
   num_workers: 0
 dataset:
   NAME: UnsteadyVastisPathlineSeg
-  data_dir: 'CppProjects/data/Pathline2/X32_Y32_T7_no_mixture'
+  data_dir: 'CppProjects/data/dbgPathline/X32_Y32_T5'
 
 #add WhiteNoise will boost vortex_unet 's performance
 datatransforms:
   train: [MinMaxNormalization,WhiteNoise]  # rotation does not help
   val: [MinMaxNormalization,WhiteNoise]
-  test: [MinMaxNormalization]
+  test: []
   kwargs:
     noiseMaginitude: 0.01
   

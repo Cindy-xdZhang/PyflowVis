@@ -344,6 +344,50 @@ bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnst
 		return result_p;
 		};
 
+	auto integratePathlineOneStep_RK4_analytical = [](const IUnsteadField2D& observerfield, double x, double y, double t, double dt) -> Eigen::Vector2d {
+		// RK4 integration step
+		Eigen::Vector2d odeStepStartPoint = { x, y };
+
+		const double h = dt;
+
+		// coefficients
+		constexpr double a21 = 0.5;
+		constexpr double a31 = 0.;
+		constexpr double a32 = 0.5;
+		constexpr double a41 = 0.;
+		constexpr double a42 = 0.;
+		constexpr double a43 = 1.;
+
+		constexpr double c2 = 0.5;
+		constexpr double c3 = 0.5;
+		constexpr double c4 = 1.;
+		constexpr double b1 = 1. / 6.;
+		constexpr double b2 = 1. / 3.;
+		constexpr double b3 = b2;
+		constexpr double b4 = b1;
+
+		// 4 stages of 2 equations (i.e., 2 dimensions of the manifold and the tangent vector space)
+
+		// stage 1
+		Eigen::Vector2d k1 = observerfield.getVectorAnalytical(odeStepStartPoint, t);
+
+		// stage 2
+		Eigen::Vector2d stagePoint = odeStepStartPoint + k1 * a21 * h;
+		Eigen::Vector2d k2 = observerfield.getVectorAnalytical(stagePoint, t + c2 * h);
+
+		// stage 3
+		stagePoint = odeStepStartPoint + (a31 * k1 + a32 * k2) * h;
+		Eigen::Vector2d k3 = observerfield.getVectorAnalytical(stagePoint, t + c3 * h);
+
+		// stage 4
+		stagePoint = odeStepStartPoint + (a41 * k1 + a42 * k2 + a43 * k3) * h;
+		Eigen::Vector2d k4 = observerfield.getVectorAnalytical(stagePoint, t + c4 * h);
+
+		Eigen::Vector2d result_p = odeStepStartPoint + h * (k1 * b1 + k2 * b2 + k3 * b3 + k4 * b4);
+
+		return result_p;
+		};
+
 	const double startTime = tstart;
 	const int maxIterationCount = 1000;
 	const double spaceConversionRatio = 1.0;
@@ -381,10 +425,16 @@ bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnst
 	// do integration
 	auto currentTime = startTime;
 
-	// push init_velocity  &start point
+
+
+	std::function<Eigen::Vector2d(const IUnsteadField2D& observerfield, double x, double y, double t, double dt) > integratorRk4 = integratePathlineOneStep_RK4_analytical;
+	if (inputField.analyticalFlowfunc_ == nullptr) [[unlikely]] {
+		integratorRk4 = integratePathlineOneStep_RK4;
+		}
+
+		// push init_velocity  &start point
 	Eigen::Vector3d pointAndTime = { currentPoint(0), currentPoint(1), currentTime };
 	pathPositions.emplace_back(pointAndTime);
-	auto init_velocity = inputField.getVector(currentPoint, currentTime);
 
 	// integrate until either
 	// - we reached the max iteration count
@@ -393,7 +443,7 @@ bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnst
 	while ((!integrationOutOfDomainBounds) && (!outOfIntegrationTimeBounds) && (pathPositions.size() < maxIterationCount)) {
 
 		// advance to a new point in the chart
-		Eigen::Vector2d newPoint = integratePathlineOneStep_RK4(inputField, currentPoint(0), currentPoint(1), currentTime, integrationTimeStepSize);
+		Eigen::Vector2d newPoint = integratorRk4(inputField, currentPoint(0), currentPoint(1), currentTime, integrationTimeStepSize);
 		integrationOutOfDomainBounds = checkIfOutOfDomain(newPoint);
 		if (!integrationOutOfDomainBounds) {
 			auto newTime = currentTime + integrationTimeStepSize;

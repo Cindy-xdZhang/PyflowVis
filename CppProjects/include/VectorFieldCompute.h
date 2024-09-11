@@ -107,6 +107,12 @@ public:
 	// for steady field variables (tmin, tmax,timesteps) are not set
 	double tmin, tmax;
 	int timeSteps = -1;
+	AnalyticalFlowFunc2D analyticalFlowfunc_ = nullptr;
+	inline Eigen::Vector2d getVectorAnalytical(const Eigen::Vector2d& pos, double t) const
+	{
+		assert(this->analyticalFlowfunc_);
+		return this->analyticalFlowfunc_(pos, t);
+	}
 };
 
 struct SteadyVectorField2D : public IUnsteadField2D {
@@ -121,7 +127,7 @@ struct SteadyVectorField2D : public IUnsteadField2D {
 	}
 	std::vector<std::vector<Eigen::Vector2d>> field; // first y dimension then x dimension
 
-	AnalyticalFlowFunc2D analyticalFlowfunc_ = nullptr;
+
 
 	Eigen::Vector2d getVector(int x, int y) const
 	{
@@ -154,11 +160,7 @@ struct SteadyVectorField2D : public IUnsteadField2D {
 	// parameter x,y are the physical position in the vector field domain.
 	// SteadyVectorField2D  might have analytical expression, then when query value from out of boundary is return valid value.
 
-	inline Eigen::Vector2d getVectorAnalytical(const Eigen::Vector2d& pos, double t_is_useless = 0.0) const
-	{
-		assert(this->analyticalFlowfunc_);
-		return this->analyticalFlowfunc_(pos, t_is_useless);
-	}
+
 	inline bool resampleFromAnalyticalExpression()
 	{
 		if (this->analyticalFlowfunc_) [[likely]] {
@@ -193,13 +195,6 @@ class UnSteadyVectorField2D : public IUnsteadField2D {
 public:
 	std::vector<std::vector<std::vector<Eigen::Vector2d>>> field; // first t, then y dimension then x dimension
 
-	// UnSteadyVectorField2D  might have analytical expression, then when query value from out of boundary is return valid value.
-	AnalyticalFlowFunc2D analyticalFlowfunc_ = nullptr;
-	inline Eigen::Vector2d getVectorAnalytical(const Eigen::Vector2d& pos, double t) const
-	{
-		assert(this->analyticalFlowfunc_);
-		return this->analyticalFlowfunc_(pos, t);
-	}
 
 	inline Eigen::Vector2d getVector(int x, int y, int t) const
 	{

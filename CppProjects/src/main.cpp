@@ -10,9 +10,9 @@ int main()
 
 
 	auto generator = UnsteadyPathlneDataSetGenerator();
-	generator.classicalParametersDeserialization("../data/dbgPathline/DesSerialize/");
+	//generator.classicalParametersDeserialization("../data/dbgPathline/DesSerialize/");
 	//generator.analyticalTestCasesGeneration("../data/dbgPathline/");
-	generator.GenDataset(30, 30, 40, "../data/dbgPathline/");
+	generator.GenDataset(4, 20, 10, "../data/dbgPathline9X9delete/");
 	//generator.generateMixUnsteadyFieldPathline("../data/dbgPathline/", 10, 10);
 
 	//// generateUnsteadyFieldPathline(5, 1, 1, "../data/Pathline/", "train");

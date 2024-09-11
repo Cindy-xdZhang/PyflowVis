@@ -267,8 +267,8 @@ def segmentationCriteria(pred, gt):
         np.array( [TP,FP,FN, precision, recall, F1, IoU],dtype=np.float32) 
     """
     # Extract the binary segmentation mask (second channel)
-    pred_mask = pred[..., 1]  # shape [batch_size, width, height]
-    gt_mask = gt[..., 1]      # shape [batch_size, width, height]
+    pred_mask = pred[..., 0]  # shape [batch_size, width, height]
+    gt_mask = gt[..., 0]      # shape [batch_size, width, height]
     
     # Flatten the masks to compute metrics for the entire batch
     pred_flat = pred_mask.flatten()
@@ -344,31 +344,31 @@ class TestSegmentation(object):
         print(f"precision, recall, F1, IoU={precision},{recall},{F1},{IoU}")
         
         # #random select  samples to visualize
-        for i in range(self.samples):
-            sample=random.randint(0,len(test_data_loader.dataset)-1)
-            data, label=test_data_loader.dataset[sample]
-            if isinstance(data, list) or isinstance(data, tuple) :
-                # Unpack the tuple
-                vectorFieldImage, pathlines = data
-                # Move each element to the device
-                batch_vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
-                pathlines = pathlines.unsqueeze(0).to(device)
-                label = label.to(device)
-                # Repack into a tuple if needed
-                data = (batch_vectorFieldImage, pathlines)
-            else:
-                # If data is not a tuple, directly move to the device
-                data = data.to(device)
-                label = label.to(device)    
+        # for i in range(self.samples):
+        #     sample=random.randint(0,len(test_data_loader.dataset)-1)
+        #     data, label=test_data_loader.dataset[sample]
+        #     if isinstance(data, list) or isinstance(data, tuple) :
+        #         # Unpack the tuple
+        #         vectorFieldImage, pathlines = data
+        #         # Move each element to the device
+        #         batch_vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
+        #         pathlines = pathlines.unsqueeze(0).to(device)
+        #         label = label.to(device)
+        #         # Repack into a tuple if needed
+        #         data = (batch_vectorFieldImage, pathlines)
+        #     else:
+        #         # If data is not a tuple, directly move to the device
+        #         data = data.to(device)
+        #         label = label.to(device)    
 
             
-            predictition= model(data)
-            predictition=predictition[0].cpu().numpy()
-            label=label.cpu().numpy()
-            name=test_data_loader.dataset.getSampleName(sample)
-            save_segmentation_as_png(predictition,f"./testOutput/{self.runName}/{name}_pred.png",upSample=10.0)
-            save_segmentation_as_png(label,f"./testOutput/{self.runName}/{name}_gt.png",upSample=10.0)
-            rawVectorField=vectorFieldImage.transpose(0,-1).cpu().numpy()
+        #     predictition= model(data)
+        #     predictition=predictition[0].cpu().numpy()
+        #     label=label.cpu().numpy()
+        #     name=test_data_loader.dataset.getSampleName(sample)
+        #     save_segmentation_as_png(predictition,f"./testOutput/{self.runName}/{name}_pred.png",upSample=10.0)
+        #     save_segmentation_as_png(label,f"./testOutput/{self.runName}/{name}_gt.png",upSample=10.0)
+        #     rawVectorField=vectorFieldImage.transpose(0,-1).cpu().numpy()
             
             # qCriterion=computeQcriterion(rawVectorField,grid_dx,grid_dy)
             # ivd=computeIVD(rawVectorField,grid_dx,grid_dy)
@@ -429,7 +429,6 @@ if __name__ == '__main__':
     cfg=argParseAndPrepareConfig()
     model = build_model_from_cfg(cfg.model)
     test_model(model,cfg)
-
 
 
 
