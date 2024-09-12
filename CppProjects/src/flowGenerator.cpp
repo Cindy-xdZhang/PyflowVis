@@ -294,8 +294,8 @@ std::vector<std::vector<uint8_t>>  generateSegmentationBinaryMask(const Eigen::V
 	std::vector<std::vector<uint8_t>> segmentation(Ydim, std::vector<uint8_t>(Xdim, 0));
 	if (si == 0.0 || si == 3.0) [[unlikely]] {
 		return segmentation;
-	}
-	auto judgeVortex = [si, rc, txy, deformInverse](const Eigen::Vector2d& pos) -> uint8_t {
+		}
+		auto judgeVortex = [si, rc, txy, deformInverse](const Eigen::Vector2d& pos) -> uint8_t {
 		auto originalPos = deformInverse * (pos - txy);
 		auto dx = rc - originalPos.norm();
 		return dx > 0 ? 1 : 0;
@@ -1186,7 +1186,7 @@ void UnsteadyPathlneDataSetGenerator::GenOneSplit(int Nparamters, int samplePerN
 					{
 						abc_dot *= 0.5;
 					}
-				}
+					}
 
 
 				UnSteadyVectorField2D unsteady_field = Tobias_ObserverTransformation(steadyField, abc, abc_dot, tmin, tmax, unsteadyFieldTimeStep);
@@ -1219,6 +1219,7 @@ void UnsteadyPathlneDataSetGenerator::GenOneSplit(int Nparamters, int samplePerN
 				std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, deformMat, rc_n_si, txy, outputPathlineLength, samplingMethod);
 
 				// visualize segmentation & pick random k path lines to vis
+				if (taskSampleId % 10 == 0)
 				{
 
 					auto licSegTexture = addSegmentationVisualization(SteadyTexture, steadyField, rc_n_si, txy, deformMat);
@@ -1249,7 +1250,7 @@ void UnsteadyPathlneDataSetGenerator::GenOneSplit(int Nparamters, int samplePerN
 				if (!jsonOut.good()) [[unlikely]] {
 					printf("couldn't open file: %s", metaFilename.c_str());
 					return;
-				}
+					}
 				{
 					cereal::JSONOutputArchive archive_o(jsonOut);
 					Eigen::Vector3d deform_TheteaSxSy = { theta, sx, sy };
@@ -1277,6 +1278,13 @@ void UnsteadyPathlneDataSetGenerator::GenOneSplit(int Nparamters, int samplePerN
 
 		} // for n,rc sample
 		});
+
+	if (this->minV > minMagintude) {
+		this->minV = minMagintude;
+	}
+	if (this->maxV < maxMagintude) {
+		this->maxV = maxMagintude;
+	}
 }
 
 
@@ -1334,7 +1342,7 @@ void UnsteadyPathlneDataSetGenerator::DeSerialize(const std::string& dest_folder
 	if (!jsonOut.good()) [[unlikely]] {
 		printf("couldn't open file: %s", metaFilename.c_str());
 		return;
-	}
+		}
 	{
 		cereal::JSONOutputArchive archive_o(jsonOut);
 		Eigen::Vector3d deform_TheteaSxSy = { theta, sx, sy };
@@ -1400,7 +1408,7 @@ void UnsteadyPathlneDataSetGenerator::analyticalTestCasesGeneration(const std::s
 	if (!jsonOut.good()) [[unlikely]] {
 		printf("couldn't open file: %s", root_metaFilename.c_str());
 		return;
-	}
+		}
 	{
 		cereal::JSONOutputArchive archive_o(jsonOut);
 		archive_o(CEREAL_NVP(Xdim));
@@ -1689,7 +1697,7 @@ void UnsteadyPathlneDataSetGenerator::generateMixUnsteadyFieldPathline(const std
 			if (!jsonOut.good()) [[unlikely]] {
 				printf("couldn't open file: %s", metaFilename.c_str());
 				return;
-			}
+				}
 			{
 				cereal::JSONOutputArchive archive_o(jsonOut);
 				archive_o(CEREAL_NVP(vectorFieldMeta));

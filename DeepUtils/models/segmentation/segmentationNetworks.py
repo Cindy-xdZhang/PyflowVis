@@ -389,12 +389,13 @@ def PathlineSamplingLayer(pathline_src,keepGroups,linesPerGroup=4,temporal_sampl
         total_groups = K // linesPerGroup
         
         # L = torch.randint(int(temporal_sampling_range[0]*L_Full_length), int(temporal_sampling_range[1]*L_Full_length), (1,)).item()
-        L=L_Full_length
         # Randomly downsample back to L steps 
-        allL_indices=torch.randperm(L_Full_length)[:L]
-        temporal_indices=torch.sort(allL_indices)[0]
-        temporal_indices[0]=0
-        temporal_sampled_pathline = pathline_src[:,temporal_indices,:,:]
+        # allL_indices=torch.randperm(L_Full_length)[:L]
+        # temporal_indices=torch.sort(allL_indices)[0]
+        # temporal_indices[0]=0
+        # temporal_sampled_pathline = pathline_src[:,temporal_indices,:,:]
+        temporal_sampled_pathline=pathline_src
+        temporal_indices=None
         # # Randomly  select first `keep_K` indices indices to keep
         # indices = torch.randperm(K)[:keepKlines]  
         # sampled_pathline=temporal_sampled_pathline[:, :, indices, :]
@@ -481,10 +482,10 @@ class PointTransformer(nn.Module):
         self.knn_k=k #knn neighbor size
         self.pathlinePerGroup=KpathlinePerGroup
         
-        # self.keep_Groups = int(0.8* PathlineGroups)
-        # if  self.keep_Groups % 4 != 0:
-        #     self.keep_Groups= (self.keep_Groups //4) * 4         
-        self.keep_Groups = PathlineGroups    
+        self.keep_Groups = int(0.6* PathlineGroups)
+        if  self.keep_Groups % 4 != 0:
+            self.keep_Groups= (self.keep_Groups //4) * 4         
+        # self.keep_Groups = PathlineGroups    
         self.embedding = nn.Linear(in_channels, dmodel)
         
         self.transformer_layers = nn.ModuleList([
@@ -517,12 +518,12 @@ class PointTransformer(nn.Module):
             x = x + layer(x, pos,knn_idx)
 
         x = self.norm(x)
-        x = x.mean(dim=1)
-        return  self.output(self.fc(x))
-        # full_features = self.propagate_features(pathline_src, sampled_pathline, x, temporal_indices,pathline_mask)
+        # x = x.mean(dim=1)
+        # return  self.output(self.fc(x))
+        full_features = self.propagate_features(pathline_src, sampled_pathline, x, temporal_indices,pathline_mask)
         # Apply final layers to get output for all pathlines
-        # full_output = self.output(self.fc(full_features)).squeeze(-1)
-        # return full_output
+        full_output = self.output(self.fc(full_features)).squeeze(-1)
+        return full_output
 
     
     def propagate_features(self, full_pathline, sampled_pathline, sampled_features, temporal_indices,mask):
@@ -557,9 +558,10 @@ class PointTransformer(nn.Module):
         full_features[:,:, mask, :] = sampled_features.view(B, L,-1, self.dim)
         full_features[:, :,~mask, :] = self.feature_propagation(propagated_features[:, :,~mask, :])
 
-        # Reshape back to (B, L, K, dim)
-        full_features = full_features.view(B, K,L* self.dim)
-        # shape of full_features=(B, L, K* dmodel)
+        # Reshape back to (B,  K, L*dim)
+        full_features = full_features.permute(0,2,1,3)
+        full_features =full_features.reshape(B, K,L* self.dim)
+        # shape of full_features=(B,  K,L* dmodel)
         return full_features
 
 

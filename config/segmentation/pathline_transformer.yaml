@@ -6,7 +6,7 @@ model:
     # d_model: 1152 
     num_encoder_layers: 3
     KpathlinePerGroup: 4
-    PathlineGroups: 36
+    PathlineGroups: 48
     in_channels: 9
     dropout: 0.01
     # DataSizeX: 32
