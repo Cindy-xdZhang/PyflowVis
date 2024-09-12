@@ -29,14 +29,14 @@ namespace {
 	constexpr double tmax = M_PI * 0.25;
 	constexpr int unsteadyFieldTimeStep = 5;//dt of vector field = (pi*0.25)/(5-1)=pi/16
 	constexpr int outputPathlineLength = 9;//dt of vector field = (pi*0.25)/(9-1)=pi/32
-	constexpr int outputPathlinesCountK = 12;//this parameter is K, make sure K is even number then output K^2 path lines.
+	constexpr int outputPathlinesCountK = 16;//this parameter is K, make sure K is even number then output K^2 path lines.
 
 	//since we compute vasitas steady field and transformation, path lines all in analytical way, this domainMinBoundary,domainMaxBoundary is control how many things is happening inside the data.
 	Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 	Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
 
 	// lic parameters
-	constexpr int LicImageSize = 2;
+	constexpr int LicImageSize = 128;
 	constexpr int LicSaveFrequency = 3; // every 2 time steps save one
 	const double stepSize = 0.012;
 	const int maxLICIteratioOneDirection = 256;
@@ -294,8 +294,8 @@ std::vector<std::vector<uint8_t>>  generateSegmentationBinaryMask(const Eigen::V
 	std::vector<std::vector<uint8_t>> segmentation(Ydim, std::vector<uint8_t>(Xdim, 0));
 	if (si == 0.0 || si == 3.0) [[unlikely]] {
 		return segmentation;
-		}
-		auto judgeVortex = [si, rc, txy, deformInverse](const Eigen::Vector2d& pos) -> uint8_t {
+	}
+	auto judgeVortex = [si, rc, txy, deformInverse](const Eigen::Vector2d& pos) -> uint8_t {
 		auto originalPos = deformInverse * (pos - txy);
 		auto dx = rc - originalPos.norm();
 		return dx > 0 ? 1 : 0;
@@ -1186,7 +1186,7 @@ void UnsteadyPathlneDataSetGenerator::GenOneSplit(int Nparamters, int samplePerN
 					{
 						abc_dot *= 0.5;
 					}
-					}
+				}
 
 
 				UnSteadyVectorField2D unsteady_field = Tobias_ObserverTransformation(steadyField, abc, abc_dot, tmin, tmax, unsteadyFieldTimeStep);
@@ -1249,7 +1249,7 @@ void UnsteadyPathlneDataSetGenerator::GenOneSplit(int Nparamters, int samplePerN
 				if (!jsonOut.good()) [[unlikely]] {
 					printf("couldn't open file: %s", metaFilename.c_str());
 					return;
-					}
+				}
 				{
 					cereal::JSONOutputArchive archive_o(jsonOut);
 					Eigen::Vector3d deform_TheteaSxSy = { theta, sx, sy };
@@ -1334,7 +1334,7 @@ void UnsteadyPathlneDataSetGenerator::DeSerialize(const std::string& dest_folder
 	if (!jsonOut.good()) [[unlikely]] {
 		printf("couldn't open file: %s", metaFilename.c_str());
 		return;
-		}
+	}
 	{
 		cereal::JSONOutputArchive archive_o(jsonOut);
 		Eigen::Vector3d deform_TheteaSxSy = { theta, sx, sy };
@@ -1400,7 +1400,7 @@ void UnsteadyPathlneDataSetGenerator::analyticalTestCasesGeneration(const std::s
 	if (!jsonOut.good()) [[unlikely]] {
 		printf("couldn't open file: %s", root_metaFilename.c_str());
 		return;
-		}
+	}
 	{
 		cereal::JSONOutputArchive archive_o(jsonOut);
 		archive_o(CEREAL_NVP(Xdim));
@@ -1487,10 +1487,13 @@ void UnsteadyPathlneDataSetGenerator::classicalParametersDeserialization(const s
 			std::tie(abc, abc_dot) = ObserverParams[j];
 
 			auto sampleName = "sample_" + std::to_string(sampleId++);
+			printf("Deserializing %s..\n", sampleName.c_str());
 			// Call DeSerialize for each set of parameters
 			DeSerialize(dst_folder, param, abc, abc_dot, sampleName);
 		}
 	}
+
+	printf("Deserializing Done.\n");
 
 
 
@@ -1686,7 +1689,7 @@ void UnsteadyPathlneDataSetGenerator::generateMixUnsteadyFieldPathline(const std
 			if (!jsonOut.good()) [[unlikely]] {
 				printf("couldn't open file: %s", metaFilename.c_str());
 				return;
-				}
+			}
 			{
 				cereal::JSONOutputArchive archive_o(jsonOut);
 				archive_o(CEREAL_NVP(vectorFieldMeta));

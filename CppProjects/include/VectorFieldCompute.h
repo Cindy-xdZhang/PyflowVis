@@ -204,7 +204,7 @@ struct SteadyVectorField2D : public IUnsteadField2D {
 			}
 
 			return true;
-			}
+		}
 		assert(false);
 		return false;
 	}
@@ -375,7 +375,7 @@ public:
 			//[0,-c(t);c(t),0]*(ra)
 			Eigen::Vector2d c_componnet = { ra(1) * -c, ra(0) * c };
 			return uv + c_componnet;
-			}
+		}
 		assert(false);
 		return {};
 	}
@@ -650,16 +650,20 @@ inline std::vector<std::vector<double>> ComputeIVD(const std::vector<std::vector
 inline std::vector<std::vector<Eigen::Matrix2d>> ComputeNablaU(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
 {
 
-	std::vector<std::vector<Eigen::Matrix2d>> NablaU(Ydim, std::vector<Eigen::Matrix2d>(Xdim);
+	std::vector<std::vector<Eigen::Matrix2d>> NablaU(Ydim, std::vector<Eigen::Matrix2d>(Xdim));
 	const double inverse_grid_interval_x = 1.0 / SpatialGridIntervalX;
 	const double inverse_grid_interval_y = 1.0 / SpatialGridIntervalY;
 
 	for (int y = 0; y < Ydim; ++y) {
-		for (int x = 0; x < Xdim ++x) {
-			int xPlus1 = std::min(x + 1, )
+		for (int x = 0; x < Xdim; ++x) {
+			int xPlus1 = std::min(x + 1, Xdim - 1);
+			int xMinus1 = std::max(x - 1, 0);
 
-				Eigen::Vector2d du_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5 * inverse_grid_interval_x;
-			Eigen::Vector2d dv_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5 * inverse_grid_interval_y;
+			int yPlus1 = std::min(y + 1, Ydim - 1);
+			int yMinus1 = std::max(y - 1, 0);
+
+			Eigen::Vector2d du_dx = (vecfieldData[y][xPlus1] - vecfieldData[y][xMinus1]) * 0.5 * inverse_grid_interval_x;
+			Eigen::Vector2d dv_dy = (vecfieldData[yPlus1][x] - vecfieldData[yMinus1][x]) * 0.5 * inverse_grid_interval_y;
 			Eigen::Matrix2d gradient;
 			gradient << du_dx(0), du_dx(1),
 				dv_dy(0), dv_dy(1);
