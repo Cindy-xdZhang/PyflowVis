@@ -4,12 +4,31 @@
 #include <Eigen/Dense>
 #include <functional>
 #include <vector>
+#include <array>
+#include <random>
 // for steady field  second parameter (t) is ignored.
 using AnalyticalFlowFunc2D = std::function<Eigen::Vector2d(const Eigen::Vector2d&, double)>;
 using AnalyticalFlowFunc3D = std::function<Eigen::Vector3d(const Eigen::Vector3d&, double)>;
 using velocityFieldData = std::vector<std::vector<Eigen::Vector2d>>;
 // save 3d position, vorticity,IVD,distance(to start seeding point)
 using PathlinePointInfo = std::vector<double>;
+enum class PATHLINE_POINT_INFO : unsigned char {
+	POSITION_X = 0,
+	POSITION_Y = 1,
+	TIME_T = 2,
+	IVD = 3,
+	DISTANCE_OR_LABEL = 4,
+	VELOCITY_MAGNITUDE = 5,
+	NABLA_U00,
+	NABLA_U01,
+	NABLA_U11
+};
+enum class PATHLINE_SEEDING_SAMPLING : unsigned char {
+	GRID_CROSS_SEEDING = 0,
+	RECTANGULAR_CLUSTER4_RANDOM
+};
+
+
 using Color = Eigen::Vector3d;
 
 template <int Component>
@@ -76,8 +95,8 @@ T bilinear_interpolate(const std::array<std::array<T, N>, N>& vector_field, doub
 template <typename T>
 T trilinear_interpolate(const std::vector<std::vector<std::vector<T>>>& vector_field, double x, double y, double t)
 {
-	int t0 = std::clamp(t, double(0), double(vector_field[0].size() - 1));
-	int t1 = std::min(t0 + 1, static_cast<int>(vector_field[0].size() - 1));
+	int t0 = std::clamp(t, double(0), double(vector_field.size() - 1));
+	int t1 = std::min(t0 + 1, static_cast<int>(vector_field.size() - 1));
 	auto value_t0 = bilinear_interpolate(vector_field[t0], x, y);
 	auto value_t1 = bilinear_interpolate(vector_field[t1], x, y);
 	double tx = t - t0;
@@ -630,13 +649,16 @@ inline std::vector<std::vector<double>> ComputeIVD(const std::vector<std::vector
 
 inline std::vector<std::vector<Eigen::Matrix2d>> ComputeNablaU(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
 {
-	std::vector<std::vector<Eigen::Matrix2d>> NablaU(Ydim, std::vector<Eigen::Matrix2d>(Xdim));
+
+	std::vector<std::vector<Eigen::Matrix2d>> NablaU(Ydim, std::vector<Eigen::Matrix2d>(Xdim);
 	const double inverse_grid_interval_x = 1.0 / SpatialGridIntervalX;
 	const double inverse_grid_interval_y = 1.0 / SpatialGridIntervalY;
 
-	for (int y = 1; y < Ydim - 1; ++y) {
-		for (int x = 1; x < Xdim - 1; ++x) {
-			Eigen::Vector2d du_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5 * inverse_grid_interval_x;
+	for (int y = 0; y < Ydim; ++y) {
+		for (int x = 0; x < Xdim ++x) {
+			int xPlus1 = std::min(x + 1, )
+
+				Eigen::Vector2d du_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5 * inverse_grid_interval_x;
 			Eigen::Vector2d dv_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5 * inverse_grid_interval_y;
 			Eigen::Matrix2d gradient;
 			gradient << du_dx(0), du_dx(1),
@@ -645,6 +667,7 @@ inline std::vector<std::vector<Eigen::Matrix2d>> ComputeNablaU(const std::vector
 			NablaU[y][x] = gradient;
 		}
 	}
+
 	return NablaU;
 }
 
@@ -827,7 +850,115 @@ bool PathhlineIntegrationRK4(const Eigen::Vector2d& StartPosition, const IUnstea
 
 bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnsteadField2D& inputField, const double tstart, const double targetIntegrationTime, const double dt_, std::vector<Eigen::Vector3d>& pathPositions);
 
-std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const int outputPathlineLength);
 
-std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const Eigen::Matrix2d& deformMat, const Eigen::Vector3d& meta_rc_n_si, const Eigen::Vector2d& txy, const int outputPathlineLength);
+
+
+
+namespace GroupSeeding {
+	inline Eigen::Vector2d JittorReSeeding(const Eigen::Vector2d& preSeeding, Eigen::Vector2d domainMin, Eigen::Vector2d domainMax) {
+		static std::random_device rd;
+		static  std::mt19937 rng(rd());
+		const auto domainRange = domainMax - domainMin;
+		//plane center vector:
+		Eigen::Vector2d Center = domainMin + 0.5 * domainRange;
+		Eigen::Vector2d  Direction = Center - preSeeding;
+		std::uniform_real_distribution<> disX(0.00001, 0.5);
+		double shift = disX(rng);
+
+		Eigen::Vector2d   seeding = preSeeding + shift * Direction;
+
+		return seeding;
+	}
+
+	inline std::vector<Eigen::Vector2d> generateSeedingsRec(double xmin, double xmax, double ymin, double ymax, int K) {
+		static std::random_device rd;
+		static  std::mt19937 rng(rd());
+		assert(xmax - xmin > 0);
+		assert(ymax - ymin > 0);
+		std::vector<Eigen::Vector2d> seedings;
+		seedings.reserve(K);
+
+		// Define distributions for x and y coordinates within the rectangle
+		std::uniform_real_distribution<> disX(xmin, xmax);
+		std::uniform_real_distribution<> disY(ymin, ymax);
+
+		for (int i = 0; i < K; ++i) {
+			// Generate random (x, y) within the defined rectangle
+			double x = disX(rng);
+			double y = disY(rng);
+			seedings.emplace_back(x, y);
+		}
+
+		return seedings;
+	}
+	inline  std::vector<Eigen::Vector2d>  RecTangular4ClusterSampling(int samplesPercluster, Eigen::Vector2d domainMin, Eigen::Vector2d domainMax) {
+		const auto domainRange = domainMax - domainMin;
+		constexpr int NClusters = 4;
+		std::array<Eigen::Vector2d, 4> domainCenters{
+			Eigen::Vector2d(0.25 * domainRange.x() + domainMin.x(), 0.25 * domainRange.y() + domainMin.y()), //-1,-1
+			Eigen::Vector2d(0.25 * domainRange.x() + domainMin.x(), 0.75 * domainRange.y() + domainMin.y()), // 1,1
+			Eigen::Vector2d(0.75 * domainRange.x() + domainMin.x(), 0.25 * domainRange.y() + domainMin.y()), // 1,-1
+			Eigen::Vector2d(0.75 * domainRange.x() + domainMin.x(), 0.75 * domainRange.y() + domainMin.y()) //-1,1
+		};
+		std::vector<Eigen::Vector2d> res;
+		res.reserve(NClusters * samplesPercluster);
+		for (int i = 0; i < NClusters; i++) {
+			// the domain d is 1/5*range,(1/10 in one direction).
+			Eigen::Vector2d domainCenter = domainCenters[i];
+
+			auto Domain_minx = std::max(domainCenter.x() - 0.25 * domainRange.x(), domainMin.x());
+			auto Domain_maxx = std::min(domainCenter.x() + 0.25 * domainRange.x(), domainMax.x());
+			auto Domain_miny = std::max(domainCenter.y() - 0.25 * domainRange.y(), domainMin.y());
+			auto Domain_maxy = std::min(domainCenter.y() + 0.25 * domainRange.y(), domainMax.y());
+			std::vector<Eigen::Vector2d>  seedings = generateSeedingsRec(Domain_minx, Domain_maxx, Domain_miny, Domain_maxy, samplesPercluster);
+			res.insert(res.end(), seedings.begin(), seedings.end());
+		}
+		return res;
+	}
+	inline  std::vector<Eigen::Vector2d> generateSeedingsCross(double xCenter, double yCenter, double dx, double dy) {
+		std::vector<Eigen::Vector2d> seedings;
+		seedings.emplace_back(xCenter - dx, yCenter);
+		seedings.emplace_back(xCenter, yCenter - dy);
+		seedings.emplace_back(xCenter + dx, yCenter);
+		seedings.emplace_back(xCenter, yCenter + dy);
+		return seedings;
+	}
+
+	inline  std::vector<Eigen::Vector2d>  GridCrossSampling(int gx, int gy, Eigen::Vector2d domainMin, Eigen::Vector2d domainMax) {
+		Eigen::Vector2d domainRange = domainMax - domainMin;
+		//need to get rid of points that are too close to boundary
+		Eigen::Vector2d SamplingDomainStart = domainMin + 0.1 * domainRange;
+		Eigen::Vector2d SamplingDomainEnd = domainMin + 0.9 * domainRange;
+		Eigen::Vector2d SamplingDomainRange = SamplingDomainEnd - SamplingDomainStart;
+
+		const double sampleGrid_dx = SamplingDomainRange.x() / (gx - 1);
+		const double sampleGrid_dy = SamplingDomainRange.y() / (gy - 1);
+
+		const double sampleCross_dx = sampleGrid_dx / 3.0;
+		const double sampleCross_dy = sampleGrid_dy / 3.0;
+		std::vector<Eigen::Vector2d> res;
+		res.reserve(gx * gy * 4);
+		for (size_t i = 0; i < gy; i++)
+			for (size_t j = 0; j < gx; j++)
+			{
+				const double centerPointX = SamplingDomainStart.x() + sampleGrid_dx * j;
+				const double centerPointY = SamplingDomainStart.y() + sampleGrid_dy * i;
+				std::vector<Eigen::Vector2d>  seedings = generateSeedingsCross(centerPointX, centerPointY, sampleCross_dx, sampleCross_dy);
+				res.insert(res.end(), seedings.begin(), seedings.end());
+			};
+
+		return res;
+	}
+
+
+
+}
+
+
+
+
+
+std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const int outputPathlineLength, PATHLINE_SEEDING_SAMPLING sampleMEthod);
+
+std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const Eigen::Matrix2d& deformMat, const Eigen::Vector3d& meta_rc_n_si, const Eigen::Vector2d& txy, const int outputPathlineLength, PATHLINE_SEEDING_SAMPLING sampleMEthod);
 #endif

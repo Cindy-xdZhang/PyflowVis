@@ -448,10 +448,10 @@ bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnst
 		if (!integrationOutOfDomainBounds) {
 			auto newTime = currentTime + integrationTimeStepSize;
 			// check if currentTime is out of the time domain -> we are done
-			if ((targetIntegrationTime > startTime) && (newTime >= targetIntegrationTime)) {
+			if ((targetIntegrationTime > startTime) && (newTime > targetIntegrationTime)) {
 				outOfIntegrationTimeBounds = true;
 			}
-			else if ((targetIntegrationTime < startTime) && (newTime <= targetIntegrationTime)) {
+			else if ((targetIntegrationTime < startTime) && (newTime < targetIntegrationTime)) {
 				outOfIntegrationTimeBounds = true;
 			}
 			else {
@@ -471,21 +471,23 @@ bool PathhlineIntegrationRK4v2(const Eigen::Vector2d& StartPosition, const IUnst
 			}
 		}
 	}
-	bool suc = pathPositions.size() > 3;
+	bool suc = pathPositions.size() > 2;
 	return suc;
 }
 
 
 
-std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const int outputPathlineLength)
+std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const int outputPathlineLength, PATHLINE_SEEDING_SAMPLING sampleMEthod)
 {
 	Eigen::Matrix2d tmp;
 	Eigen::Vector3d ttmp;
 	Eigen::Vector2d tttmp;
-	return PathlineIntegrationInfoCollect2D(inputField, KLines, tmp, ttmp, tttmp, outputPathlineLength);
+	return PathlineIntegrationInfoCollect2D(inputField, KLines, tmp, ttmp, tttmp, outputPathlineLength, sampleMEthod);
 }
 
-std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines, const Eigen::Matrix2d& deformMat, const Eigen::Vector3d& n_rc_si, const Eigen::Vector2d& txy, const int outputPathlineLength)
+std::vector<std::vector<PathlinePointInfo>>
+PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KLines,
+	const Eigen::Matrix2d& deformMat, const Eigen::Vector3d& n_rc_si, const Eigen::Vector2d& txy, const int outputPathlineLength, PATHLINE_SEEDING_SAMPLING sampleMEthod)
 {
 	constexpr int maximumLength = 50; // pathline_dt=1/5 dt, thus total have 9*5=45 steps.
 	auto maxBound = inputField.getSpatialMaxBoundary();
@@ -495,32 +497,18 @@ std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(con
 	auto tmin = inputField.tmin;
 	auto Xdim = inputField.XdimYdim.x();
 	auto Ydim = inputField.XdimYdim.y();
-
-	auto generateSeedings = [](double xmin, double xmax, double ymin, double ymax, int K) -> std::vector<Eigen::Vector2d> {
-		assert(xmax - xmin > 0);
-		assert(ymax - ymin > 0);
-		std::vector<Eigen::Vector2d> seedings;
-		seedings.reserve(K);
-
-		// Define distributions for x and y coordinates within the rectangle
-		std::uniform_real_distribution<> disX(xmin, xmax);
-		std::uniform_real_distribution<> disY(ymin, ymax);
-
-		for (int i = 0; i < K; ++i) {
-			// Generate random (x, y) within the defined rectangle
-			double x = disX(rng);
-			double y = disY(rng);
-			seedings.emplace_back(x, y);
-		}
-
-		return seedings;
-		};
+	if (inputField.analyticalFlowfunc_ == nullptr)
+	{
+		printf("error: input field has no analytical expression.. currently not support.");
+		assert(false);
+	}
 
 	const double dt = (inputField.tmax - inputField.tmin) / (double)(inputField.timeSteps - 1);
 	const double pathline_dt = (inputField.tmax - inputField.tmin) / (double)(outputPathlineLength - 1);
 
 	// std::vector<std::vector<std::vector<double>>> curlFields(inputField.timeSteps);
 	std::vector<std::vector<std::vector<double>>> ivdFields(inputField.timeSteps);
+	std::vector<std::vector<std::vector<double>>> velocityMagnitudeFields(inputField.timeSteps);
 	std::vector<std::vector<std::vector<Eigen::Matrix2d>>> nablaUfields(inputField.timeSteps);
 
 	// precompute vorticity and ivd field
@@ -531,81 +519,75 @@ std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(con
 		// curlFields[t] = curlField;
 		ivdFields[t] = ivdField;
 		nablaUfields[t] = ComputeNablaU(inputField.field[t], Xdim, Ydim, inputField.spatialGridInterval(0), inputField.spatialGridInterval(1));
+
+		velocityMagnitudeFields[t] = ComputeVelocityMagniture(inputField.field[t], Xdim, Ydim);
 	}
 
-	// generate random window D as a local cluster in the physical domain near grid point P; or 4 clusters divide the whole domain
-	//
-	// generate  K(7?9?) random samples inside D
-	// K pathlines, padding to equal length, stepsize makes to 1/m *dt->in total generate K*M points per cluster
-	// every path line information will store position,time, vorticity,IVD.
-	// the segmentation of steady vasts is an objective quantity, and should not change no matter what observer is applied.
+
 	std::vector<std::vector<PathlinePointInfo>> clusterPathlines;
-	constexpr int NClusters = 4;
-	std::array<Eigen::Vector2d, 4> domainCenters{
-		Eigen::Vector2d(0.25 * domainRange.x() + minBound.x(), 0.25 * domainRange.y() + minBound.y()), //-1,-1
-		Eigen::Vector2d(0.25 * domainRange.x() + minBound.x(), 0.75 * domainRange.y() + minBound.y()), // 1,1
-		Eigen::Vector2d(0.75 * domainRange.x() + minBound.x(), 0.25 * domainRange.y() + minBound.y()), // 1,-1
-		Eigen::Vector2d(0.75 * domainRange.x() + minBound.x(), 0.75 * domainRange.y() + minBound.y()) //-1,1
-	};
+	std::vector<Eigen::Vector2d> seedings;
+	if (sampleMEthod == PATHLINE_SEEDING_SAMPLING::GRID_CROSS_SEEDING)
+	{
+		seedings = GroupSeeding::GridCrossSampling(KLines / 2, KLines / 2, minBound, maxBound);//intotal klines*klines pathlines
+	}
+	else
+	{
+		seedings = GroupSeeding::RecTangular4ClusterSampling(KLines * KLines * 0.25, minBound, maxBound);//intotal klines*klines pathlines
+	}
+	const auto TOTAL_LINES = seedings.size();
+	clusterPathlines.resize(TOTAL_LINES);
 
-	clusterPathlines.resize(NClusters * KLines);
-	for (int i = 0; i < NClusters; i++) {
-		// the domain d is 1/5*range,(1/10 in one direction).
-		Eigen::Vector2d domainCenter = domainCenters[i];
+	for (size_t k = 0; k < TOTAL_LINES; k++) {
+		//integrate pathline
+		clusterPathlines[k].reserve(maximumLength);
+		std::vector<Eigen::Vector3d> pathlinePositions;
+		auto suc = PathhlineIntegrationRK4v2(seedings[k], inputField, 0, tmax, pathline_dt, pathlinePositions);
+		while (suc == false) {
+			seedings[k] = GroupSeeding::JittorReSeeding(seedings[k], minBound, maxBound);
+			suc = PathhlineIntegrationRK4v2(seedings[k], inputField, 0, tmax, pathline_dt, pathlinePositions);
+		}
 
-		auto Domain_minx = std::max(domainCenter.x() - 0.25 * domainRange.x(), minBound.x());
-		auto Domain_maxx = std::min(domainCenter.x() + 0.25 * domainRange.x(), maxBound.x());
-		auto Domain_miny = std::max(domainCenter.y() - 0.25 * domainRange.y(), minBound.y());
-		auto Domain_maxy = std::min(domainCenter.y() + 0.25 * domainRange.y(), maxBound.y());
-		auto seedings = generateSeedings(Domain_minx, Domain_maxx, Domain_miny, Domain_maxy, KLines);
-		for (size_t k = 0; k < KLines; k++) {
-			int thisPathlineGlobalId = i * KLines + k;
-			clusterPathlines[thisPathlineGlobalId].reserve(maximumLength * 4);
+		//compute properties.
+		const auto startPoint = seedings[k];
+		for (int step = 0; step < pathlinePositions.size(); step++) {
+			auto px = pathlinePositions[step].x();
+			auto py = pathlinePositions[step].y();
+			auto time = pathlinePositions[step].z();
+			double floatIndexX = (px - minBound.x()) / inputField.spatialGridInterval(0);
+			double floatIndexY = (py - minBound.y()) / inputField.spatialGridInterval(1);
+			double floatIndexT = (time - inputField.tmin) / dt;
 
-			std::vector<Eigen::Vector3d> pathlinePositions;
-			auto suc = PathhlineIntegrationRK4v2(seedings[k], inputField, 0, tmax, pathline_dt, pathlinePositions);
-			while (suc == false) {
-				seedings[k] = generateSeedings(Domain_minx, Domain_maxx, Domain_miny, Domain_maxy, 1)[0];
-				suc = PathhlineIntegrationRK4v2(seedings[k], inputField, 0, tmax, pathline_dt, pathlinePositions);
-			}
+			auto ivd = trilinear_interpolate(ivdFields, floatIndexX, floatIndexY, floatIndexT);
+			auto nablau = trilinear_interpolate(nablaUfields, floatIndexX, floatIndexY, floatIndexT);
+			Eigen::Vector2d pos = { px,py };
+			auto velocityMag = inputField.getVectorAnalytical(pos, time).norm();
+			auto distance = sqrt((px - startPoint.x()) * (px - startPoint.x()) + (py - startPoint.y()) * (py - startPoint.y()));
 
-			const auto startPoint = seedings[k];
-			for (int step = 0; step < pathlinePositions.size(); step++) {
-				auto px = pathlinePositions[step].x();
-				auto py = pathlinePositions[step].y();
-				auto time = pathlinePositions[step].z();
-				double floatIndexX = (px - minBound.x()) / inputField.spatialGridInterval(0);
-				double floatIndexY = (py - minBound.y()) / inputField.spatialGridInterval(1);
-				double floatIndexT = (time - inputField.tmin) / dt;
-
-				auto ivd = trilinear_interpolate(ivdFields, floatIndexX, floatIndexY, floatIndexT);
-				//auto nablau = trilinear_interpolate(nablaUfields, floatIndexX, floatIndexY, floatIndexT);
-
-				auto distance = sqrt((px - startPoint.x()) * (px - startPoint.x()) + (py - startPoint.y()) * (py - startPoint.y()));
-
-				//std::vector<double> pathlinePointAndInfo = { px, py, time, ivd, distance,nablau(0,0),nablau(0,1),nablau(1,0) ,nablau(1,1) };
-				std::vector<double> pathlinePointAndInfo = { px, py, time, ivd, distance };
-				clusterPathlines[thisPathlineGlobalId].emplace_back(pathlinePointAndInfo);
-			}
+			std::vector<double> pathlinePointAndInfo = { px, py, time, ivd, distance,velocityMag, nablau(0,0),nablau(0,1) ,nablau(1,1) };
+			checkVectorValues(pathlinePointAndInfo);
+			clusterPathlines[k].emplace_back(pathlinePointAndInfo);
 		}
 	}
 
-	// auto rc = meta_n_rc_si.y();
-	// auto si = meta_n_rc_si.z();
-	// const auto deformInverse = deformMat.inverse();
-	// auto judgeVortex = [si, rc, txy, deformInverse](const Eigen::Vector2d& pos) -> double {
-	//     if (si == 1.0 || si == 2.0) {
-	//         auto originalPos = deformInverse * (pos - txy);
-	//         auto dx = rc - originalPos.norm();
-	//         return dx > 0 ? 1.0 : 0.0;
-	//     }
-	//     return 0.0;
-	// };
-	std::vector PadValue = { -100.0, -100.0, -100.0 * 3.1415926, -100.0, -100.0 };
-	// the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
+
+	const auto rc = n_rc_si((int)VastisParamRC_N::VastisParamRC);
+	const auto si = n_rc_si.z();
+	const auto deformInverse = deformMat.inverse();
+	auto judgeVortex = [si, rc, txy, deformInverse](const Eigen::Vector2d& pos) -> double {
+		if ((si == 1.0 || si == 2.0) && rc > 0) {
+			auto originalPos = deformInverse * (pos - txy);
+			auto dx = rc - originalPos.norm();
+			return dx > 0 ? 1.0 : 0.0;
+		}
+		return 0.0;
+		};
+	constexpr double paddingValue = -1000.0;
+	constexpr double paddingValue_Time = -1000 * 3.1415926;
+	std::vector PadValue = { paddingValue , paddingValue , paddingValue_Time , paddingValue , paddingValue , paddingValue , paddingValue ,paddingValue, paddingValue };
 	for (auto& pathline : clusterPathlines) {
-		/*     Eigen::Vector2d pos = { pathline.at(0).at(0), pathline.at(0).at(1) };
-			 pathline.at(0).at(4) = judgeVortex(pos);*/
+		Eigen::Vector2d start_pos = { pathline.at(0).at(0), pathline.at(0).at(1) };
+		// the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
+		pathline.at(0).at((int)PATHLINE_POINT_INFO::DISTANCE_OR_LABEL) = judgeVortex(start_pos);
 		pathline.resize(outputPathlineLength, PadValue);
 	}
 
@@ -613,22 +595,26 @@ std::vector<std::vector<PathlinePointInfo>> PathlineIntegrationInfoCollect2D(con
 	// verify code to make sure every pathline has same time stamps
 	// ----------------------------------------------------------
 	for (size_t step = 0; step < outputPathlineLength; step++) {
-		auto time = clusterPathlines[0].at(step).at(2);
-		if (time == -100.0 * 3.1415926) {
+		auto time = clusterPathlines[0].at(step).at((int)PATHLINE_POINT_INFO::TIME_T);
+		if (time == paddingValue_Time) {
 			for (size_t l = 1; l < clusterPathlines.size(); l++) {
-				if (clusterPathlines[l].at(step).at(2) != -100.0 * 3.1415926) {
-					time = clusterPathlines[l].at(step).at(2);
+				if (clusterPathlines[l].at(step).at((int)PATHLINE_POINT_INFO::TIME_T) != paddingValue_Time) {
+					time = clusterPathlines[l].at(step).at((int)PATHLINE_POINT_INFO::TIME_T);
 				}
 			}
 		}
 
 		for (size_t l = 1; l < clusterPathlines.size(); l++) {
-			if (clusterPathlines[l].at(step).at(2) != time && clusterPathlines[l].at(step).at(2) != -100.0 * 3.1415926) {
-				printf("error: get not equal timestamps of pathlines.");
+			if (clusterPathlines[l].at(step).at((int)PATHLINE_POINT_INFO::TIME_T) != time && clusterPathlines[l].at(step).at((int)PATHLINE_POINT_INFO::TIME_T) != paddingValue_Time) {
+				printf("error: get not equal timestamps of path lines.");
 				assert(false);
 			};
 		}
 	}
+
+
+
+
 
 	return clusterPathlines;
 }

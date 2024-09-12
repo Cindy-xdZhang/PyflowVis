@@ -50,11 +50,14 @@ class UnsteadyVastisPathlineSeg(VastisDataset):
         #find all *.bin data in this subfoder
         metaFiles = [f for f in os.listdir(sub_folder) if f.endswith('.json')]
         minV,maxV=   self.dastasetMetaInfo['minV'],self.dastasetMetaInfo['maxV']
+        PathlineLength= self.dastasetMetaInfo["outputPathlineLength"]
+        PathlineCountK= self.dastasetMetaInfo["outputPathlinesCountK"]
+        PathlineCount=int(PathlineCountK/2)*int(PathlineCountK/2)*4
         oneFolderData=[None]*len(metaFiles)
         oneFolderLabel=[None]*len(metaFiles)
         for idx,metaFile in enumerate(metaFiles) :
             metaPath=os.path.join(sub_folder,metaFile)
-            data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,domainMinBoundary=self.dastasetMetaInfo["domainMinBoundary"],dominMaxBoundary=self.dastasetMetaInfo["domainMaxBoundary"] ) 
+            data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,PathlineLength=PathlineLength,PathlineCount=PathlineCount) 
             fieldData,pathlineData=data
             fieldData=torch.tensor(fieldData).transpose(0, -1)
             pathlineData=torch.tensor(pathlineData)

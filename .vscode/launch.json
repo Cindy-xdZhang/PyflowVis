@@ -8,7 +8,7 @@
             "name": "Python: Train Pipeline",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/train.py",
+            "program": "${workspaceFolder}/test.py",
             // "program": "${workspaceFolder}/test.py",
             "console": "integratedTerminal",
             "args": [

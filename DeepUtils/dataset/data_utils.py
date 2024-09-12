@@ -123,11 +123,38 @@ def pad_or_truncate_pathlines(pathlineClusters, L):
     return result
 
 
+def getClassificationOfPatch(si):
+    #classfication of this patch
+    vortexsegmentationLabel = np.zeros((1),dtype=np.float32)
+    if si ==1.0 or si == 2.0 :
+        vortexsegmentationLabel[0] = 1.0        
+    else:
+        # vortexsegmentationLabel[0] = 0.0 
+        vortexsegmentationLabel[0] =0.0
+    return vortexsegmentationLabel
+
+
+def getSegmentationofPathlines(pathlineClusters,si):
+    Klines,PointsPerline,featurePerPoint=pathlineClusters.shape
+    vortexsegmentationLabel = np.zeros((Klines),dtype=np.float32)
+    if si ==1.0 or si == 2.0 :
+        for lineId in range(Klines):
+            #point features: px, py, time, ivd, distance,v_mag,nablau(0,0),nablau(0,1) ,nablau(1,1)
+            vortexsegmentationLabel[lineId] =pathlineClusters[lineId,0,4]
+            #remove the label 
+            pathlineClusters[lineId,0,4]=0
+
+    return vortexsegmentationLabel
+
     
-def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,domainMinBoundary,dominMaxBoundary):
+def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineLength,PathlineCount):
     #get meta information
-    metaINFo=read_json_file(metaPath)
-    n,rc,si=metaINFo['rc_n_si']["value0"],metaINFo['rc_n_si']["value1"],metaINFo['rc_n_si']["value2"]
+    # metaINFo=read_json_file(metaPath)
+    # n,rc,si=metaINFo['rc_n_si']["value0"],metaINFo['rc_n_si']["value1"],metaINFo['rc_n_si']["value2"]
+    if "saddle" in metaPath or "zero" in metaPath :
+        si=0.0
+    else:
+        si=1.0
     # txy=np.array([metaINFo['txy']["value0"],metaINFo['txy']["value1"]]  )  
     # theta,sx,sy=metaINFo['deform_theta_sx_sy']["value0"],metaINFo['deform_theta_sx_sy']["value1"],metaINFo['deform_theta_sx_sy']["value2"]
     # deformMatA=np.array([
@@ -145,14 +172,6 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,domainMin
     #     vortexsegmentationLabel[:, :, 0] = 1 - vortexsegLabel
     #     vortexsegmentationLabel[:, :, 1] = vortexsegLabel
     
-    #classfication of this patch
-    vortexsegmentationLabel = np.zeros((1),dtype=np.float32)
-    if si ==1.0 or si == 2.0 :
-        vortexsegmentationLabel[0] = 1.0        
-    else:
-        # vortexsegmentationLabel[0] = 0.0 
-        vortexsegmentationLabel[0] =0.0
-
 
 
     rawBinaryPath= metaPath.replace('meta.json', '.bin')
@@ -162,12 +181,18 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,domainMin
     
     pathlineBinarypath= metaPath.replace('meta.json', '_pathline.bin')
     pathlineClusters=read_binary_file(pathlineBinarypath)
-    assert(pathlineClusters.shape[0]==100*9*5) 
-    pathlineClusters=pathlineClusters.reshape(100,9,5)
+    assert(pathlineClusters.shape[0]==PathlineLength*PathlineCount*9) 
+    pathlineClusters=pathlineClusters.reshape(PathlineCount,PathlineLength,9)
+    
+    vortexsegmentationLabel=getSegmentationofPathlines(pathlineClusters,si)
     
     # Permute pathline clusters first and second axis
+
     pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))
-    pathlineClusters[:,:,2]=pathlineClusters[:,:,2]/(0.25*np.pi)
+    #normalize time
+    # pathlineClusters[:,:,2]=pathlineClusters[:,:,2]/(0.25*np.pi)    
+    
+    
     return (fieldData,pathlineClusters),vortexsegmentationLabel
 
 

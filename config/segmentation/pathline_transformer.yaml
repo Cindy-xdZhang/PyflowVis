@@ -4,9 +4,10 @@ model:
   encoder_args:
     NAME: PointTransformer
     # d_model: 1152 
-    num_encoder_layers: 4
-    Kpathlines: 192
-    in_channels: 5
+    num_encoder_layers: 3
+    KpathlinePerGroup: 4
+    PathlineGroups: 36
+    in_channels: 9
     dropout: 0.01
     # DataSizeX: 32
     # DataSizeY: 32
@@ -21,8 +22,8 @@ model:
 # Training parameters
 # random_seed: 4259
 wandb: True 
-batch_size: 32
-lr: 0.0001
+batch_size: 64
+lr: 0.001
 epochs: 200
 # scheduler: TwoStep
 # warmup_epochs: 80 
@@ -34,8 +35,8 @@ optimizer:
 # scheduler
 scheduler: cosine
 warmup_epochs:  2
-warmup_lr_init: 5.0e-6
-min_lr: 0.00002
+warmup_lr_init: 5.0e-5
+min_lr: 0.000005
 
 
 

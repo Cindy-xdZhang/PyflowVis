@@ -24,20 +24,24 @@ std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genSy(0.0, 2.2
 std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTx(0.0, 1.34);
 std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTy(0.0, 1.27);
 namespace {
-	constexpr int Xdim = 9, Ydim = 9;
+	constexpr int Xdim = 32, Ydim = 32;
 	constexpr double tmin = 0.0;
 	constexpr double tmax = M_PI * 0.25;
 	constexpr int unsteadyFieldTimeStep = 5;//dt of vector field = (pi*0.25)/(5-1)=pi/16
 	constexpr int outputPathlineLength = 9;//dt of vector field = (pi*0.25)/(9-1)=pi/32
+	constexpr int outputPathlinesCountK = 12;//this parameter is K, make sure K is even number then output K^2 path lines.
 
+	//since we compute vasitas steady field and transformation, path lines all in analytical way, this domainMinBoundary,domainMaxBoundary is control how many things is happening inside the data.
 	Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
 	Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
 
 	// lic parameters
-	constexpr int LicImageSize = 128;
+	constexpr int LicImageSize = 2;
 	constexpr int LicSaveFrequency = 3; // every 2 time steps save one
 	const double stepSize = 0.012;
 	const int maxLICIteratioOneDirection = 256;
+
+	constexpr PATHLINE_SEEDING_SAMPLING samplingMethod = PATHLINE_SEEDING_SAMPLING::GRID_CROSS_SEEDING;
 #if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
 	auto policy
 		= std::execution::seq;
@@ -174,8 +178,17 @@ std::vector<std::vector<Eigen::Vector3d>> addPathlineVisualization(const std::ve
 		// Linear interpolation between white and blue based on time
 		return (1.0 - time) * blue + time * white;
 		};
-
-	constexpr int randomPickKlinesToDraw = 96;
+	auto colorCodingPathlineInsideVortex = [](double time) -> Eigen::Vector3d {
+		// Clamp time to [0, 1] range
+		time = std::max(0.0, std::min(1.0, time));
+		// White color
+		Eigen::Vector3d red(1.0, 0.0, 0.0);
+		// Blue color
+		Eigen::Vector3d yellow(204.0 / 255.0, 102.0 / 255.0, 0.0);
+		// Linear interpolation between white and blue based on time
+		return (1.0 - time) * red + time * yellow;
+		};
+	constexpr int randomPickKlinesToDraw = int(outputPathlinesCountK / 2) * int(outputPathlinesCountK / 2) * 4;
 	const Eigen::Vector2d domainRange = domainMax - domainMIn;
 	const int licImageSizeY = inputLicImage.size();
 	const int licImageSizeX = inputLicImage[0].size();
@@ -185,31 +198,30 @@ std::vector<std::vector<Eigen::Vector3d>> addPathlineVisualization(const std::ve
 
 	std::vector<Eigen::Vector2d> selectedStartingPoints;
 	for (int i = 0; i < randomPickKlinesToDraw; i++) {
-		int lineIdx;
-		bool isFarEnough;
-		int failureTime = 0;
-		double distanceThreshold = 0.1;
-		do {
-			lineIdx = dist_int(rng);
-			isFarEnough = true;
-			const Eigen::Vector2d currentStartPoint(InputPathlines[lineIdx][0][0], InputPathlines[lineIdx][0][1]);
-			if (failureTime >= 10)
-			{
-				distanceThreshold *= 0.5;
-				failureTime = 0;
-			}
-
-			for (const auto& previousStartPoint : selectedStartingPoints) {
-				if ((currentStartPoint - previousStartPoint).norm() < distanceThreshold) {
-					isFarEnough = false;
-					failureTime++;
-					break;
+		int lineIdx = i; ;
+		/*	bool isFarEnough;
+			int failureTime = 0;
+			double distanceThreshold = 0.1;
+			do {
+				lineIdx = dist_int(rng);
+				isFarEnough = true;
+				const Eigen::Vector2d currentStartPoint(InputPathlines[lineIdx][0][0], InputPathlines[lineIdx][0][1]);
+				if (failureTime >= 10)
+				{
+					distanceThreshold *= 0.5;
+					failureTime = 0;
 				}
-			}
-		} while (!isFarEnough);
 
+				for (const auto& previousStartPoint : selectedStartingPoints) {
+					if ((currentStartPoint - previousStartPoint).norm() < distanceThreshold) {
+						isFarEnough = false;
+						failureTime++;
+						break;
+					}
+				}
+			} while (!isFarEnough);
+			selectedStartingPoints.push_back(Eigen::Vector2d(InputPathlines[lineIdx][0][0], InputPathlines[lineIdx][0][1]));*/
 
-		selectedStartingPoints.push_back(Eigen::Vector2d(InputPathlines[lineIdx][0][0], InputPathlines[lineIdx][0][1]));
 		auto unique_pathline = InputPathlines[lineIdx];
 
 		// draw the pathline points to lic image
@@ -222,9 +234,17 @@ std::vector<std::vector<Eigen::Vector3d>> addPathlineVisualization(const std::ve
 			int gridX = static_cast<int>(normalized_x * licImageSizeX);
 			int gridY = static_cast<int>(normalized_y * licImageSizeY);
 
+			bool vortex_label = (int)unique_pathline.at(0).at((int)PATHLINE_POINT_INFO::DISTANCE_OR_LABEL);
+
 			if (gridX >= 0 && gridX < licImageSizeX && gridY >= 0 && gridY < licImageSizeY) {
+
 				double ratio_time = (time - t_min) / (t_max - t_min);
-				Eigen::Vector3d color = colorCodingPathline(ratio_time); // Blue for pathlines
+				Eigen::Vector3d color;
+				if (vortex_label)
+					color = colorCodingPathlineInsideVortex(ratio_time);
+				else
+					color = colorCodingPathline(ratio_time);
+
 				auto preColor = InputLicImage[gridY][gridX];
 				InputLicImage[gridY][gridX] = 0.2 * preColor + 0.8 * color;
 			}
@@ -581,8 +601,6 @@ namespace DBG_TEST {
 		const int maxLICIteratioOneDirection = 256;
 		int numVelocityFields = 1; // num of fields per n, rc parameter setting
 		const int LicSaveFrequency = 2;
-		Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
-		Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
 		std::string root_folder = "../data/test_criterion/";
 		if (!filesystem::exists(root_folder)) {
 			filesystem::create_directories(root_folder);
@@ -607,7 +625,7 @@ namespace DBG_TEST {
 
 		for (const auto& [fieldName, unsteady_field] : classicalAnalyticalFields) {
 
-			std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, 25, outputPathlineLength);
+			std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, outputPathlineLength, samplingMethod);
 			const auto steadyZeroSlice = unsteady_field.getVectorfieldSliceAtTime(0);
 			auto outputSteadyTexture = LICAlgorithm(steadyZeroSlice, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
 			outputSteadyTexture = addPathlineVisualization(outputSteadyTexture, domainMinBoundary, domainMaxBoundary, tmin, tmax, ClusterPathlines);
@@ -1198,7 +1216,7 @@ void UnsteadyPathlneDataSetGenerator::GenOneSplit(int Nparamters, int samplePerN
 
 
 				// the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
-				std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, 25, deformMat, rc_n_si, txy, outputPathlineLength);
+				std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, deformMat, rc_n_si, txy, outputPathlineLength, samplingMethod);
 
 				// visualize segmentation & pick random k path lines to vis
 				{
@@ -1295,7 +1313,7 @@ void UnsteadyPathlneDataSetGenerator::DeSerialize(const std::string& dest_folder
 	auto rawUnsteadyFieldData = flatten3DVectorsAs1Dfloat(unsteady_field.field);
 	// the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
 
-	std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, 25, deformMat, rc_n_si, txy, outputPathlineLength);
+	std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, deformMat, rc_n_si, txy, outputPathlineLength, samplingMethod);
 	{
 
 		auto licSegTexture = addSegmentationVisualization(SteadyTexture, steadyField, rc_n_si, txy, deformMat);
@@ -1346,8 +1364,6 @@ void UnsteadyPathlneDataSetGenerator::DeSerialize(const std::string& dest_folder
 void UnsteadyPathlneDataSetGenerator::analyticalTestCasesGeneration(const std::string& dst_folder) {
 	//analytical test field.
 	Eigen::Vector2i grid_size(Xdim, Ydim);
-	Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
-	Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
 	int time_steps = 32;
 
 	//taking global field paramters.
@@ -1360,7 +1376,7 @@ void UnsteadyPathlneDataSetGenerator::analyticalTestCasesGeneration(const std::s
 	for (const auto& [fieldName, unsteady_field] : classicalAnalyticalFields) {
 
 
-		std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, 25, outputPathlineLength);
+		std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, outputPathlineLength, samplingMethod);
 		const auto steadyZeroSlice = unsteady_field.getVectorfieldSliceAtTime(0);
 		auto outputSteadyTexture = LICAlgorithm(steadyZeroSlice, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
 		outputSteadyTexture = addPathlineVisualization(outputSteadyTexture, domainMinBoundary, domainMaxBoundary, tmin, tmax, ClusterPathlines);
@@ -1412,8 +1428,11 @@ void UnsteadyPathlneDataSetGenerator::classicalParametersDeserialization(const s
 	};
 	const std::vector<std::tuple<Eigen::Vector3d, Eigen::Vector3d>> ObserverParams = {
 		//no acc 
-		std::make_tuple(Eigen::Vector3d(0.0, 0.0,-0.1), Eigen::Vector3d(0.0, 0.0, 0.0)),
 		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		std::make_tuple(Eigen::Vector3d(0.0, 0.0,-0.1), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.2), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.25), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		std::make_tuple(Eigen::Vector3d(0.0, 0.0,-0.15), Eigen::Vector3d(0.0, 0.0, 0.0)),
 
 		std::make_tuple(Eigen::Vector3d(-0.10, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
 
@@ -1434,7 +1453,7 @@ void UnsteadyPathlneDataSetGenerator::classicalParametersDeserialization(const s
 		std::make_tuple(Eigen::Vector3d(0.00, 0.00,0.1), Eigen::Vector3d(0.0, 0.0, 0.00)),
 
 		//with acc 
-		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.01)),
+		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.0), Eigen::Vector3d(-0.001, 0.0, 0.01)),
 		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.0), Eigen::Vector3d(0.0, 0.002, 0.00)),
 		std::make_tuple(Eigen::Vector3d(0.10, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.001)),
 		std::make_tuple(Eigen::Vector3d(0.20, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.002)),
@@ -1615,7 +1634,7 @@ void UnsteadyPathlneDataSetGenerator::generateMixUnsteadyFieldPathline(const std
 
 			UnSteadyVectorField2D unsteady_field = Tobias_ObserverTransformation(steadyField, abc, abc_dot, tmin, tmax, unsteadyFieldTimeStep);
 			// the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
-			std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, 25, outputPathlineLength);
+			std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, outputPathlineLength, samplingMethod);
 			{
 
 				auto licSegTexturewithPathline = addPathlineVisualization(steadyLicTexture, domainMinBoundary, domainMaxBoundary, tmin, tmax, ClusterPathlines);
@@ -1711,5 +1730,9 @@ void UnsteadyPathlneDataSetGenerator::generateMixUnsteadyFieldPathline(const std
 		// save min and max
 		archive_o(cereal::make_nvp("minV", minMagintude));
 		archive_o(cereal::make_nvp("maxV", maxMagintude));
+		std::string pathlineSamplingMethod = string{ magic_enum::enum_name<PATHLINE_SEEDING_SAMPLING>(samplingMethod) };
+		archive_o(CEREAL_NVP(pathlineSamplingMethod));
+		archive_o(CEREAL_NVP(outputPathlineLength));
+		archive_o(CEREAL_NVP(outputPathlinesCountK));
 	}
 }

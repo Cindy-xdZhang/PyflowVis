@@ -63,8 +63,17 @@ inline std::vector<float> flatten2DVectorsAs1Dfloat(const std::vector<std::vecto
 	result.resize(xdim * ydim * 2);
 	for (size_t i = 0; i < ydim; i++)
 		for (size_t j = 0; j < xdim; j++) {
-			result[2 * (i * xdim + j)] = static_cast<float>(x2D[i][j](0));
-			result[2 * (i * xdim + j) + 1] = static_cast<float>(x2D[i][j](1));
+
+
+			float value0 = static_cast<float>(x2D[i][j](0));
+			float value1 = static_cast<float>(x2D[i][j](1));
+			if (!std::isfinite(value0) || !std::isfinite(value1) || std::isnan(value0) || std::isnan(value1)) {
+				printf("got infinite or nan numbers.");
+			}
+			else {
+				result[2 * (i * xdim + j)] = value0;
+				result[2 * (i * xdim + j) + 1] = value1;
+			}
 		}
 
 	return result;
@@ -83,8 +92,16 @@ inline  std::vector<float> flatten3DVectorsAs1Dfloat(const std::vector<std::vect
 	for (size_t t = 0; t < tdim; t++)
 		for (size_t i = 0; i < ydim; i++)
 			for (size_t j = 0; j < xdim; j++) {
-				result[2 * ((t * ydim + i) * xdim + j)] = static_cast<float>(x3D[t][i][j](0));
-				result[2 * ((t * ydim + i) * xdim + j) + 1] = static_cast<float>(x3D[t][i][j](1));
+				float value0 = static_cast<float>(x3D[t][i][j](0));
+				float value1 = static_cast<float>(x3D[t][i][j](1));
+				if (!std::isfinite(value0) || !std::isfinite(value1) || std::isnan(value0) || std::isnan(value1)) [[unlikely]] {
+					printf("got infinite or nan numbers.");
+					}
+				else {
+					result[2 * ((t * ydim + i) * xdim + j)] = value0;
+					result[2 * ((t * ydim + i) * xdim + j) + 1] = value1;
+				}
+
 			}
 
 	return result;
@@ -99,8 +116,14 @@ inline  std::vector<float> flatten2DvecAs1Dfloat(const std::vector<std::vector<T
 	assert(ydim > 0);
 	std::vector<float> result(ydim * tdim);
 	for (size_t t = 0; t < tdim; t++)
-		for (size_t i = 0; i < ydim; i++)
-			result[t * ydim + i] = static_cast<float>(x2D[t][i]);
+		for (size_t i = 0; i < ydim; i++) {
+			auto value = static_cast<float>(x2D[t][i]);
+			if (!std::isfinite(value) || !std::isfinite(value)) [[unlikely]] {
+				printf("got infinite or nan numbers.");
+				}
+			else
+				result[t * ydim + i] = value;
+		}
 
 	return result;
 }
@@ -118,12 +141,32 @@ inline  std::vector<float> flatten3DvecAs1Dfloat(const std::vector<std::vector<s
 	for (size_t t = 0; t < tdim; t++)
 		for (size_t i = 0; i < ydim; i++)
 			for (size_t j = 0; j < xdim; j++) {
-				result[(t * ydim + i) * xdim + j] = static_cast<float>(x3D[t][i][j]);
+				auto value = static_cast<float>(x3D[t][i][j]);
+				if (!std::isfinite(value) || !std::isfinite(value)) [[unlikely]] {
+					printf("got infinite or nan numbers.");
+					}
+				else
+					result[(t * ydim + i) * xdim + j] = value;
 			}
 
 	return result;
 }
 
+template <typename T>
+inline  auto checkVectorValues(const std::vector<T>& x1D)
+{
+
+	const size_t tdim = x1D.size();
+	for (size_t t = 0; t < tdim; t++) {
+		auto value = static_cast<float>(x1D[t]);
+		if (!std::isfinite(value) || !std::isfinite(value)) [[unlikely]] {
+			printf("got infinite or nan numbers.");
+			}
+
+	}
+
+	return;
+}
 
 inline std::string trimNumString(const std::string& numString)
 {
