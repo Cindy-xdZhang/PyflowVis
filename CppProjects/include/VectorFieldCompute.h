@@ -30,9 +30,18 @@ enum class PATHLINE_SEEDING_SAMPLING : unsigned char {
 
 
 using Color = Eigen::Vector3d;
+#ifdef _WIN32
+    #define STRONG_INLINE __forceinline
+#elif defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+    // Linux/Unix/macOS
+    #define STRONG_INLINE __attribute__((always_inline)) inline
+#else
+    #define STRONG_INLINE inline
+#endif
+
 
 template <int Component>
-__forceinline int VecComponentAddressTrans(const int x, const int y, const int mgridDim_x)
+STRONG_INLINE int VecComponentAddressTrans(const int x, const int y, const int mgridDim_x)
 {
 	static_assert(Component == 1 || Component == 2);
 	const int GridPointFlatternIdx = x + y * mgridDim_x;

@@ -1,9 +1,8 @@
 #include "VastistasVelocityGenerator.h"
 #include <cmath>
-#include <corecrt_math_defines.h>
 #include <random>
 #include <unordered_set>
-
+#include <ctime>
 
 namespace {
 

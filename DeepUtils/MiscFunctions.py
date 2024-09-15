@@ -7,6 +7,7 @@ import yaml
 import numpy as np
 import random
 from .utils import EasyConfig
+from typing import List, Tuple
 def print_args(args, printer=print):
     printer("==========       args      =============")
     for arg, content in args.items():
@@ -24,7 +25,7 @@ def set_seed(seed,force_determinsitic=False):
         torch.backends.cudnn.deterministic=True
 
 
-def runNameTagGenerator(config) ->(str,list[:str]):
+def runNameTagGenerator(config)->Tuple[str, List[str]]:
     seed=config['random_seed']
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     runName = f"bs_{config['batch_size']}_ep_{config['epochs']}_lr_{config['lr']}_{current_time}_seed_{seed}"

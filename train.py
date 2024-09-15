@@ -149,20 +149,14 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
 
 
 def train_pipeline():
+    print("torch.cuda.is_available():",torch.cuda.is_available())  # Should return True
+    print("torch.version.cuda:",torch.version.cuda)         # Should print the CUDA version PyTorch was built with
     try:
         cfg=argParseAndPrepareConfig()
         cfg["gitInfo"]=get_git_commit_id()
         run_Name,runTags=runNameTagGenerator(cfg)
         cfg['run_name']=run_Name
-        # Initialize wandb
-        if cfg['wandb']:
-            run=wandb.init(project=GLOBAL_WANDB_PROJECT_NAME,
-                        name=run_Name,
-                        tags=runTags,
-                        config=cfg)
-            arti_code=wandb.Artifact("code", type="code")
-            arti_code=CollectWandbLogfiles(arti_code)
-            wandb.log_artifact(arti_code) 
+
         print_args(cfg)
         logging.info(f"run name: {run_Name}, run tags: {runTags}")
 
@@ -200,6 +194,16 @@ def train_pipeline():
        # optimizer & scheduler
         optimizer = build_optimizer_from_cfg(model, lr=cfg.lr, **cfg.optimizer)
         scheduler = build_scheduler_from_cfg(cfg, optimizer) if "scheduler" in cfg else None
+
+        # Initialize wandb
+        if cfg['wandb']:
+            run=wandb.init(project=GLOBAL_WANDB_PROJECT_NAME,
+                        name=run_Name,
+                        tags=runTags,
+                        config=cfg)
+            arti_code=wandb.Artifact("code", type="code")
+            arti_code=CollectWandbLogfiles(arti_code)
+            wandb.log_artifact(arti_code) 
 
         # Training
         best_val_loss=train_model(model, train_loader, val_loader, optimizer,scheduler,cfg)

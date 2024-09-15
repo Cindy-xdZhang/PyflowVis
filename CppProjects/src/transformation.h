@@ -2,7 +2,6 @@
 #pragma once
 #include <Eigen/Core>
 #include <Eigen/Geometry>
-#include <corecrt_math_defines.h>
 #include <iostream>
 
 #include <random>

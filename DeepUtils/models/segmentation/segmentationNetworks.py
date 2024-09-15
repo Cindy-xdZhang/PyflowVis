@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from ..build import MODELS
 from torch import nn, einsum
-from einops import repeat
 
 class DoubleConv(nn.Module):
     def __init__(self, in_channels, out_channels,dropout=0.0):

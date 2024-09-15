@@ -8,10 +8,15 @@
 #include <array>
 #include <assert.h>
 #include <cmath>
-#include <corecrt_math_defines.h>
 #include <string>
 #include <vector>
 #include <unordered_map>
+#ifdef _WIN32
+#include <corecrt_math_defines.h>
+#elif __linux__
+#define _USE_MATH_DEFINES
+#include <cmath>
+#endif
 
 // one VastisParamter is Eigen::Vector2d rc_n, Eigen::Vector2d tx_ty,Eigen::Vector3d sxsytheta, int si.
 using VastisParamter = std::tuple<Eigen::Vector2d, Eigen::Vector2d, Eigen::Vector3d, int>;

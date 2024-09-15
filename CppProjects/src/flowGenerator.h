@@ -1,13 +1,17 @@
 #pragma once
 #include <Eigen/Core>
 #include <Eigen/Geometry>
-#include <corecrt_math_defines.h>
 #include <iostream>
 #include <string>
 #include <random>
 #include <vector>
 #include "commonUtils.h"
 #include "VastistasVelocityGenerator.h"
+
+
+
+
+
 
 // void ConvertNoiseTextureImage2Text(const std::string& infilename, const std::string& outFile, int width, int height);
 

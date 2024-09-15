@@ -5,7 +5,8 @@ autosave/
 profile/profile.txt
 wandb/
 testOutput/
-
+slurm_logs/
+ibex_bash/dcgm
 
 CppProjects/PybindCppModules/__pycache__/
 CppProjects/PybindCppModules/Pyds/__pycache__/
