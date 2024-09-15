@@ -619,3 +619,89 @@ PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KL
 	return clusterPathlines;
 }
 
+std::vector<Eigen::Vector2d> GroupSeeding::generateSeedingsRec(double xmin, double xmax, double ymin, double ymax, int K)
+{
+	static std::random_device rd;
+	static  std::mt19937 rng(rd());
+	assert(xmax - xmin > 0);
+	assert(ymax - ymin > 0);
+	std::vector<Eigen::Vector2d> seedings;
+	seedings.reserve(K);
+
+	// Define distributions for x and y coordinates within the rectangle
+	std::uniform_real_distribution<> disX(xmin, xmax);
+	std::uniform_real_distribution<> disY(ymin, ymax);
+
+	for (int i = 0; i < K; ++i) {
+		// Generate random (x, y) within the defined rectangle
+		double x = disX(rng);
+		double y = disY(rng);
+		seedings.emplace_back(x, y);
+	}
+
+	return seedings;
+}
+
+std::vector<Eigen::Vector2d> GroupSeeding::RecTangular4ClusterSampling(int samplesPercluster, Eigen::Vector2d domainMin, Eigen::Vector2d domainMax)
+{
+	const auto domainRange = domainMax - domainMin;
+	constexpr int NClusters = 4;
+	std::array<Eigen::Vector2d, 4> domainCenters{
+		Eigen::Vector2d(0.25 * domainRange.x() + domainMin.x(), 0.25 * domainRange.y() + domainMin.y()), //-1,-1
+		Eigen::Vector2d(0.25 * domainRange.x() + domainMin.x(), 0.75 * domainRange.y() + domainMin.y()), // 1,1
+		Eigen::Vector2d(0.75 * domainRange.x() + domainMin.x(), 0.25 * domainRange.y() + domainMin.y()), // 1,-1
+		Eigen::Vector2d(0.75 * domainRange.x() + domainMin.x(), 0.75 * domainRange.y() + domainMin.y()) //-1,1
+	};
+	std::vector<Eigen::Vector2d> res;
+	res.reserve(NClusters * samplesPercluster);
+	for (int i = 0; i < NClusters; i++) {
+		// the domain d is 1/5*range,(1/10 in one direction).
+		Eigen::Vector2d domainCenter = domainCenters[i];
+
+		auto Domain_minx = std::max(domainCenter.x() - 0.25 * domainRange.x(), domainMin.x());
+		auto Domain_maxx = std::min(domainCenter.x() + 0.25 * domainRange.x(), domainMax.x());
+		auto Domain_miny = std::max(domainCenter.y() - 0.25 * domainRange.y(), domainMin.y());
+		auto Domain_maxy = std::min(domainCenter.y() + 0.25 * domainRange.y(), domainMax.y());
+		std::vector<Eigen::Vector2d>  seedings = generateSeedingsRec(Domain_minx, Domain_maxx, Domain_miny, Domain_maxy, samplesPercluster);
+		res.insert(res.end(), seedings.begin(), seedings.end());
+	}
+	return res;
+}
+
+std::vector<Eigen::Vector2d> GroupSeeding::generateSeedingsCross(double xCenter, double yCenter, double dx, double dy)
+{
+	std::vector<Eigen::Vector2d> seedings;
+	seedings.emplace_back(xCenter - dx, yCenter);
+	seedings.emplace_back(xCenter, yCenter - dy);
+	seedings.emplace_back(xCenter, yCenter);
+	seedings.emplace_back(xCenter + dx, yCenter);
+	seedings.emplace_back(xCenter, yCenter + dy);
+	return seedings;
+}
+
+std::vector<Eigen::Vector2d> GroupSeeding::GridCrossSampling(int gx, int gy, Eigen::Vector2d domainMin, Eigen::Vector2d domainMax)
+{
+	Eigen::Vector2d domainRange = domainMax - domainMin;
+	//need to get rid of points that are too close to boundary
+	Eigen::Vector2d SamplingDomainStart = domainMin + 0.1 * domainRange;
+	Eigen::Vector2d SamplingDomainEnd = domainMin + 0.9 * domainRange;
+	Eigen::Vector2d SamplingDomainRange = SamplingDomainEnd - SamplingDomainStart;
+
+	const double sampleGrid_dx = SamplingDomainRange.x() / (gx - 1);
+	const double sampleGrid_dy = SamplingDomainRange.y() / (gy - 1);
+
+	const double sampleCross_dx = sampleGrid_dx / 3.0;
+	const double sampleCross_dy = sampleGrid_dy / 3.0;
+	std::vector<Eigen::Vector2d> res;
+	res.reserve(gx * gy * 4);
+	for (size_t i = 0; i < gy; i++)
+		for (size_t j = 0; j < gx; j++)
+		{
+			const double centerPointX = SamplingDomainStart.x() + sampleGrid_dx * j;
+			const double centerPointY = SamplingDomainStart.y() + sampleGrid_dy * i;
+			std::vector<Eigen::Vector2d>  seedings = generateSeedingsCross(centerPointX, centerPointY, sampleCross_dx, sampleCross_dy);
+			res.insert(res.end(), seedings.begin(), seedings.end());
+		};
+
+	return res;
+}

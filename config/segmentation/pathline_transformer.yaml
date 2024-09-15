@@ -6,9 +6,9 @@ model:
     # d_model: 1152 
     num_encoder_layers: 3
     KpathlinePerGroup: 4
-    PathlineGroups: 48
+    PathlineGroups: 64
     in_channels: 9
-    dropout: 0.01
+    dropout: 0.5
     # DataSizeX: 32
     # DataSizeY: 32
     # TimeSteps: 5
@@ -22,9 +22,10 @@ model:
 # Training parameters
 # random_seed: 4259
 wandb: True 
-batch_size: 64
-lr: 0.001
-epochs: 200
+batch_size: 68
+lr: 0.0001
+epochs: 120
+val_freq: 5
 # scheduler: TwoStep
 # warmup_epochs: 80 
 # second_lr: 0.00001

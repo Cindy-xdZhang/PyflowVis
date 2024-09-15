@@ -12,6 +12,9 @@ val_freq: 10
 epochs: 100
 batch_size: 256
 
+gradient_accumulate: 2
+gradient_norm_clip: 1.0
+
 optimizer:
  NAME: 'adam'
  weight_decay: 0.00000001
@@ -24,6 +27,6 @@ optimizer:
 # finetune: False 
 print_freq: 100 
 save_model: false
-save_freq: -1 # saving frequency for ckpt. -1 only saving the latest and the best.
+save_freq: 20 # saving frequency for ckpt. -1 only saving the latest and the best.
 save_model_path: 'models/'
 

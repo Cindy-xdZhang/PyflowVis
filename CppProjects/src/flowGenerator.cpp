@@ -28,8 +28,9 @@ namespace {
 	constexpr double tmin = 0.0;
 	constexpr double tmax = M_PI * 0.25;
 	constexpr int unsteadyFieldTimeStep = 5;//dt of vector field = (pi*0.25)/(5-1)=pi/16
-	constexpr int outputPathlineLength = 9;//dt of vector field = (pi*0.25)/(9-1)=pi/32
+	constexpr int outputPathlineLength = 16;//dt of vector field = (pi*0.25)/(9-1)=pi/32
 	constexpr int outputPathlinesCountK = 16;//this parameter is K, make sure K is even number then output K^2 path lines.
+	constexpr int outputPathlinesPerCluster = 5;//this parameter is K, make sure K is even number then output K^2 path lines.
 
 	//since we compute vasitas steady field and transformation, path lines all in analytical way, this domainMinBoundary,domainMaxBoundary is control how many things is happening inside the data.
 	Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
@@ -40,7 +41,7 @@ namespace {
 	constexpr int LicSaveFrequency = 3; // every 2 time steps save one
 	const double stepSize = 0.012;
 	const int maxLICIteratioOneDirection = 256;
-
+	constexpr int LICImageRenderFrequency = 20;//
 	constexpr PATHLINE_SEEDING_SAMPLING samplingMethod = PATHLINE_SEEDING_SAMPLING::GRID_CROSS_SEEDING;
 #if defined(DISABLE_CPP_PARALLELISM) || defined(_DEBUG)
 	auto policy
@@ -188,7 +189,7 @@ std::vector<std::vector<Eigen::Vector3d>> addPathlineVisualization(const std::ve
 		// Linear interpolation between white and blue based on time
 		return (1.0 - time) * red + time * yellow;
 		};
-	constexpr int randomPickKlinesToDraw = int(outputPathlinesCountK / 2) * int(outputPathlinesCountK / 2) * 4;
+	const int randomPickKlinesToDraw = InputPathlines.size();
 	const Eigen::Vector2d domainRange = domainMax - domainMIn;
 	const int licImageSizeY = inputLicImage.size();
 	const int licImageSizeX = inputLicImage[0].size();
@@ -1087,6 +1088,7 @@ void DataSetGenBase::GenDataset(int Nparamters, int samplePerParameters, int obs
 		archive_o(CEREAL_NVP(tmin));
 		archive_o(CEREAL_NVP(tmax));
 		archive_o(CEREAL_NVP(outputPathlineLength));
+		archive_o(CEREAL_NVP(outputPathlinesCountK));
 
 		// save min and max
 		archive_o(cereal::make_nvp("minV", this->minV));
@@ -1219,7 +1221,7 @@ void UnsteadyPathlneDataSetGenerator::GenOneSplit(int Nparamters, int samplePerN
 				std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, deformMat, rc_n_si, txy, outputPathlineLength, samplingMethod);
 
 				// visualize segmentation & pick random k path lines to vis
-				if (taskSampleId % 10 == 0)
+				if (taskSampleId % LICImageRenderFrequency == 0)
 				{
 
 					auto licSegTexture = addSegmentationVisualization(SteadyTexture, steadyField, rc_n_si, txy, deformMat);

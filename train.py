@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from DeepUtils.MiscFunctions import *
 import logging,random,wandb
-import torchsummary
+# import torchsummary
 
 from DeepUtils.models import build_model_from_cfg
 from DeepUtils.optim import build_optimizer_from_cfg
@@ -65,8 +65,12 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
     total_iterations,oom_time,best_val_loss=0,0,float('inf')
     model.to(device)
     sched_on_epoch=getattr(config,"sched_on_epoch",True)
+    accumulation_steps=getattr(config,'gradient_accumulate', 1) 
+    max_grad_norm = getattr(config,'gradient_norm_clip', 1.0)   # Maximum norm for gradient clipping
+
     for epoch in range(epochs):
         epoch_loss = 0
+        running_accumulate_loss=0
         try:
             for batch_idx, (data, label) in enumerate(data_loader):
                 if isinstance(data, list):
@@ -82,23 +86,34 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
                     # If data is not a tuple, directly move to the device
                     data = data.to(device)
                     label = label.to(device)    
+                    
                 predictition= model(data)                
                 loss=model.get_loss(predictition,label)
-                optimizer.zero_grad()
+                loss = loss / accumulation_steps  # Normalize the loss
                 loss.backward()
-                optimizer.step()
-                epoch_loss += loss.item()
+                
+                if (batch_idx + 1) % accumulation_steps == 0:
+                    # Gradient clipping
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)                    
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    if scheduler is not None and not sched_on_epoch:
+                        scheduler.step(epoch)         
+
+                 
+        
+                epoch_loss += loss.item()* accumulation_steps
+                running_accumulate_loss+=loss.item()* accumulation_steps
                 total_iterations += 1
                 if batch_idx % config['print_freq'] == 0:
                     lr=optimizer.param_groups[0]["lr"]
-                    logging.info(f'Epoch {epoch+1}, iter {batch_idx+1}, total_iterations: {total_iterations}. {lossName}: {loss.item()},lr:{lr}.')
+                    print_freq=config['print_freq'] if config['print_freq'] >0 and batch_idx>1 else 1
+                    running_accumulate_loss/=float(print_freq)
+                    logging.info(f'Epoch {epoch+1}, iter {batch_idx+1}, total_iterations: {total_iterations}. {lossName}: {running_accumulate_loss},lr:{lr}.')                    
                     if config['wandb']:
-                        wandb.log({"train_loss": loss.item(),  "total_iterations": total_iterations,"lr":lr})
-                        
-                if scheduler is not None and not sched_on_epoch:
-                    scheduler.step(epoch)                   
-               
-                
+                        wandb.log({"train_loss": running_accumulate_loss,  "total_iterations": total_iterations,"lr":lr})
+                    running_accumulate_loss=0
+                               
             if scheduler is not None and sched_on_epoch:
                 scheduler.step(epoch)       
                         
@@ -118,19 +133,20 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
                         'state_dict': model.state_dict(),
                         'optimizer': optimizer.state_dict(),
                     }, folder_name=saving_path, checkpoint_name= f'best_checkpoint.pth.tar')
-                #periodically save model
-                if  config['save_model'] and epoch % config["save_freq"]== 0 and epoch>0 and config["save_freq"]>0:
-                    saving_path= os.path.join(config['save_model_path'],run_Name) 
-                    save_checkpoint({
-                        'epoch': epoch + 1,
-                        'state_dict': model.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                    }, folder_name=saving_path, checkpoint_name= f'epoch_{epoch+ 1}.pth.tar')
+                    
+            #periodically save model
+            if  config['save_model'] and epoch % config["save_freq"]== 0 and epoch>0 and config["save_freq"]>0:
+                saving_path= os.path.join(config['save_model_path'],run_Name) 
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'state_dict': model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                }, folder_name=saving_path, checkpoint_name= f'epoch_{epoch+ 1}.pth.tar')
+                
             else:
                 logging.info(f'Epoch {epoch+1}, epoch_Loss: {epoch_loss}')
                 if config['wandb']:
                     wandb.log({"epoch": epoch+1,  "epoch_Loss": {epoch_loss}})
-
 
         except RuntimeError as exception:
             if "out of memory" in str(exception):
@@ -219,7 +235,6 @@ def train_pipeline():
 
     except Exception as e:
         print(e)
-        print("Error loading config file")
         return
    
 

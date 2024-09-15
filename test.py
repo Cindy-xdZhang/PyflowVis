@@ -377,7 +377,14 @@ class TestSegmentation(object):
             # precision, recall, F1, IoU=segmentationCriteria(predictition,labelVortex)
 
 
-  
+class TestPathlineSeg(object):
+    def __init__(self, device,run_name,samples=10,**kwargs):
+          self.device=device
+          self.samples=samples
+          self.runName=run_name
+          
+    
+      
 
 def test_model(model,cfg):
     device = cfg['device']
