@@ -50,11 +50,23 @@ class UnsteadyVastisPathlineSeg(VastisDataset):
         #find all *.bin data in this subfoder
         metaFiles = [f for f in os.listdir(sub_folder) if f.endswith('.json')]
         minV,maxV=   self.dastasetMetaInfo['minV'],self.dastasetMetaInfo['maxV']
-        PathlineLength= self.dastasetMetaInfo["outputPathlineLength"]
-        PathlineCountK= self.dastasetMetaInfo["outputPathlinesCountK"]
-        PathlineCount=int(PathlineCountK/2)*int(PathlineCountK/2)*4
+        PathlineCountK=16
+        PathlineLength=16
+        PathlineFeature=10
+        if "outputPathlineLength" not in self.dastasetMetaInfo:
+            print("outputPathlineLength not in self.dastasetMetaInfo,assume 16" )
+        else:
+            PathlineLength=self.dastasetMetaInfo["outputPathlineLength"]
+        if "outputPathlinesCountK" not in self.dastasetMetaInfo:
+            print("outputPathlinesCountK not in self.dastasetMetaInfo,assume 16" )
+        else:
+            PathlineCountK= self.dastasetMetaInfo["outputPathlinesCountK"]
+
+
+        PathlineCount=int(PathlineCountK/2)*int(PathlineCountK/2)*5
         oneFolderData=[None]*len(metaFiles)
         oneFolderLabel=[None]*len(metaFiles)
+
         for idx,metaFile in enumerate(metaFiles) :
             metaPath=os.path.join(sub_folder,metaFile)
             data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,PathlineLength=PathlineLength,PathlineCount=PathlineCount,mode=self.split) 
