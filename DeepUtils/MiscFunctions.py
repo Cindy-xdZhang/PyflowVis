@@ -36,17 +36,18 @@ def runNameTagGenerator(config)->Tuple[str, List[str]]:
 
 def CollectWandbLogfiles(config,arti_code):
     def collectPyFilesOfAFolder(saveFolder):
-        fileList=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if f.endswith(".py") ]            
+        fileList=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if f.endswith(".py") and "__init__" not in f ]            
+        return fileList
     fileList0=[]    
     saveFolder0=collectPyFilesOfAFolder("./DeepUtils/models/segmentation")
     fileList0.extend(saveFolder0)
     configFile=getattr(config,"config_yaml",None) 
     fileList0.append("train.py")
     fileList0.append(configFile)
+    print("wandb arti_code are:", fileList0)
     for file in fileList0:
         if os.path.isfile(file):
             arti_code.add_file(file, name= file)
-    print("wandb arti_code are:", arti_code)
     return arti_code
 
 

@@ -504,11 +504,11 @@ class PointTransformer(nn.Module):
         self.knn_k=k #knn neighbor size
         self.pathlinePerGroup=KpathlinePerGroup
         
-        self.keep_Groups = int(0.4* PathlineGroups)
+        self.keep_Groups = int(0.5* PathlineGroups)
         if  self.keep_Groups % 4 != 0:
             self.keep_Groups= (self.keep_Groups //4) * 4         
         # self.keep_Groups = PathlineGroups    
-        self.embedding = PosE_Initial(in_channels, dmodel)
+        self.embedding = PosE_Initial(in_channels, dmodel)#dmodel must be mutiple of inchannels.
         
         self.transformer_layers = nn.ModuleList([
             PointTransformerLayerv2(dmodel,dropout) for _ in range(num_encoder_layers)

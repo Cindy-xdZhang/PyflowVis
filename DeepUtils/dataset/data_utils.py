@@ -184,7 +184,6 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
     
     pathlineBinarypath= metaPath.replace('meta.json', '_pathline.bin')
     pathlineClusters=read_binary_file(pathlineBinarypath)
-    assert(pathlineClusters.shape[0]==PathlineLength*PathlineCount*9) 
     pathlineClusters=pathlineClusters.reshape(PathlineCount,PathlineLength,10)
     
     vortexsegmentationLabel=getSegmentationofPathlines(pathlineClusters,si)

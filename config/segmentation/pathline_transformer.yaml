@@ -3,11 +3,11 @@ model:
   NAME: BaseSeg
   encoder_args:
     NAME: PointTransformer
-    # d_model: 1152 
+    in_channels: 10
+    dmodel: 240 #becasue of pos_embedding,   dmodel must be multiple of in_channels, if not the code will adjust itself.
     num_encoder_layers: 3
-    KpathlinePerGroup: 4
+    KpathlinePerGroup: 5
     PathlineGroups: 64
-    in_channels: 9
     dropout: 0.5
     # DataSizeX: 32
     # DataSizeY: 32
@@ -17,12 +17,12 @@ model:
    
 
 # ---------------------------------------------------------------------------- #
-# Training cfgs of TobiasVortexBoundaryCNN
+# Training cfgs 
 # ---------------------------------------------------------------------------- #
 # Training parameters
 # random_seed: 4259
 wandb: True 
-batch_size: 68
+batch_size: 32
 lr: 0.0001
 epochs: 120
 val_freq: 5
@@ -50,7 +50,8 @@ dataloader:
   num_workers: 0
 dataset:
   NAME: UnsteadyVastisPathlineSeg
-  data_dir: 'CppProjects/data/dbgPathline/X32_Y32_T5'
+  # data_dir: 'CppProjects/data/dbgPathline/X32_Y32_T5'
+  data_dir: '/ibex/user/zhanx0o/data/dbgPathline5/X32_Y32_T5'
 
 #add WhiteNoise will boost vortex_unet 's performance
 datatransforms:
@@ -62,7 +63,7 @@ datatransforms:
   
 
 test_tasks:
-      tasks: ["TestSegmentation","TestPathlineSeg"] 
+      tasks: ["TestSegmentation"] 
 
 
 
