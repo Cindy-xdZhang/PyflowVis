@@ -22,6 +22,238 @@ namespace {
 using namespace std;
 #include "stablized_texture_512png.cpp"
 
+
+//give the analytical curl field from vectorfield, discrete curl field  as XDim X Ydim  vector.
+std::vector<std::vector<double>> ComputeCurlAnalytical(const IUnsteadField2D& vectorfield, const int Xdim, const int Ydim, const double time)
+{
+	std::vector<std::vector<double>> curl(Ydim, std::vector<double>(Xdim, 0.0f));
+	const auto domainMin = vectorfield.spatialDomainMinBoundary;
+	const auto domainRange = vectorfield.spatialDomainMaxBoundary - domainMin;
+	//discrete of curl field
+	const auto spatialGridIntervalX = domainRange.x() / (double)(Xdim - 1);
+	const auto spatialGridIntervalY = domainRange.y() / (double)(Ydim - 1);
+
+	constexpr double delta_ratio = 0.00001;
+	const Eigen::Vector2d   DeltaX = { delta_ratio * spatialGridIntervalX , 0.0 };
+	const Eigen::Vector2d   DeltaY = { 0.0, delta_ratio * spatialGridIntervalY };
+	const double inverse_DeltaX = 1.0f / (delta_ratio * spatialGridIntervalX);
+	const double inverse_DeltaY = 1.0f / (delta_ratio * spatialGridIntervalY);
+
+	// Calculate curl (vorticity) of the vector field
+	for (int y = 0; y < Ydim; ++y) {
+		for (int x = 0; x < Xdim; ++x) {
+			double posX = domainMin.x() + x * spatialGridIntervalX;
+			double posY = domainMin.y() + y * spatialGridIntervalY;
+
+			Eigen::Vector2d  curl_pos = { posX,posY };
+			Eigen::Vector2d v_xplus_delta = vectorfield.getVectorAnalytical(curl_pos + DeltaX, time);
+			Eigen::Vector2d v_xminux_delta = vectorfield.getVectorAnalytical(curl_pos - DeltaX, time);
+			Eigen::Vector2d dv_dx = (v_xplus_delta - v_xminux_delta) * 0.5f * (delta_ratio * inverse_DeltaX);
+
+			Eigen::Vector2d v_yplus_delta = vectorfield.getVectorAnalytical(curl_pos + DeltaY, time);
+			Eigen::Vector2d v_yminux_delta = vectorfield.getVectorAnalytical(curl_pos - DeltaY, time);
+
+			Eigen::Vector2d du_dy = (v_yplus_delta - v_yminux_delta) * 0.5f * (delta_ratio * inverse_DeltaY);
+			double curl_ = dv_dx(1) - du_dy(0);
+			curl[y][x] = curl_;
+		}
+	}
+	return curl;
+}
+
+std::vector<std::vector<double>> ComputeCurl(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
+{
+	std::vector<std::vector<double>> curl(Ydim, std::vector<double>(Xdim, 0.0f));
+	const double inverse_grid_interval_x = 1.0f / (double)SpatialGridIntervalX;
+	const double inverse_grid_interval_y = 1.0f / (double)SpatialGridIntervalY;
+	// Calculate curl (vorticity) of the vector field
+	for (int y = 1; y < Ydim - 1; ++y) {
+		for (int x = 1; x < Xdim - 1; ++x) {
+			Eigen::Vector2d dv_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5f * inverse_grid_interval_x;
+			Eigen::Vector2d du_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5f * inverse_grid_interval_y;
+			double curl_ = dv_dx(1) - du_dy(0);
+			curl[y][x] = curl_;
+		}
+	}
+	return curl;
+}
+
+std::vector<std::vector<double>> ComputeQCriterion(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
+{
+	std::vector<std::vector<double>> Q(Ydim, std::vector<double>(Xdim, 0.0));
+	const double inverse_grid_interval_x = 1.0 / SpatialGridIntervalX;
+	const double inverse_grid_interval_y = 1.0 / SpatialGridIntervalY;
+
+	for (int y = 1; y < Ydim - 1; ++y) {
+		for (int x = 1; x < Xdim - 1; ++x) {
+			Eigen::Vector2d du_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5 * inverse_grid_interval_x;
+			Eigen::Vector2d dv_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5 * inverse_grid_interval_y;
+			Eigen::Matrix2d gradient;
+			gradient << du_dx(0), du_dx(1),
+				dv_dy(0), dv_dy(1);
+
+			Eigen::Matrix2d S = 0.5 * (gradient + gradient.transpose());
+			Eigen::Matrix2d Omega = 0.5 * (gradient - gradient.transpose());
+
+			double Q_value = 0.5 * (Omega.squaredNorm() - S.squaredNorm());
+			Q[y][x] = Q_value;
+		}
+	}
+	return Q;
+}
+
+std::vector<std::vector<double>> ComputeDeltaCriterion(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
+{
+	std::vector<std::vector<double>> delta(Ydim, std::vector<double>(Xdim, 0.0));
+	const double inverse_grid_interval_x = 1.0 / SpatialGridIntervalX;
+	const double inverse_grid_interval_y = 1.0 / SpatialGridIntervalY;
+
+	for (int y = 1; y < Ydim - 1; ++y) {
+		for (int x = 1; x < Xdim - 1; ++x) {
+			Eigen::Vector2d dv_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5 * inverse_grid_interval_x;
+			Eigen::Vector2d du_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5 * inverse_grid_interval_y;
+			Eigen::Matrix2d Jacobian;
+			Jacobian << dv_dx(0), dv_dx(1),
+				du_dy(0), du_dy(1);
+			auto J2 = Jacobian * Jacobian;
+			auto Q = -0.5 * J2.trace();
+			auto R = Jacobian.determinant();
+			double detlaVal = std::pow(Q / 3.0, 3.0) + std::pow(R / 2.0, 2.0);
+			delta[y][x] = detlaVal;
+		}
+	}
+	return delta;
+}
+
+std::vector<std::vector<double>> ComputeLambda2Criterion(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
+{
+	std::vector<std::vector<double>> lambda2(Ydim, std::vector<double>(Xdim, 0.0));
+	const double inverse_grid_interval_x = 1.0 / SpatialGridIntervalX;
+	const double inverse_grid_interval_y = 1.0 / SpatialGridIntervalY;
+
+	for (int y = 1; y < Ydim - 1; ++y) {
+		for (int x = 1; x < Xdim - 1; ++x) {
+			Eigen::Vector2d du_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5 * inverse_grid_interval_x;
+			Eigen::Vector2d dv_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5 * inverse_grid_interval_y;
+			Eigen::Matrix2d gradient;
+			gradient << du_dx(0), du_dx(1),
+				dv_dy(0), dv_dy(1);
+
+			Eigen::Matrix2d S = 0.5 * (gradient + gradient.transpose());
+			Eigen::Matrix2d Omega = 0.5 * (gradient - gradient.transpose());
+
+			Eigen::Matrix2d S2_ADD_OMEGA2 = S * S + Omega * Omega;
+			Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> solver(S2_ADD_OMEGA2);
+			Eigen::Vector2d eigenvalues = solver.eigenvalues();
+			lambda2[y][x] = eigenvalues(1); // The second largest eigenvalue
+		}
+	}
+	return lambda2;
+}
+
+std::vector<std::vector<double>> ComputeIVD(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
+{
+	std::vector<std::vector<double>> IVD(Ydim, std::vector<double>(Xdim, 0.0));
+	const double inverse_grid_interval_x = 1.0 / SpatialGridIntervalX;
+	const double inverse_grid_interval_y = 1.0 / SpatialGridIntervalY;
+	auto curlField = ComputeCurl(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+	double averageCurl = 0.0;
+	for (const auto& row : curlField) {
+		double sumRow = 0.0;
+		for (auto val : row) {
+			sumRow += val;
+		}
+		averageCurl += sumRow;
+	}
+	averageCurl /= (Xdim - 2) * (Ydim - 2);
+
+	for (int y = 1; y < Ydim - 1; ++y) {
+		for (int x = 1; x < Xdim - 1; ++x) {
+			Eigen::Vector2d dv_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5 * inverse_grid_interval_x;
+			Eigen::Vector2d du_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5 * inverse_grid_interval_y;
+			double vorticity = dv_dx(1) - du_dy(0);
+
+			IVD[y][x] = std::abs(vorticity - averageCurl);
+		}
+	}
+	return IVD;
+}
+
+std::vector<std::vector<Eigen::Matrix2d>> ComputeNablaU(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
+{
+	std::vector<std::vector<Eigen::Matrix2d>> NablaU(Ydim, std::vector<Eigen::Matrix2d>(Xdim));
+	const double inverse_grid_interval_x = 1.0 / SpatialGridIntervalX;
+	const double inverse_grid_interval_y = 1.0 / SpatialGridIntervalY;
+
+	for (int y = 0; y < Ydim; ++y) {
+		for (int x = 0; x < Xdim; ++x) {
+			int xPlus1 = std::min(x + 1, Xdim - 1);
+			int xMinus1 = std::max(x - 1, 0);
+
+			int yPlus1 = std::min(y + 1, Ydim - 1);
+			int yMinus1 = std::max(y - 1, 0);
+
+			Eigen::Vector2d du_dx = (vecfieldData[y][xPlus1] - vecfieldData[y][xMinus1]) * 0.5 * inverse_grid_interval_x;
+			Eigen::Vector2d dv_dy = (vecfieldData[yPlus1][x] - vecfieldData[yMinus1][x]) * 0.5 * inverse_grid_interval_y;
+			Eigen::Matrix2d gradient;
+			gradient << du_dx(0), du_dx(1),
+				dv_dy(0), dv_dy(1);
+
+			NablaU[y][x] = gradient;
+		}
+	}
+
+	return NablaU;
+}
+
+std::vector<std::vector<double>> ComputeSujudiHaimes(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY)
+{
+	std::vector<std::vector<double>> sujudiHaimes(Ydim, std::vector<double>(Xdim, 0.0));
+	const double inverse_grid_interval_x = 1.0 / SpatialGridIntervalX;
+	const double inverse_grid_interval_y = 1.0 / SpatialGridIntervalY;
+
+	for (int y = 1; y < Ydim - 1; ++y) {
+		for (int x = 1; x < Xdim - 1; ++x) {
+			Eigen::Vector2d dv_dx = (vecfieldData[y][x + 1] - vecfieldData[y][x - 1]) * 0.5 * inverse_grid_interval_x;
+			Eigen::Vector2d du_dy = (vecfieldData[y + 1][x] - vecfieldData[y - 1][x]) * 0.5 * inverse_grid_interval_y;
+			Eigen::Matrix2d gradient;
+			gradient << dv_dx(0), dv_dx(1),
+				du_dy(0), du_dy(1);
+
+			auto JV = gradient * vecfieldData[y][x];
+			auto V = vecfieldData[y][x];
+			// check JV and v is paralell?
+			bool paralllel = JV.dot(V) == JV.norm() * V.norm();
+			sujudiHaimes[y][x] = paralllel ? 1.0 : 0.0;
+		}
+	}
+	return sujudiHaimes;
+}
+
+auto computeTargetCrtierion(const std::vector<std::vector<Eigen::Vector2d>>& vecfieldData, int Xdim, int Ydim, double SpatialGridIntervalX, double SpatialGridIntervalY, VORTEX_CRITERION criterionENUM)
+{
+	switch (criterionENUM) {
+	case VORTEX_CRITERION::Q_CRITERION:
+		return ComputeQCriterion(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+	case VORTEX_CRITERION::LAMBDA2_CRITERION:
+		return ComputeLambda2Criterion(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+	case VORTEX_CRITERION::IVD_CRITERION:
+		return ComputeIVD(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+	case VORTEX_CRITERION::DELTA_CRITERION:
+		return ComputeDeltaCriterion(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+	case VORTEX_CRITERION::SUJUDI_HAIMES_CRITERION:
+		return ComputeSujudiHaimes(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+	case VORTEX_CRITERION::SOBEL_EDGE_DETECTION:
+		return ComputeSobelEdge(vecfieldData, Xdim, Ydim);
+	case VORTEX_CRITERION::VELICITY_MAGINITUDE:
+		return ComputeVelocityMagniture(vecfieldData, Xdim, Ydim);
+	case VORTEX_CRITERION::CURL:
+	default:
+		return ComputeCurl(vecfieldData, Xdim, Ydim, SpatialGridIntervalX, SpatialGridIntervalY);
+
+	}
+}
+
 // Function to generate a 2D vector of random noise
 std::vector<std::vector<double>> randomNoiseTexture(int width, int height)
 {
@@ -560,10 +792,12 @@ PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KL
 			auto ivd = trilinear_interpolate(ivdFields, floatIndexX, floatIndexY, floatIndexT);
 			auto nablau = trilinear_interpolate(nablaUfields, floatIndexX, floatIndexY, floatIndexT);
 			Eigen::Vector2d pos = { px,py };
-			auto velocityMag = inputField.getVectorAnalytical(pos, time).norm();
+			auto velocity = inputField.getVectorAnalytical(pos, time);
 			auto distance = sqrt((px - startPoint.x()) * (px - startPoint.x()) + (py - startPoint.y()) * (py - startPoint.y()));
 
-			std::vector<double> pathlinePointAndInfo = { px, py, time, ivd, distance,velocityMag, nablau(0,0),nablau(0,1) ,nablau(1,1) };
+			std::vector<double> pathlinePointAndInfo = { px, py, time, ivd, distance,velocity(0),velocity(1), nablau(0,0),nablau(0,1) ,nablau(1,1) };
+
+
 			checkVectorValues(pathlinePointAndInfo);
 			clusterPathlines[k].emplace_back(pathlinePointAndInfo);
 		}
@@ -617,6 +851,22 @@ PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KL
 
 
 	return clusterPathlines;
+}
+
+Eigen::Vector2d GroupSeeding::JittorReSeeding(const Eigen::Vector2d& preSeeding, Eigen::Vector2d domainMin, Eigen::Vector2d domainMax)
+{
+	static std::random_device rd;
+	static  std::mt19937 rng(rd());
+	const auto domainRange = domainMax - domainMin;
+	//plane center vector:
+	Eigen::Vector2d Center = domainMin + 0.5 * domainRange;
+	Eigen::Vector2d  Direction = Center - preSeeding;
+	std::uniform_real_distribution<> disX(0.00001, 0.5);
+	double shift = disX(rng);
+
+	Eigen::Vector2d   seeding = preSeeding + shift * Direction;
+
+	return seeding;
 }
 
 std::vector<Eigen::Vector2d> GroupSeeding::generateSeedingsRec(double xmin, double xmax, double ymin, double ymax, int K)
@@ -704,4 +954,34 @@ std::vector<Eigen::Vector2d> GroupSeeding::GridCrossSampling(int gx, int gy, Eig
 		};
 
 	return res;
+}
+
+const SteadyVectorField2D UnSteadyVectorField2D::getVectorfieldSliceAtTime(int t) const
+{
+	SteadyVectorField2D vecfield;
+	vecfield.spatialDomainMinBoundary = spatialDomainMinBoundary;
+	vecfield.spatialDomainMaxBoundary = spatialDomainMaxBoundary;
+	vecfield.spatialGridInterval = spatialGridInterval;
+	vecfield.XdimYdim = this->XdimYdim;
+
+	if (t >= 0 && t < timeSteps) {
+		if (this->analyticalFlowfunc_ != nullptr) {
+			assert(this->tmax> this->tmin && this->timeSteps>1);
+			const auto dt = (this->tmax - this->tmin) / (double)(this->timeSteps - 1);
+			assert(dt>0.0);
+			double physical_time = dt * t + this->tmin;
+			vecfield.analyticalFlowfunc_ = [this, physical_time](const Eigen::Vector2d& pos, double use_less_time) {
+				return this->analyticalFlowfunc_(pos, physical_time);
+				};
+			vecfield.resampleFromAnalyticalExpression();
+
+		}
+		else
+			vecfield.field = field[static_cast<int>(t)];
+	}
+	else {
+		assert(false);
+	}
+
+	return vecfield;
 }

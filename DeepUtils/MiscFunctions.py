@@ -34,23 +34,19 @@ def runNameTagGenerator(config)->Tuple[str, List[str]]:
     runTags= [tagGen0,tagGen1]
     return runName,runTags
 
-def CollectWandbLogfiles(arti_code):
-    def match_file(path):    
-        return path.endswith(".py") 
-    saveFolder="./DeepUtils/models/reconstruction"
-    fileList0=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]
-    # saveFolder="./DeepUtils/models/reconstruction"
-    # saveFolder="./FlowUtils/"
-    # fileList1=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]    
-    saveFolder="./DeepUtils/models/segmentation"
-    fileList2=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if match_file(f)]    
-    fileList0.extend(fileList2)
+def CollectWandbLogfiles(config,arti_code):
+    def collectPyFilesOfAFolder(saveFolder):
+        fileList=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if f.endswith(".py") ]            
+    fileList0=[]    
+    saveFolder0=collectPyFilesOfAFolder("./DeepUtils/models/segmentation")
+    fileList0.extend(saveFolder0)
+    configFile=getattr(config,"config_yaml",None) 
     fileList0.append("train.py")
-
+    fileList0.append(configFile)
     for file in fileList0:
-        arti_code.add_file(file, name= file)
-    # for file in fileList1:
-    #     arti_code.add_file(file, name=file)
+        if os.path.isfile(file):
+            arti_code.add_file(file, name= file)
+    print("wandb arti_code are:", arti_code)
     return arti_code
 
 
@@ -142,6 +138,7 @@ def argParseAndPrepareConfig():
     args = parser.parse_args()
     cfg = EasyConfig()
     cfg.load(args.config, recursive=True)
+    cfg["config_yaml"]=args.config
     # Update config with command line arguments
     if args.epochs is not None:
         cfg['epochs'] = args.epochs
@@ -163,3 +160,5 @@ def argParseAndPrepareConfig():
         set_seed(cfg['random_seed'],force_determinsitic=True)
 
     return cfg
+
+

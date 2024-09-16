@@ -39,7 +39,8 @@ warmup_epochs:  2
 warmup_lr_init: 5.0e-5
 min_lr: 0.000005
 
-
+save_model: true
+save_freq: 30 # saving frequency for ckpt. -1 only saving the latest and the best.
 
 # scheduler: TwoStep
 # warmup_epochs: 60 
@@ -61,7 +62,7 @@ datatransforms:
   
 
 test_tasks:
-      tasks: ["TestSegmentation"] 
+      tasks: ["TestSegmentation","TestPathlineSeg"] 
 
 
 

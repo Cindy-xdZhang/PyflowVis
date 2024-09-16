@@ -23,6 +23,7 @@ def keep_path_last_n_names(path,n):
     return last_two_levels
 
 
+
 def read_binary_file(filepath, dtype=np.float32) -> np.ndarray:
     with open(filepath, 'rb') as file:
         data = np.fromfile(file, dtype=dtype)
@@ -174,10 +175,10 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
     
 
 
-    # rawBinaryPath= metaPath.replace('meta.json', '.bin')
-    # raw_Binary = read_binary_file(rawBinaryPath)
-    # fieldData = raw_Binary.reshape(time_steps, Ydim,Xdim, 2)
-    fieldData=np.zeros([1,1,1,1],dtype=np.float32)
+    rawBinaryPath= metaPath.replace('meta.json', '.bin')
+    raw_Binary = read_binary_file(rawBinaryPath)
+    fieldData = raw_Binary.reshape(time_steps, Ydim,Xdim, 2)
+    # fieldData=np.zeros([1,1,1,1],dtype=np.float32)
     # pathlineClusters= np.array(metaINFo["ClusterPathlines"],dtype=np.float32)
     
     pathlineBinarypath= metaPath.replace('meta.json', '_pathline.bin')

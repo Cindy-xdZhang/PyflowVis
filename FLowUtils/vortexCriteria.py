@@ -1,6 +1,7 @@
 from PIL import Image
 import os
 import numpy as np
+from .VectorField2d import UnsteadyVectorField2D
 
 def computeQcriterion(vecfieldData, SpatialGridIntervalX, SpatialGridIntervalY):
     """
@@ -126,6 +127,75 @@ def saveCriteriaPicture(scalarField, filename, upSample=1.0):
     image.save(filename)
 
 
+def referenceFrameReconstruct(abc,abcDot,inputfield:UnsteadyVectorField2D):
+    """
+    referenceFrameReconstruct is suffer from inputfield has limited domain size, and doesn't have analytical expression for point out side of its domain.
+    """
+    dt=inputfield.timeInterval
+    # Initial values
+    theta=0.0        
+    theta_t = [0.0]
+    angular_velocity = abc[2]  # abc is a numpy array of shape (3,)
+    angular_velocities = [angular_velocity]
+    
+
+    translation_c=np.array([0.0, 0.0])
+    translation_c_t = [np.array([0.0, 0.0])]
+    translation_cdot = np.array([abc[0], abc[1]])  # translation velocity
+    velocities = [translation_cdot]
+    translation_cdotdot = np.array([abcDot[0], abcDot[1]])  # acceleration
+    Q_tlist= [ np.array([
+            [1.0, 0],
+            [0, 1.0]
+        ])]
+    # Integrate rotation and translation
+    for i in range(1, inputfield.time_steps):
+        theta += dt * angular_velocity
+        theta_t.append(theta)
+        angular_velocity += dt * abcDot[2]
+        angular_velocities.append(angular_velocity)
+        Q_tlist.append( np.array([
+                    [np.cos(theta), -np.sin(theta)],
+                    [np.sin(theta), np.cos(theta)]]) )
+        translation_c += dt * translation_cdot
+        translation_c_t.append(translation_c)
+        translation_cdot += dt * translation_cdotdot
+        velocities.append(translation_cdot)
+
+    #reconstruct:
+    reconstructField=UnsteadyVectorField2D(16,16,5,[-2,-2],[2,2],tmin=0,tmax=0.7853981633974483)
+    reconstructField.field=np.zeros([5,16,16, 2],dtype=np.float32)
+    
+    for t in range(0, inputfield.time_steps):
+        # Rotation matrix Q_t based on theta
+        theta=theta_t[t]
+        Q_t = Q_tlist[t]
+        Q_t_transpose = Q_t.T
+        angular_velocity=angular_velocities[t]
+        # Compute spin tensor (anti-symmetric matrix of angular velocity)
+        spin_tensor = np.array([
+            [0.0, angular_velocity],
+            [-angular_velocity, 0.0]
+        ])
+        # Compute Q_dot
+        Q_dot = np.dot(Q_t, spin_tensor)
+        # Translation velocity at this time step
+        translation_velocity = velocities[t]
+        for y in range(0, inputfield.Ydim):
+            for x in range(0, inputfield.Xdim):
+                pos_x=np.array([inputfield.domainMinBoundary[0]+x*inputfield.gridInterval[0],inputfield.domainMinBoundary[1]+y*inputfield.gridInterval[1]])
+                # Transformed position xStar
+                x_star = np.dot(Q_t, pos_x) + translation_c_t[t]
+                # Get the analytical vector from the input field at xStar and time t
+                #x_star is physical coordinate, need convert to floating indices
+                x_star_floatIndex_x=float(x_star[0]-inputfield.domainMinBoundary[0])/inputfield.gridInterval[0]
+                x_star_floatIndex_y=float(x_star[1]-inputfield.domainMinBoundary[1])/inputfield.gridInterval[1]
+                v_star_xstar = inputfield.getBilinearInterpolateVector(x_star_floatIndex_x,x_star_floatIndex_y,t)
+
+                # Compute the velocity at the original position
+                v_at_pos = np.dot(Q_t_transpose, (v_star_xstar - np.dot(Q_dot, pos_x) - translation_velocity))
+                reconstructField.field[t][y][x]=v_at_pos
+    return reconstructField
 
 
 if __name__ == '__main__':

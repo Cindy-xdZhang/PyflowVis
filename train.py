@@ -172,8 +172,6 @@ def train_pipeline():
         cfg["gitInfo"]=get_git_commit_id()
         run_Name,runTags=runNameTagGenerator(cfg)
         cfg['run_name']=run_Name
-
-        print_args(cfg)
         logging.info(f"run name: {run_Name}, run tags: {runTags}")
 
         model = build_model_from_cfg(cfg.model)
@@ -218,19 +216,19 @@ def train_pipeline():
                         tags=runTags,
                         config=cfg)
             arti_code=wandb.Artifact("code", type="code")
-            arti_code=CollectWandbLogfiles(arti_code)
+            arti_code=CollectWandbLogfiles(config=cfg,arti_code=arti_code)
             wandb.log_artifact(arti_code) 
-
+        print_args(cfg)
+        
         # Training
         best_val_loss=train_model(model, train_loader, val_loader, optimizer,scheduler,cfg)
         #final test 
-        avgtest_loss,mintest_error,maxtest_error=test_model(model,cfg)
+        test_result:dict=test_model(model,cfg)
 
-        if cfg['wandb']:
+        if cfg['wandb'] and  isinstance(test_result,dict):            
             wandb.summary.update({"best_val_loss": best_val_loss})
-            wandb.summary.update({"avg_test_loss": avgtest_loss})
-            wandb.summary.update({"min_test_error": mintest_error})
-            wandb.summary.update({"max_test_error": maxtest_error})
+            for key, value in test_result.items():
+                wandb.summary.update({key: value})
             wandb.finish()
 
     except Exception as e:
@@ -244,19 +242,10 @@ def train_pipeline():
 
 
 
-def test_pipeline():
-    model_path="models/bs_512_ep_100_lr_0.0005_20240826_152302_seed_00041698924902/best_checkpoint.pth.tar"
-    cfg=argParseAndPrepareConfig()
-    model = build_model_from_cfg(cfg.model)
-    
-    checkpoint=torch.load(model_path)
-    model.load_state_dict(checkpoint['state_dict'])
-    model.to(cfg['device'])
-    test_model(model,cfg)
-  
 
 
 
 
 if __name__ == '__main__':
     train_pipeline()
+    

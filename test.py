@@ -1,196 +1,16 @@
 import torch,random
-import logging
-from DeepUtils.dataset import build_dataloader_from_cfg
 import numpy as np
+import os
+from DeepUtils.dataset import build_dataloader_from_cfg
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 from DeepUtils.dataset import UnsteadyVastisDataset
-import os
 from PIL import Image
 from FLowUtils.vortexCriteria import *
-
-
-class TestLoss(object):
-    """ TestLoss is the default test task.  """
-    def __init__(self, device,**kwargs):
-          self.device=device
-
-    def __call__(self, model,test_data_loader):
-        device=self.device
-        test_loss = 0
-        test_loss_records=[]
-        model.to(device)
-        for batch_idx, (data, label) in enumerate(test_data_loader):
-            data,label = data.to(device), label.to(device)
-            predictition= model(data)                
-            loss=model.get_loss(predictition,label)
-            test_loss += loss.item()
-            test_loss_records.append(loss.item())
-        test_loss /= len(test_data_loader)
-        min_loss,max_loss=min(test_loss_records),max(test_loss_records)
-        logging.info(f'Avg test loss: {test_loss}, min test loss: {min_loss}, max test loss: {max_loss}')
-        return (test_loss,min_loss,max_loss) 
-    
-class TestRandomSamples(object):
-    """ TestRandomSamples random pick n samples and print the prediction and label"""
-    def __init__(self, device,samples=20,**kwargs):
-          self.device=device
-          self.samples=samples
-
-    def __call__(self, model,test_data_loader):
-        device=self.device
-        #random select  samples to visualize
-        for i in range(self.samples):
-            sample=random.randint(0,len(test_data_loader.dataset)-1)
-            vectorFieldImage, labelVortex=test_data_loader.dataset[sample]
-            vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
-            predictition= model(vectorFieldImage)
-            predictition=predictition[0].cpu().numpy()
-            logging.info(f"testSample{sample}_predict  {predictition}, vs label { labelVortex}")
-
-class TestClassification(object):
-    """ TestClassification  is the default test task for classification tasks """
-    def __init__(self, device,**kwargs):
-          self.device=device
-
-    def __call__(self, model,test_data_loader):
-        device=self.device
-        test_loss = 0
-        test_loss_records=[]
-        correct=0
-        model.to(device)
-        for batch_idx, (data, label) in enumerate(test_data_loader):
-            data,label = data.to(device), label.to(device)
-            predictition= model(data)                
-            loss=model.get_loss(predictition,label)
-            test_loss += loss.item()
-            test_loss_records.append(loss.item())
-            predicted_classes = torch.argmax(predictition, dim=1)
-            true_classes = torch.argmax(label, dim=1)
-            # Compare and count the number of correct predictions
-            correct += (predicted_classes == true_classes).sum().item()
-
-        precision=float(correct)/float(len(test_data_loader.dataset)-1)
-        logging.info(f"cls correctly predicts {correct} out of {len(test_data_loader.dataset)-1}, precision={precision*100}%.")
-        test_loss /= len(test_data_loader)
-        min_loss,max_loss=min(test_loss_records),max(test_loss_records)
-        logging.info(f'Avg test loss: {test_loss}, min test loss: {min_loss}, max test loss: {max_loss}')
-        return (test_loss,min_loss,max_loss) 
-    
-def read_binary_file(filepath, dtype=np.float32) -> np.ndarray:
-    with open(filepath, 'rb') as file:
-        data = np.fromfile(file, dtype=dtype)
-        if dtype == np.float32:
-            data=data[2:]
-        elif dtype == np.float64:
-            data=data[1:]        
-    return data
-
-class TestRotatingZeroField(object):
-
-    def __init__(self, device,**kwargs):
-          self.device=device
-    def __call__(self,model,test_data_loader) -> None:                
-        from FLowUtils.LicRenderer import LicRenderingUnsteadyCpp
-        from FLowUtils.GlyphRenderer import glyphsRenderUnsteadyField
-        device=self.device
-        minV= -3.8220109939575197
-        maxV= 3.5120744705200197
-        def testOneSample(raw_data_file,correctlabel):
-            raw_Binary = read_binary_file(raw_data_file).reshape(5,16,16, 2)
-            name=raw_data_file.split("\\")[-1]
-            # UnsteadyField=  UnsteadyVectorField2D(16,16,5,[-2,-2],[2,2],np.pi * 0.25)
-            # UnsteadyField.field=raw_Binary
-            # glyphsRenderUnsteadyField(UnsteadyField,800,timeStepSKip=1,saveFolder="./testOutput",saveName=f"glyph__{name}")
-            # LicRenderingUnsteadyCpp(UnsteadyField,800,timeStepSKip=1,saveFolder="./testOutput",saveName=f"lic__{name}")
-            model.eval()
-            with torch.no_grad():
-                for step in range(5):
-                    slice_data=raw_Binary[step]
-                    fieldData = torch.tensor(slice_data).transpose(0, -1).unsqueeze(0)
-                    vectorFieldImage=(fieldData-minV)/(maxV-minV)
-                    vectorFieldImage = vectorFieldImage.to(device)
-                    predictition= model(vectorFieldImage) 
-                    predictition=predictition[0].cpu()
-                    logging.info(f"testRotatingZeroField {name} step {step}, network predicts {predictition}, vs label ={correctlabel}")
-
-        testOneSample("CppProjects\\data\\rotatingZeroField\\sample_0saddle.bin",0)
-        testOneSample("CppProjects\\data\\rotatingZeroField\\sample_6center_ccw.bin",0)
-        testOneSample("CppProjects\\data\\rotatingZeroField\\sample_1NotZeroFieldSaddlemeta.bin",0)
-        testOneSample("CppProjects\\data\\rotatingZeroField\\sample_1977center_cw.bin",1)
-        return None
-
-
-def referenceFrameReconstruct(abc,abcDot,inputfield:UnsteadyVectorField2D):
-    """
-    referenceFrameReconstruct is suffer from inputfield has limited domain size, and doesn't have analytical expression for point out side of its domain.
-    """
-    dt=inputfield.timeInterval
-    # Initial values
-    theta=0.0        
-    theta_t = [0.0]
-    angular_velocity = abc[2]  # abc is a numpy array of shape (3,)
-    angular_velocities = [angular_velocity]
-    
-
-    translation_c=np.array([0.0, 0.0])
-    translation_c_t = [np.array([0.0, 0.0])]
-    translation_cdot = np.array([abc[0], abc[1]])  # translation velocity
-    velocities = [translation_cdot]
-    translation_cdotdot = np.array([abcDot[0], abcDot[1]])  # acceleration
-    Q_tlist= [ np.array([
-            [1.0, 0],
-            [0, 1.0]
-        ])]
-    # Integrate rotation and translation
-    for i in range(1, inputfield.time_steps):
-        theta += dt * angular_velocity
-        theta_t.append(theta)
-        angular_velocity += dt * abcDot[2]
-        angular_velocities.append(angular_velocity)
-        Q_tlist.append( np.array([
-                    [np.cos(theta), -np.sin(theta)],
-                    [np.sin(theta), np.cos(theta)]]) )
-        translation_c += dt * translation_cdot
-        translation_c_t.append(translation_c)
-        translation_cdot += dt * translation_cdotdot
-        velocities.append(translation_cdot)
-
-    #reconstruct:
-
-    reconstructField=UnsteadyVectorField2D(16,16,5,[-2,-2],[2,2],tmin=0,tmax=0.7853981633974483)
-    reconstructField.field=np.zeros([5,16,16, 2],dtype=np.float32)
-    
-    for t in range(0, inputfield.time_steps):
-        # Rotation matrix Q_t based on theta
-        theta=theta_t[t]
-        Q_t = Q_tlist[t]
-        Q_t_transpose = Q_t.T
-        angular_velocity=angular_velocities[t]
-        # Compute spin tensor (anti-symmetric matrix of angular velocity)
-        spin_tensor = np.array([
-            [0.0, angular_velocity],
-            [-angular_velocity, 0.0]
-        ])
-        # Compute Q_dot
-        Q_dot = np.dot(Q_t, spin_tensor)
-        # Translation velocity at this time step
-        translation_velocity = velocities[t]
-        for y in range(0, inputfield.Ydim):
-            for x in range(0, inputfield.Xdim):
-                pos_x=np.array([inputfield.domainMinBoundary[0]+x*inputfield.gridInterval[0],inputfield.domainMinBoundary[1]+y*inputfield.gridInterval[1]])
-                # Transformed position xStar
-                x_star = np.dot(Q_t, pos_x) + translation_c_t[t]
-                # Get the analytical vector from the input field at xStar and time t
-                #x_star is physical coordinate, need convert to floating indices
-                x_star_floatIndex_x=float(x_star[0]-inputfield.domainMinBoundary[0])/inputfield.gridInterval[0]
-                x_star_floatIndex_y=float(x_star[1]-inputfield.domainMinBoundary[1])/inputfield.gridInterval[1]
-                v_star_xstar = inputfield.getBilinearInterpolateVector(x_star_floatIndex_x,x_star_floatIndex_y,t)
-
-                # Compute the velocity at the original position
-                v_at_pos = np.dot(Q_t_transpose, (v_star_xstar - np.dot(Q_dot, pos_x) - translation_velocity))
-                reconstructField.field[t][y][x]=v_at_pos
-    return reconstructField
-
+from FLowUtils.LicRenderer import *
+from DeepUtils.MiscFunctions import argParseAndPrepareConfig
+from DeepUtils.models import build_model_from_cfg
+from DeepUtils.dataset.data_utils import read_binary_file
+import datetime
 
 class TestReconstructSteadyField(object):
     def __init__(self, device, data_dir,**kwargs):
@@ -244,7 +64,10 @@ def save_segmentation_as_png(vortexsegmentationLabel, filename, upSample=1.0):
         print(f"Created directory: {folder}")
     
     # Convert the segmentation to a binary mask
-    binary_mask = np.where(vortexsegmentationLabel[..., 1] > 0.5, 255, 0).astype(np.uint8)
+    if len(vortexsegmentationLabel.shape)==3:
+        binary_mask = np.where(vortexsegmentationLabel[..., 1] > 0.5, 255, 0).astype(np.uint8)
+        
+    binary_mask = np.where(vortexsegmentationLabel > 0.5, 255, 0).astype(np.uint8)
     
     # Create an image from the binary mask
     image = Image.fromarray(binary_mask, mode='L')  # 'L' mode for (8-bit pixels, black and white)
@@ -343,6 +166,14 @@ class TestSegmentation(object):
         print(f"TP,FP,FN={TP},{FP},{FN}")
         print(f"precision, recall, F1, IoU={precision},{recall},{F1},{IoU}")
         
+        result = {
+            "precision": precision,
+            "F1": F1,
+            "IoU": IoU
+        }
+        return result
+    
+        
         # #random select  samples to visualize
         # for i in range(self.samples):
         #     sample=random.randint(0,len(test_data_loader.dataset)-1)
@@ -377,13 +208,100 @@ class TestSegmentation(object):
             # precision, recall, F1, IoU=segmentationCriteria(predictition,labelVortex)
 
 
+def pathlineSegToFieldSeg(Pathlines,PathlineSeg,Xdim,Ydim,DominMin,DominMax):
+    from scipy.spatial import cKDTree
+    L,K,C=Pathlines.shape
+    # Extract seeding points from Pathlines
+    seeding_points = Pathlines[ 0,:, :2]  # Assuming first two dimensions are x, y coordinates
+    
+    # Create a grid of points
+    x = np.linspace(DominMin[0], DominMax[0], Xdim)
+    y = np.linspace(DominMin[1], DominMax[1], Ydim)
+    grid_points = np.array(np.meshgrid(x, y)).T.reshape(-1, 2)
+    
+    # Build KD-tree for efficient nearest neighbor search
+    tree = cKDTree(seeding_points)
+    
+    # Find K nearest neighbors for each grid point
+    k = min(K,5)  # Use at most 10 nearest neighbors
+    distances, indices = tree.query(grid_points, k=k)
+
+    
+    # Compute the segmentation for each grid point
+    grid_segmentation = np.zeros((Ydim, Xdim), dtype=np.float32)
+    for i, (dist, idx) in enumerate(zip(distances, indices)):
+        weights = 1 / (dist + 1e-6)  # Add small epsilon to avoid division by zero
+        neighbor_labels = PathlineSeg[idx]
+        weighted_labels = weights * neighbor_labels
+        grid_segmentation[i // Xdim, i % Xdim] = np.sum(weighted_labels) / np.sum(weights) 
+    return grid_segmentation
+
+
 class TestPathlineSeg(object):
     def __init__(self, device,run_name,samples=10,**kwargs):
           self.device=device
           self.samples=samples
           self.runName=run_name
-          
+               
     
+    def __call__(self, model,test_data_loader) -> torch.Any:
+        device=self.device
+        # first random select  samples to visualize
+        out_folder=f"./testOutput/{self.runName}"
+        print(f"TestPathlineSeg save to {out_folder}")
+        for i in range(self.samples):
+            sample=random.randint(0,len(test_data_loader.dataset)-1)
+            data, label=test_data_loader.dataset[sample]
+            assert(isinstance(data, list) or isinstance(data, tuple) ) 
+            # Unpack the tuple
+            vectorFieldImage, pathlines = data
+            # Repack into a tuple if needed
+            data = (None, pathlines.unsqueeze(0).to(device))
+            predictition= model(data)
+            predictition=predictition[0].cpu().numpy()
+            label=label.cpu().numpy()
+            name=test_data_loader.dataset.getSampleName(sample)
+            
+            UnsteadyField=  UnsteadyVectorField2D(32,32,5,[-2,-2],[2,2],np.pi * 0.25)
+            UnsteadyField.field=vectorFieldImage.transpose(0,-1).cpu().numpy()
+            predictition_seg=pathlineSegToFieldSeg(pathlines,predictition,Xdim=32,Ydim=32,DominMin=[-2,-2],DominMax=[2,2])
+            label_seg=pathlineSegToFieldSeg(pathlines,label,Xdim=32,Ydim=32,DominMin=[-2,-2],DominMax=[2,2])
+            LicRenderingPathlineSegmentation(UnsteadyField,predictition_seg,4.0,saveFolder=out_folder,saveName=f"{name}__pred")
+            LicRenderingPathlineSegmentation(UnsteadyField,label_seg,4.0,saveFolder=out_folder,saveName=f"{name}__gt")
+                
+        #then   visualize resulst on analytical field
+        analytical_field_Folder="CppProjects/data/dbgPathline/analytical"
+        outputPathlineLength=16
+        outputPathlinesCountK=16        
+        outputPathlinesCount=int(outputPathlinesCountK//2) *int(outputPathlinesCountK//2) *5
+        pathlineFeatures=10
+        if os.path.exists(analytical_field_Folder):
+              pathline_Files = [f  for f in os.listdir(analytical_field_Folder) if f.endswith('_pathline.bin')]
+              for pathline_file in pathline_Files:
+                    name=pathline_file.replace("_pathline.bin","")
+                  
+                    pathline_file_dir= os.path.join(analytical_field_Folder,pathline_file) 
+                    pathlineClusters = read_binary_file(pathline_file_dir).reshape(outputPathlinesCount, outputPathlineLength,pathlineFeatures)
+                    raw_data_file=pathline_file_dir.replace("_pathline.bin",".bin")
+                    raw_Binary = read_binary_file(raw_data_file).reshape(5,32,32, 2)
+                    
+                    pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))[:,:,:9]#L,K,C
+                    pathlines_tensor=torch.tensor(pathlineClusters)
+                    data = (None, pathlines_tensor.unsqueeze(0).to(device))
+                    predictition= model(data)
+                    predictition=predictition[0].cpu().numpy()
+                    UnsteadyField=  UnsteadyVectorField2D(32,32,5,[-2,-2],[2,2],np.pi * 0.25)
+                    UnsteadyField.field=raw_Binary
+                    predictition_seg=pathlineSegToFieldSeg(pathlineClusters,predictition,Xdim=32,Ydim=32,DominMin=[-2,-2],DominMax=[2,2])
+                    LicRenderingPathlineSegmentation(UnsteadyField,predictition_seg,4.0,saveFolder=out_folder,saveName=f"{name}__pred")
+                    
+                    
+                    
+        
+        
+            
+
+   
       
 
 def test_model(model,cfg):
@@ -399,43 +317,50 @@ def test_model(model,cfg):
     model.eval()
     #building test tasks
     test_cfg=cfg['test_tasks']
-    test_cfg["run_name"]=cfg['run_name'] if "run_name" in cfg else "default"
+    timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    test_cfg["run_name"]=cfg['run_name'] if "run_name" in cfg else f"default/{timestamp}"
+
+    
     test_tasks=[]
     for  cfg_task_name in test_cfg['tasks']:
         task_init_fn=eval(cfg_task_name)
         kwagrs=test_cfg["kwargs"] if "kwargs" in test_cfg else {}
         t=task_init_fn(device,**test_cfg,**kwagrs)
         test_tasks.append(t)
-    #if no specified test tasks, then append the default one:    
-    if len(test_tasks)<1:
-        test_tasks.append(TestLoss(device))
-
+        
     model.eval()
     retValues={}
     with torch.no_grad():
         for t in test_tasks:
             key=str(t.__class__.__name__)
             retValues[key]=t(model,test_data_loader)
-    
-
     if "TestLoss" in retValues:
         retLoss=retValues["TestLoss"]
     elif "TestClassification" in retValues:
         retLoss=retValues["TestClassification"]
+    elif "TestSegmentation" in retValues:
+        retLoss=retValues["TestSegmentation"]
     else :
-        retLoss=(None,None,None)
+        retLoss=None
+    return retLoss
 
-    test_loss,min_loss,max_loss=retLoss
-    return test_loss,min_loss,max_loss
+    
+
+def test_pipeline(model_path=None):
+    cfg=argParseAndPrepareConfig()
+    model = build_model_from_cfg(cfg.model)
+    if model_path is not None and os.path.exists(model_path):
+        checkpoint=torch.load(model_path) 
+        model.load_state_dict(checkpoint['state_dict'])
+    
+    model.to(cfg['device'])
+    test_model(model,cfg)
+  
 
 
 
 if __name__ == '__main__':
-    from DeepUtils.MiscFunctions import argParseAndPrepareConfig
-    from DeepUtils.models import build_model_from_cfg
-    cfg=argParseAndPrepareConfig()
-    model = build_model_from_cfg(cfg.model)
-    test_model(model,cfg)
+    test_pipeline("models/bs_68_ep_120_lr_0.0001_20240915_221035_seed_326/epoch_91.pth.tar")
 
 
 

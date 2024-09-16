@@ -7,6 +7,7 @@ wandb/
 testOutput/
 slurm_logs/
 ibex_bash/dcgm
+models/
 
 CppProjects/PybindCppModules/__pycache__/
 CppProjects/PybindCppModules/Pyds/__pycache__/

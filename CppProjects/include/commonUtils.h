@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <fstream>
 #include <iostream>
+#include <chrono>
 #include <cereal/types/tuple.hpp>
 #include <cereal/cereal.hpp>
 #include "stb/stb_image.h"
@@ -175,5 +176,9 @@ inline std::string trimNumString(const std::string& numString)
 	str.erase(str.find_last_not_of('.') + 1, std::string::npos);
 	return str;
 }
+
+
+std::string GetTimeStamp();
+
 
 #endif

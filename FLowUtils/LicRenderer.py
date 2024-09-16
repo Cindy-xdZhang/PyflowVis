@@ -138,6 +138,55 @@ def LicRenderingSteadyCpp(vecfield: SteadyVectorField2D,licImageSize:int,saveFol
         os.makedirs(saveFolder)
     savePath=os.path.join(saveFolder,save_name)
     img.save(savePath)
+    return img
+
+
+
+@typechecked
+def LicRenderingPathlineSegmentation(vecfield: UnsteadyVectorField2D, SegmentationImage, upsampling: float = 2.0, saveFolder: str = "./", saveName: str = "vector_field_lic", stepSize = 0.01, MaxIntegrationSteps = 128):
+    """
+    Render a LIC image with pathline segmentation overlay.
+    """
+    # Convert segmentation image to numpy array
+    segmentation_array = np.array(SegmentationImage)
+    
+    # Create colored segmentation image
+    segmentation_colored = np.zeros((*segmentation_array.shape, 3), dtype=np.uint8)
+    segmentation_colored[segmentation_array >= 0.6] = [255, 255, 0]  # Yellow for class 1
+    
+    # Apply upsampling if needed
+    if upsampling != 1.0:
+        new_size = (int(segmentation_array.shape[0] * upsampling), int(segmentation_array.shape[1]* upsampling))
+        segmentation_colored = Image.fromarray(segmentation_colored).resize(new_size, Image.NEAREST)
+        segmentation_colored = np.array(segmentation_colored)
+    else:
+        new_size = SegmentationImage.size
+
+    # Generate LIC image
+    assert cppMoudules['CppLicRenderingModule'].licRenderingPybindCPP is not None
+    steadyVectorField2D = vecfield.getSlice(0)
+    lic_result = cppMoudules['CppLicRenderingModule'].licRenderingPybindCPP(
+        steadyVectorField2D.field, vecfield.Xdim, vecfield.Ydim,
+        vecfield.domainMinBoundary[0], vecfield.domainMaxBoundary[0],
+        vecfield.domainMinBoundary[1], vecfield.domainMaxBoundary[1],
+        new_size[0], stepSize, MaxIntegrationSteps
+    )
+    
+    # Normalize and convert LIC result to RGB
+    lic_normalized = np.clip(lic_result, 0, np.max(lic_result))  # Clip negative values to 0
+    # Step 4: Convert to an image and save
+    lic_color_img = (lic_normalized * 255).astype(np.uint8)  # Convert to 8-bit grayscale
+
+    # Blend LIC image with segmentation
+    blended_image = np.clip(lic_color_img * 0.5 + segmentation_colored * 0.5, 0, 255).astype(np.uint8)
+
+    # Save images
+    os.makedirs(saveFolder, exist_ok=True)
+    
+    blended_image = Image.fromarray(blended_image, mode='RGB')
+    blended_save_path = os.path.join(saveFolder, f"{saveName}.png")
+    blended_image.save(blended_save_path)
+    return blended_image
 
 
 @typechecked
@@ -152,6 +201,7 @@ def LicRenderingUnsteadyCpp(vecfield:UnsteadyVectorField2D,licImageSize:int,time
         steadyVectorField2D = vecfield.getSlice(i)
         save_name=f"{saveName}_{i}"
         LicRenderingSteadyCpp(steadyVectorField2D ,licImageSize, saveFolder=saveFolder,saveName =save_name,stepSize=stepSize,MaxIntegrationSteps=MaxIntegrationSteps)
+    
     
 @typechecked        
 def LicGlyphMixRenderingSteady(vecfield: SteadyVectorField2D,licImageSize:int,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128,ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v)):

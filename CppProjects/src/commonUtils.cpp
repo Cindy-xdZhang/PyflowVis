@@ -45,6 +45,17 @@ double matrix2angle(const Eigen::Matrix2d& rotationMat)
 	return theta;
 }
 
+std::string GetTimeStamp()
+{
+	const char* fmt = { "%A %c %EY" };
+	const auto time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+	std::stringstream ss;
+	std::string date;
+	ss << std::put_time(std::localtime(&time), fmt);
+	date = ss.str();
+	return date;
+}
+
 std::vector<std::vector<double>> loadSinglechanelPngFile(const std::string& filename, int& width, int& height)
 {
 	int n;

@@ -26,11 +26,12 @@ std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTy(0.0, 1.2
 namespace {
 	constexpr int Xdim = 32, Ydim = 32;
 	constexpr double tmin = 0.0;
-	constexpr double tmax = M_PI * 0.25;
+	constexpr double tmax = M_PI * 0.25;//determine dt of observer, thus influence accuracy of observer transformation.
 	constexpr int unsteadyFieldTimeStep = 5;//dt of vector field = (pi*0.25)/(5-1)=pi/16
-	constexpr int outputPathlineLength = 16;//dt of vector field = (pi*0.25)/(9-1)=pi/32
+	constexpr int outputPathlineLength = 16;//dt of vector field = (pi*0.25)/(9-1)=pi/32, influence accuray of pathline pde.
 	constexpr int outputPathlinesCountK = 16;//this parameter is K, make sure K is even number then output K^2 path lines.
 	constexpr int outputPathlinesPerCluster = 5;//this parameter is K, make sure K is even number then output K^2 path lines.
+	//constexpr int disturbNoiseMagnitude = 0.0025;//0.25% noise add to vector field' s analytical expression, then the path line can have noise
 
 	//since we compute vasitas steady field and transformation, path lines all in analytical way, this domainMinBoundary,domainMaxBoundary is control how many things is happening inside the data.
 	Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
@@ -615,8 +616,8 @@ namespace DBG_TEST {
 
 		// add segmentation visualization for lic
 		std::vector<std::pair<VORTEX_CRITERION, std::string>> enumCriterion = {
-			{ VORTEX_CRITERION::Q_CRITERION, "Q_CRITERION" },
 			{ VORTEX_CRITERION::CURL, "CURL" },
+			{ VORTEX_CRITERION::Q_CRITERION, "Q_CRITERION" },
 			{ VORTEX_CRITERION::IVD_CRITERION, "IVD_CRITERION" },
 			{ VORTEX_CRITERION::LAMBDA2_CRITERION, "LAMBDA2_CRITERION" },
 			{ VORTEX_CRITERION::DELTA_CRITERION, "DELTA_CRITERION" },
@@ -1093,6 +1094,8 @@ void DataSetGenBase::GenDataset(int Nparamters, int samplePerParameters, int obs
 		// save min and max
 		archive_o(cereal::make_nvp("minV", this->minV));
 		archive_o(cereal::make_nvp("maxV", this->maxV));
+		auto DataSetTimeStamp = GetTimeStamp();
+		archive_o(CEREAL_NVP(DataSetTimeStamp));
 	}
 
 
@@ -1374,7 +1377,7 @@ void UnsteadyPathlneDataSetGenerator::DeSerialize(const std::string& dest_folder
 void UnsteadyPathlneDataSetGenerator::analyticalTestCasesGeneration(const std::string& dst_folder) {
 	//analytical test field.
 	Eigen::Vector2i grid_size(Xdim, Ydim);
-	int time_steps = 32;
+	int time_steps = 5;
 
 	//taking global field paramters.
 	AnalyticalFlowCreator flowCreator(grid_size, time_steps, domainMinBoundary, domainMaxBoundary, tmin, tmax);
@@ -1420,6 +1423,8 @@ void UnsteadyPathlneDataSetGenerator::analyticalTestCasesGeneration(const std::s
 		archive_o(CEREAL_NVP(domainMaxBoundary));
 		archive_o(CEREAL_NVP(tmin));
 		archive_o(CEREAL_NVP(tmax));
+		archive_o(CEREAL_NVP(outputPathlineLength));
+		archive_o(CEREAL_NVP(outputPathlinesCountK));
 	}
 	// do not manually close file before creal deconstructor, as cereal will preprend a ]/} to finish json class/array
 	jsonOut.close();
