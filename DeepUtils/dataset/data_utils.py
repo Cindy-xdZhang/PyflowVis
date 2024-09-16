@@ -148,7 +148,7 @@ def getSegmentationofPathlines(pathlineClusters,si):
     return vortexsegmentationLabel
 
     
-def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineLength,PathlineCount):
+def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineLength,PathlineCount,mode="train"):
     #get meta information
     # metaINFo=read_json_file(metaPath)
     # n,rc,si=metaINFo['rc_n_si']["value0"],metaINFo['rc_n_si']["value1"],metaINFo['rc_n_si']["value2"]
@@ -173,18 +173,19 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
     #     vortexsegmentationLabel[:, :, 0] = 1 - vortexsegLabel
     #     vortexsegmentationLabel[:, :, 1] = vortexsegLabel
     
-
-
-    rawBinaryPath= metaPath.replace('meta.json', '.bin')
-    raw_Binary = read_binary_file(rawBinaryPath)
-    fieldData = raw_Binary.reshape(time_steps, Ydim,Xdim, 2)
-    # fieldData=np.zeros([1,1,1,1],dtype=np.float32)
+    fieldData=None
+    if mode=="test":#during test, we need data for visualization, for train and validation, only pathline are need
+        rawBinaryPath= metaPath.replace('meta.json', '.bin')
+        raw_Binary = read_binary_file(rawBinaryPath)
+        fieldData = raw_Binary.reshape(time_steps, Ydim,Xdim, 2)
+    else:
+        fieldData=np.zeros([1,1,1,1],dtype=np.float32)
     # pathlineClusters= np.array(metaINFo["ClusterPathlines"],dtype=np.float32)
     
     pathlineBinarypath= metaPath.replace('meta.json', '_pathline.bin')
     pathlineClusters=read_binary_file(pathlineBinarypath)
     assert(pathlineClusters.shape[0]==PathlineLength*PathlineCount*9) 
-    pathlineClusters=pathlineClusters.reshape(PathlineCount,PathlineLength,9)
+    pathlineClusters=pathlineClusters.reshape(PathlineCount,PathlineLength,10)
     
     vortexsegmentationLabel=getSegmentationofPathlines(pathlineClusters,si)
     

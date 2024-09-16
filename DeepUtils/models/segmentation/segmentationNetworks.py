@@ -436,7 +436,6 @@ class PointTransformerLayerv2(nn.Module):
         self.linear_q = nn.Linear(dim, dim, bias=False)
         self.linear_k = nn.Linear(dim, dim, bias=False)
         self.linear_v = nn.Linear(dim, dim, bias=False)
-        self.dropout_1 = nn.Dropout(dropout)
     
         self.linear_out = nn.Linear(dim, dim)
 
@@ -446,7 +445,6 @@ class PointTransformerLayerv2(nn.Module):
         # Get the features and positions of k-neighbors
         knn_feat = self.get_graph_feature(x, knn_idx)  # (B, N, k, C)
         knn_pos = self.get_graph_feature(pos,knn_idx)  # (B, N, k, 3)
-        knn_feat=self.dropout_1(knn_feat) 
      
         pos_enc = self.pos_mlp(knn_pos - pos.unsqueeze(2))  # (B, N, k, C)
 

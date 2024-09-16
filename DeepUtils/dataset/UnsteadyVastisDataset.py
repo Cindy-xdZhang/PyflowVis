@@ -57,7 +57,7 @@ class UnsteadyVastisPathlineSeg(VastisDataset):
         oneFolderLabel=[None]*len(metaFiles)
         for idx,metaFile in enumerate(metaFiles) :
             metaPath=os.path.join(sub_folder,metaFile)
-            data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,PathlineLength=PathlineLength,PathlineCount=PathlineCount) 
+            data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,PathlineLength=PathlineLength,PathlineCount=PathlineCount,mode=self.split) 
             fieldData,pathlineData=data
             fieldData=torch.tensor(fieldData).transpose(0, -1)
             pathlineData=torch.tensor(pathlineData)
