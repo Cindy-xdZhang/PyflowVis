@@ -1,19 +1,16 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #SBATCH -N 1
 #SBATCH --array=0
 #SBATCH -J seg
-#SBATCH --nodes=1 #Number of Nodes desired e.g 1 node
-#SBATCH --time=2:05:00
-#SBATCH -e slurm_logs/%x.%3a.%A.err
 #SBATCH -o slurm_logs/%x.%3a.%A.out
+#SBATCH -e slurm_logs/%x.%3a.%A.err
 
-
+#SBATCH --time=20:00:00
 #SBATCH --nodes=1
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=6
-##SBATCH --gres=gpu:v100:1
-##SBATCH --mem=36G
-
+#SBATCH  --constraint=[a100]
+##SBATCH --mem=30G
 
 
 
