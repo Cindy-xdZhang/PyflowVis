@@ -1,16 +1,17 @@
 import torch,random
 import numpy as np
 import os
+import datetime
 from DeepUtils.dataset import build_dataloader_from_cfg
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 from DeepUtils.dataset import UnsteadyVastisDataset
 from PIL import Image
 from FLowUtils.vortexCriteria import *
 from FLowUtils.LicRenderer import *
-from DeepUtils.MiscFunctions import argParseAndPrepareConfig
+from DeepUtils.MiscFunctions import argParseAndPrepareConfig,readDataSetRelatedConfig
 from DeepUtils.models import build_model_from_cfg
 from DeepUtils.dataset.data_utils import read_binary_file
-import datetime
+
 
 class TestReconstructSteadyField(object):
     def __init__(self, device, data_dir,**kwargs):
@@ -126,10 +127,10 @@ def segmentationCriteria(pred, gt):
 
 class TestSegmentation(object):
     """ TestSegmentation  is the default test task for Segmentation tasks """
-    def __init__(self, device,run_name,samples=10,**kwargs):
+    def __init__(self, device,config,samples=10,**kwargs):
           self.device=device
           self.samples=samples
-          self.runName=run_name
+          self.runName=config["run_name"]
 
 
     def __call__(self, model,test_data_loader):
@@ -238,10 +239,11 @@ def pathlineSegToFieldSeg(Pathlines,PathlineSeg,Xdim,Ydim,DominMin,DominMax):
 
 
 class TestPathlineSeg(object):
-    def __init__(self, device,run_name,samples=10,**kwargs):
+    def __init__(self, device, config,samples=10, **kwargs):
           self.device=device
           self.samples=samples
-          self.runName=run_name
+          self.runName=config["run_name"]
+          self.data_dir=config["dataset"]["data_dir"]
                
     
     def __call__(self, model,test_data_loader) -> torch.Any:
@@ -270,7 +272,7 @@ class TestPathlineSeg(object):
             LicRenderingPathlineSegmentation(UnsteadyField,label_seg,4.0,saveFolder=out_folder,saveName=f"{name}__gt")
                 
         #then   visualize resulst on analytical field
-        analytical_field_Folder="CppProjects/data/dbgPathline/analytical"
+        analytical_field_Folder= os.path.join( self.data_dir,"analytical")
         outputPathlineLength=16
         outputPathlinesCountK=16        
         outputPathlinesCount=int(outputPathlinesCountK//2) *int(outputPathlinesCountK//2) *5
@@ -317,15 +319,14 @@ def test_model(model,cfg):
     model.eval()
     #building test tasks
     test_cfg=cfg['test_tasks']
+    kwagrs=test_cfg["kwargs"] if "kwargs" in test_cfg else {}
     timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    test_cfg["run_name"]=cfg['run_name'] if "run_name" in cfg else f"default/{timestamp}"
-
+    cfg['run_name']=getattr(cfg,'run_name',f"default/{timestamp}")
     
     test_tasks=[]
     for  cfg_task_name in test_cfg['tasks']:
         task_init_fn=eval(cfg_task_name)
-        kwagrs=test_cfg["kwargs"] if "kwargs" in test_cfg else {}
-        t=task_init_fn(device,**test_cfg,**kwagrs)
+        t=task_init_fn(device=device,config=cfg,**kwagrs)
         test_tasks.append(t)
         
     model.eval()
@@ -333,6 +334,7 @@ def test_model(model,cfg):
     with torch.no_grad():
         for t in test_tasks:
             key=str(t.__class__.__name__)
+            print(f"run test task: [{key}]")
             retValues[key]=t(model,test_data_loader)
     if "TestLoss" in retValues:
         retLoss=retValues["TestLoss"]
@@ -348,6 +350,7 @@ def test_model(model,cfg):
 
 def test_pipeline(model_path=None):
     cfg=argParseAndPrepareConfig()
+    readDataSetRelatedConfig(cfg)
     model = build_model_from_cfg(cfg.model)
     if model_path is not None and os.path.exists(model_path):
         checkpoint=torch.load(model_path) 
@@ -360,7 +363,7 @@ def test_pipeline(model_path=None):
 
 
 if __name__ == '__main__':
-    test_pipeline("models/bs_68_ep_120_lr_0.0001_20240915_221035_seed_326/epoch_91.pth.tar")
+    test_pipeline("models\\bs_64_ep_120_lr_0.0001_20240916_233923_seed_206\\epoch_31.pth.tar")
 
 
 

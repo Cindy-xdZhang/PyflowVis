@@ -2,14 +2,16 @@
 model:
   NAME: BaseSeg
   encoder_args:
-    NAME: PointTransformer
+    NAME: PointNNTransformer
+    in_channels: 10
+    dmodel: 320 #becasue of pos_embedding,   dmodel must be multiple of in_channels, if not the code will adjust itself.
+    num_encoder_layers: 6
     KpathlinePerGroup: 5
-    in_channels: 10        #if in_channels not specify then it take value from dataset.PathlineFeature (function readDataSetRelatedConfig)
-    # PathlineGroups: 64     ##PathlineGroups  is write by function readDataSetRelatedConfig
-    dmodel: 144 #becasue of pos_embedding,   dmodel must be multiple of 3, if not the code will adjust itself.
-    num_encoder_layers: 3
+    PathlineGroups: 64
     dropout: 0.5
-
+    # DataSizeX: 32
+    # DataSizeY: 32
+    # TimeSteps: 5
   criterion_args:
     NAME: BCELoss
    
@@ -19,10 +21,10 @@ model:
 # ---------------------------------------------------------------------------- #
 # Training parameters
 # random_seed: 4259
-# wandb: True 
-batch_size: 4
-lr: 0.0001
-epochs: 1
+wandb: True 
+batch_size: 24
+lr: 0.00014
+epochs: 120
 val_freq: 5
 # scheduler: TwoStep
 # warmup_epochs: 80 
@@ -33,7 +35,7 @@ optimizer:
 
 # scheduler
 scheduler: cosine
-warmup_epochs:  2
+warmup_epochs:  4
 warmup_lr_init: 5.0e-5
 min_lr: 0.000005
 
@@ -48,8 +50,8 @@ dataloader:
   num_workers: 0
 dataset:
   NAME: UnsteadyVastisPathlineSeg
-  data_dir: 'CppProjects/data/dbgPathline5/X32_Y32_T5'
-  # data_dir: '/ibex/user/zhanx0o/data/dbgPathline5/X32_Y32_T5'
+  # data_dir: 'CppProjects/data/dbgPathline/X32_Y32_T5'
+  data_dir: '/ibex/user/zhanx0o/data/dbgPathline5/X32_Y32_T5'
 
 #add WhiteNoise will boost vortex_unet 's performance
 datatransforms:
@@ -61,7 +63,7 @@ datatransforms:
   
 
 test_tasks:
-      tasks: ["TestSegmentation","TestPathlineSeg"] 
+      tasks: ["TestSegmentation"] 
 
 
 

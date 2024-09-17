@@ -148,7 +148,7 @@ def getSegmentationofPathlines(pathlineClusters,si):
     return vortexsegmentationLabel
 
     
-def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineLength,PathlineCount,mode="train"):
+def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineLength,PathlineCount,PathlineFeature,mode="train"):
     #get meta information
     # metaINFo=read_json_file(metaPath)
     # n,rc,si=metaINFo['rc_n_si']["value0"],metaINFo['rc_n_si']["value1"],metaINFo['rc_n_si']["value2"]
@@ -184,7 +184,7 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
     
     pathlineBinarypath= metaPath.replace('meta.json', '_pathline.bin')
     pathlineClusters=read_binary_file(pathlineBinarypath)
-    pathlineClusters=pathlineClusters.reshape(PathlineCount,PathlineLength,10)
+    pathlineClusters=pathlineClusters.reshape(PathlineCount,PathlineLength,PathlineFeature)
     
     vortexsegmentationLabel=getSegmentationofPathlines(pathlineClusters,si)
     

@@ -7,7 +7,7 @@ import logging,random,wandb
 
 from DeepUtils.models import build_model_from_cfg
 from DeepUtils.optim import build_optimizer_from_cfg
-from DeepUtils.dataset import build_dataloader_from_cfg,getDatasetRootaMeta
+from DeepUtils.dataset import build_dataloader_from_cfg
 from DeepUtils.scheduler import build_scheduler_from_cfg
 from test import test_model
 
@@ -164,6 +164,13 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
     return best_val_loss
 
 
+
+        
+        
+        
+    
+
+
 def train_pipeline():
     print("torch.cuda.is_available():",torch.cuda.is_available())  # Should return True
     print("torch.version.cuda:",torch.version.cuda)         # Should print the CUDA version PyTorch was built with
@@ -173,21 +180,14 @@ def train_pipeline():
         run_Name,runTags=runNameTagGenerator(cfg)
         cfg['run_name']=run_Name
         logging.info(f"run name: {run_Name}, run tags: {runTags}")
-
+        #get dataset realted config paramters,like PathlineGroupsCount, minV,maxV, etc.
+        readDataSetRelatedConfig(cfg)
         model = build_model_from_cfg(cfg.model)
         model.to(cfg['device'])
-        # build dataset        
-        rootInfo=getDatasetRootaMeta(cfg.dataset['data_dir'])
+    
         # if "unsteadyFieldTimeStep" not in rootInfo:            
         #     torchsummary.summary(model, (2, rootInfo["Xdim"], rootInfo["Ydim"]))
         # else:
-        #     torchsummary.summary(model, (2, rootInfo["Xdim"], rootInfo["Ydim"],rootInfo["unsteadyFieldTimeStep"]))
-
-        if isinstance(cfg.datatransforms['kwargs'], dict):   
-            cfg.datatransforms['kwargs'].update(rootInfo) 
-        else: 
-            cfg.datatransforms['kwargs']= rootInfo
-
         train_loader = build_dataloader_from_cfg(cfg.batch_size,
                                                 cfg.dataset,
                                                 cfg.dataloader,

@@ -8,6 +8,8 @@ from .data_utils import *
 from .SteadyVastisDataset import VastisDataset
 from .transforms.basic_transform import PathlineJittorCubic
 
+import logging
+
 @DATASETS.register_module()
 class UnsteadyVastisDataset(VastisDataset):
     def __init__(self, data_dir,split, transform,**kwargs):
@@ -54,14 +56,17 @@ class UnsteadyVastisPathlineSeg(VastisDataset):
         PathlineLength=16
         PathlineFeature=10
         if "outputPathlineLength" not in self.dastasetMetaInfo:
-            print("outputPathlineLength not in self.dastasetMetaInfo,assume 16" )
+            logging.warning("outputPathlineLength not in self.dastasetMetaInfo,assume 16" )
         else:
             PathlineLength=self.dastasetMetaInfo["outputPathlineLength"]
         if "outputPathlinesCountK" not in self.dastasetMetaInfo:
-            print("outputPathlinesCountK not in self.dastasetMetaInfo,assume 16" )
+            logging.warning("outputPathlinesCountK not in self.dastasetMetaInfo,assume 16" )
         else:
             PathlineCountK= self.dastasetMetaInfo["outputPathlinesCountK"]
-
+        if "PathlineFeature" not in self.dastasetMetaInfo:
+            logging.warning("PathlineFeature not in self.dastasetMetaInfo,assume 10" )
+        else:
+            PathlineFeature= self.dastasetMetaInfo["PathlineFeature"]
 
         PathlineCount=int(PathlineCountK/2)*int(PathlineCountK/2)*5
         oneFolderData=[None]*len(metaFiles)
@@ -69,7 +74,7 @@ class UnsteadyVastisPathlineSeg(VastisDataset):
 
         for idx,metaFile in enumerate(metaFiles) :
             metaPath=os.path.join(sub_folder,metaFile)
-            data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,PathlineLength=PathlineLength,PathlineCount=PathlineCount,mode=self.split) 
+            data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,PathlineLength=PathlineLength,PathlineCount=PathlineCount,PathlineFeature=PathlineFeature,mode=self.split) 
             fieldData,pathlineData=data
             fieldData=torch.tensor(fieldData).transpose(0, -1)
             pathlineData=torch.tensor(pathlineData)

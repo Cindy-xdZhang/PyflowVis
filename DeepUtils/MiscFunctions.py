@@ -8,6 +8,8 @@ import numpy as np
 import random
 from .utils import EasyConfig
 from typing import List, Tuple
+from .dataset.SteadyVastisDataset import getDatasetRootaMeta
+
 def print_args(args, printer=print):
     printer("==========       args      =============")
     for arg, content in args.items():
@@ -50,7 +52,30 @@ def CollectWandbLogfiles(config,arti_code):
             arti_code.add_file(file, name= file)
     return arti_code
 
-
+def readDataSetRelatedConfig(cfg):
+    # some config paramters  need to rewrite by dataset meta file 
+    rootInfo=getDatasetRootaMeta(cfg.dataset['data_dir'])
+    if isinstance(cfg.datatransforms['kwargs'], dict):   
+        cfg.datatransforms['kwargs'].update(rootInfo) 
+    else: 
+        cfg.datatransforms['kwargs']= rootInfo
+    PathlineCountK=16
+    PathlineFeature=10
+    if "outputPathlinesCountK" not in rootInfo:
+        logging.warning("outputPathlinesCountK not in self.dastasetMetaInfo,assume 16" )
+    else:
+        PathlineCountK= rootInfo["outputPathlinesCountK"]
+    if "PathlineFeature" not in rootInfo:
+        logging.warning("PathlineFeature not in self.dastasetMetaInfo,assume 10" )
+    else:
+        PathlineFeature= rootInfo["PathlineFeature"]
+        
+    PathlineGroupsCount=int(PathlineCountK/2)*int(PathlineCountK/2)
+    cfg["model"]["encoder_args"]["PathlineGroups"]=PathlineGroupsCount
+    if "in_channels" not in cfg["model"]["encoder_args"]:
+        cfg["model"]["encoder_args"]["in_channels"]=PathlineFeature
+    
+        
 def load_config(path):
     with open(path, 'r') as file:
         args = yaml.safe_load(file)

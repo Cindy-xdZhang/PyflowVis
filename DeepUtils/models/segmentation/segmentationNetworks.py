@@ -383,37 +383,38 @@ class PathlineTransformerWithCNNVecField(nn.Module):
         x=F.softmax(x,dim=-1)         
         return x
 
-def PathlineSamplingLayer(pathline_src,keepGroups,linesPerGroup=4,temporal_sampling_range:list=[0.9,1.0]):
-        B, L_Full_length, K, C = pathline_src.shape
-        total_groups = K // linesPerGroup
-        
-        # L = torch.randint(int(temporal_sampling_range[0]*L_Full_length), int(temporal_sampling_range[1]*L_Full_length), (1,)).item()
-        # Randomly downsample back to L steps 
-        # allL_indices=torch.randperm(L_Full_length)[:L]
-        # temporal_indices=torch.sort(allL_indices)[0]
-        # temporal_indices[0]=0
-        # temporal_sampled_pathline = pathline_src[:,temporal_indices,:,:]
-        temporal_sampled_pathline=pathline_src
-        temporal_indices=None
-        # # Randomly  select first `keep_K` indices indices to keep
-        # indices = torch.randperm(K)[:keepKlines]  
-        # sampled_pathline=temporal_sampled_pathline[:, :, indices, :]
-        
-        # Randomly permute groups
-        group_indices = torch.randperm(total_groups)[:keepGroups]
-        # Create a mask for the selected groups
-        mask = torch.zeros(K, dtype=torch.bool)
-        for idx in group_indices:
-            start = idx * linesPerGroup
-            end = start + linesPerGroup
-            mask[start:end] = True
 
-        # Apply temporal and group sampling
-        sampled_pathline = temporal_sampled_pathline[:, :, mask, :]
-        
-        return sampled_pathline,temporal_indices,mask
+def PathlineTemporalSamplingLayer(in_pathline_src,temporal_sampling_ratio=0.5):
+    B, L_Full_length, K, C = in_pathline_src.shape
+    L = int(0.5*L_Full_length)
+    # Randomly downsample back to L steps 
+    allL_indices=torch.randperm(L_Full_length)[:L]
+    temporal_indices=torch.sort(allL_indices)[0]
+    temporal_indices[0]=0
+    temporal_sampled_pathline = in_pathline_src[:,temporal_indices,:,:]
+    return temporal_sampled_pathline,temporal_indices
     
+    
+def PathlineSpatialSamplingLayer(in_pathline_src,keepGroups,linesPerGroup=5):
+    B, L_Full_length, K, C = in_pathline_src.shape
+    total_groups = K // linesPerGroup
+    # keepGroups=int(keepGroups_ratio*total_groups)
+    
+    # Randomly permute groups
+    group_indices = torch.randperm(total_groups)[:keepGroups]
+    # Create a mask for the selected groups
+    mask = torch.zeros(K, dtype=torch.bool)
+    for idx in group_indices:
+        start = idx * linesPerGroup
+        end = start + linesPerGroup
+        mask[start:end] = True
 
+    # Apply temporal and group sampling
+    sampled_pathline = in_pathline_src[:, :, mask, :]
+    
+    return sampled_pathline,mask
+    
+    
 
 class PointTransformerLayerv2(nn.Module):
     def __init__(self, dim, dropout=0.1,k=16):
@@ -469,6 +470,7 @@ class PointTransformerLayerv2(nn.Module):
         x = x.contiguous().view(batch_size * num_points, -1)[idx, :]
         x = x.view(batch_size, num_points, k, num_dims)
         return x
+    
 # PosE for Raw-point Embedding 
 class PosE_Initial(nn.Module):
     def __init__(self, in_dim, out_dim, alpha=100, beta=1000):
@@ -505,10 +507,11 @@ class PointTransformer(nn.Module):
         self.pathlinePerGroup=KpathlinePerGroup
         
         self.keep_Groups = int(0.5* PathlineGroups)
-        if  self.keep_Groups % 4 != 0:
-            self.keep_Groups= (self.keep_Groups //4) * 4         
+        if  self.keep_Groups % 2 != 0:
+            self.keep_Groups= (self.keep_Groups //2) * 2         
         # self.keep_Groups = PathlineGroups    
-        self.embedding = PosE_Initial(in_channels, dmodel)#dmodel must be mutiple of inchannels.
+        self.raw_pos_embedding = PosE_Initial(3, dmodel//2)#dmodel must be mutiple of inchannels.
+        self.feature_embedding = nn.Linear(7, dmodel//2)
         
         self.transformer_layers = nn.ModuleList([
             PointTransformerLayerv2(dmodel,dropout) for _ in range(num_encoder_layers)
@@ -516,17 +519,23 @@ class PointTransformer(nn.Module):
         self.feature_propagation = nn.Linear(dmodel, dmodel)
         self.norm = nn.LayerNorm(dmodel)
         self.fc = nn.Linear(dmodel,  num_classes)
+        
+  
+        
         self.output=nn.Sigmoid()
         # self.vector_field_feature_exct=ReferenceFrameCNN(2,32,32,5, self.dim ,dropout=dropout)
 
         
     def forward(self, data):
-        vector_field,pathline_src=data
+        _,pathline_src=data
         
-        sampled_pathline,temporal_indices,pathline_mask=PathlineSamplingLayer(pathline_src, self.keep_Groups,self.pathlinePerGroup)
+        tmp_sampled_pathline,temporal_indices=PathlineTemporalSamplingLayer(pathline_src)
+        sampled_pathline,pathline_mask=PathlineSpatialSamplingLayer(tmp_sampled_pathline,self.keep_Groups,self.pathlinePerGroup)
         B, L, sampleK, C =sampled_pathline.shape
+        
    
-        points=sampled_pathline.reshape(B,L*sampleK,C)      
+        points=sampled_pathline.reshape(B,L*sampleK,C)   
+           
         # points: (B, N, 3+C)
         pos = points[:, :, :3]
         # Find k nearest neighbors
@@ -535,16 +544,24 @@ class PointTransformer(nn.Module):
         pairwise_distance = -xx - inner - xx.transpose(2, 1)
         knn_idx = pairwise_distance.topk(k=self.knn_k, dim=-1)[1]  # (B, N, k)
         
-        x = self.embedding(points)
+        pos_emb = self.raw_pos_embedding(pos)
+        feature= self.feature_embedding(points[:, :, 3:])
+        x=torch.concat((pos_emb,feature),dim=-1)
+        
+        
         for layer in self.transformer_layers:
             x = x + layer(x, pos,knn_idx)
 
         x = self.norm(x)
         x=x.reshape(B,L,sampleK,self.dim)
+        
         #x shape [B,K,Dimodel]
-        x = x.mean(dim=1)
+        # global  pool
+        x = x.mean(dim=1)+x.max(dim=1)[0]
+        
         # return  self.output(self.fc(x))
         full_features = self.propagate_features(pathline_src[:,0,:,:], sampled_pathline[:,0,:,:], x,pathline_mask)
+     
         # Apply final layers to get output for all pathlines
         full_output = self.output(self.fc(full_features)).squeeze(-1)
         return full_output
