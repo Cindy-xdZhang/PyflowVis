@@ -9,8 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <chrono>
-#include <cereal/types/tuple.hpp>
-#include <cereal/cereal.hpp>
+
 #include "stb/stb_image.h"
 #include "VectorFieldCompute.h"
 void saveAsPNG(const std::vector<std::vector<Eigen::Vector3d>>& data, const std::string& filename);
@@ -19,6 +18,9 @@ void ConvertImage2Text(const std::string& infilename, const std::string& outFile
 Color mapValueToColor(double value);
 double matrix2angle(const Eigen::Matrix2d& rotationMat);
 
+#ifdef _CEREAL_TOOLS_
+#include <cereal/types/tuple.hpp>
+#include <cereal/cereal.hpp>
 namespace cereal {
 
 	// Specialization for saving as array
@@ -52,6 +54,8 @@ auto cerealBinaryOut(T data, const std::string& dest)
 	archive_Binary(data);
 	outBin.close();
 }
+
+#endif
 
 
 // Function to flatten a 2D vector to a 1D vector

@@ -3,7 +3,7 @@ import sys
 import importlib
 import re
 import datetime
-
+import platform
 
 def renamingPydFiles(pyds_path):
     for file in os.listdir(pyds_path):
@@ -39,29 +39,29 @@ def rebuildPyBindLibs(module_root_path,libFile, libRelatedFileList):
             break
 
 def initPyBindLibs(ExcludingList=[]):
-    # Add the pyds folder to the module search path
+    current_platform = platform.system()
+    if current_platform == 'Windows':
+        platform_subfolder = "win32_64"
+    elif current_platform == 'Linux':
+        platform_subfolder = "linux"
+    else:
+        raise Exception(f"Unsupported platform: {current_platform}")
 
     pyds_path =os.path.dirname(__file__)
-    module_root_path = os.path.dirname(pyds_path)
-    # libBinary=os.path.join(pyds_path, "example.pyd")
-    # libFiles=[ "example.cpp"]
-    # libFiles=[  os.path.join(module_root_path, file) for file in libFiles]
-    # rebuildPyBindLibs(module_root_path,libBinary,libFiles)
-    renamingPydFiles(pyds_path)
-    sys.path.append(pyds_path)
+    module_root_path=os.path.join(pyds_path,platform_subfolder)
+    sys.path.append(module_root_path)
     # Create a dictionary to store the imported modules
     modules = {}
-    print()
     # Iterate over all .pyd files in the pyds folder
-    for file in os.listdir(pyds_path):
-        if file.endswith('.pyd'):
+    for file in os.listdir(module_root_path):
+        if file.endswith('.pyd') or  file.endswith('.so') :
             # Get the module name (without the extension)
             module_name = os.path.splitext(file)[0]
             if module_name in ExcludingList:
                 continue
             # Dynamically import the module
             module = importlib.import_module(module_name)
-            print(f"Loaded module '{module_name}' --version {module.__version__}")
+            print(f"Loaded module '{module_name}' from {module_root_path}, version: {module.__version__}")
             
             # Store the module in the dictionary with the module name as the key
             modules[module_name] = module

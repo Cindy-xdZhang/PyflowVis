@@ -5,6 +5,7 @@ import os,math
 from PIL import Image
 from .GlyphRenderer import glyphsRenderSteadyFieldAlgorthim
 from .interpolation import bilinear_interpolate
+from .Pyds.CppPlugins import cppMoudules      
 
 def LICAlgorithm(texture:np.ndarray, vecfield: SteadyVectorField2D, resultImageSizeX, resultImageSizeY,stepSize:float, MaxIntegrationSteps:int):
     """
@@ -117,7 +118,7 @@ def LicRenderingUnsteady(field:UnsteadyVectorField2D,licImageSize:int,timeStepSK
 
 
 
-from .Pyds.CppPlugins import cppMoudules        
+  
 @typechecked
 def LicRenderingSteadyCpp(vecfield: SteadyVectorField2D,licImageSize:int,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
     """
