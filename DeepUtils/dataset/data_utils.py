@@ -156,22 +156,6 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
         si=0.0
     else:
         si=1.0
-    # txy=np.array([metaINFo['txy']["value0"],metaINFo['txy']["value1"]]  )  
-    # theta,sx,sy=metaINFo['deform_theta_sx_sy']["value0"],metaINFo['deform_theta_sx_sy']["value1"],metaINFo['deform_theta_sx_sy']["value2"]
-    # deformMatA=np.array([
-    #                 [sx*np.cos(theta), -sy*np.sin(theta)],
-    #                 [sx*np.sin(theta), sy*np.cos(theta)]])
-    # InvA= np.linalg.inv(deformMatA)
-    
-    # vortexsegmentationLabel = np.zeros((Ydim, Xdim,2),dtype=np.float32)
-    # if "saddle" in metaPath:
-    #     vortexsegmentationLabel[:, :, 0] = 1.0
-    # else:
-    #     # vortexsegLabel=np.array(metaINFo["segmentation"]) 
-    #     segmentationBinarypath= metaPath.replace('meta.json', '_segmentation.bin')
-    #     vortexsegLabel=read_binary_file(segmentationBinarypath).reshape(Ydim,Xdim)
-    #     vortexsegmentationLabel[:, :, 0] = 1 - vortexsegLabel
-    #     vortexsegmentationLabel[:, :, 1] = vortexsegLabel
     
     fieldData=None
     if mode=="test":#during test, we need data for visualization, for train and validation, only pathline are need
@@ -191,8 +175,10 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
     # Permute pathline clusters first and second axis
 
     pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))
-    #normalize time
-    # pathlineClusters[:,:,2]=pathlineClusters[:,:,2]/(0.25*np.pi)    
+    #In spatical, the range is [-2,2] generate 8 cross, seed poistion distance is sampleGrid_dx / 3.0, that is 4*0.8/((8-1)*3)=0.15237
+    #normalize time then time is range (0,1), we will need to compute distance (for knn query),
+    #then the range of time will influence distance in space and distance in time, and dt is 1/15=0.06666666 vs. not normalize : pi/(4*15)=0.0523598
+    pathlineClusters[:,:,2]=pathlineClusters[:,:,2]/(0.25*np.pi)     
     
     
     return (fieldData,pathlineClusters),vortexsegmentationLabel
