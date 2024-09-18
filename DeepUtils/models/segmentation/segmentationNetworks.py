@@ -388,9 +388,11 @@ def PathlineTemporalSamplingLayer(in_pathline_src,temporal_sampling_ratio=0.5):
     B, L_Full_length, K, C = in_pathline_src.shape
     L = int(0.5*L_Full_length)
     # Randomly downsample back to L steps 
-    allL_indices=torch.randperm(L_Full_length)[:L]
-    temporal_indices=torch.sort(allL_indices)[0]
-    temporal_indices[0]=0
+    # allL_indices=torch.randperm(L_Full_length)[:L]
+    # temporal_indices=torch.sort(allL_indices)[0]
+    # temporal_indices[0]=0
+    # temporal_indices[-1]=L_Full_length-1
+    temporal_indices = torch.arange(0, L_Full_length, step=2)[:L]
     temporal_sampled_pathline = in_pathline_src[:,temporal_indices,:,:]
     return temporal_sampled_pathline,temporal_indices
     
@@ -399,9 +401,10 @@ def PathlineSpatialSamplingLayer(in_pathline_src,keepGroups,linesPerGroup=5):
     B, L_Full_length, K, C = in_pathline_src.shape
     total_groups = K // linesPerGroup
     # keepGroups=int(keepGroups_ratio*total_groups)
-    
     # Randomly permute groups
-    group_indices = torch.randperm(total_groups)[:keepGroups]
+    # group_indices = torch.randperm(total_groups)[:keepGroups]
+    group_indices = torch.arange(0, total_groups, step=2)[:keepGroups]
+    
     # Create a mask for the selected groups
     mask = torch.zeros(K, dtype=torch.bool)
     for idx in group_indices:
@@ -532,7 +535,6 @@ class PointTransformer(nn.Module):
         tmp_sampled_pathline,temporal_indices=PathlineTemporalSamplingLayer(pathline_src)
         sampled_pathline,pathline_mask=PathlineSpatialSamplingLayer(tmp_sampled_pathline,self.keep_Groups,self.pathlinePerGroup)
         B, L, sampleK, C =sampled_pathline.shape
-        
    
         points=sampled_pathline.reshape(B,L*sampleK,C)   
            

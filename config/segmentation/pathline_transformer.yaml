@@ -7,9 +7,9 @@ model:
     KpathlinePerGroup: 5
     in_channels: 10        #if in_channels not specify then it take value from dataset.PathlineFeature (function readDataSetRelatedConfig)
     # PathlineGroups: 64     ##PathlineGroups  is write by function readDataSetRelatedConfig
-    dmodel: 192 #becasue of pos_embedding,   dmodel must be multiple of 3, if not the code will adjust itself.
-    num_encoder_layers: 4
-    # dropout: 0.5
+    dmodel: 288 #becasue of pos_embedding,   dmodel must be multiple of 3*2=6, [if not the code will adjust itself.]
+    num_encoder_layers: 6
+
 
   criterion_args:
     NAME: BCELoss
@@ -22,7 +22,7 @@ model:
 # random_seed: 4259
 
 wandb: True 
-batch_size: 84
+batch_size: 64
 lr: 0.0001
 epochs: 180
 
@@ -36,7 +36,7 @@ optimizer:
 
 # scheduler
 scheduler: cosine
-warmup_epochs:  4
+warmup_epochs:  2
 warmup_lr_init: 5.0e-5
 min_lr: 0.000005
 
