@@ -239,7 +239,7 @@ def pathlineSegToFieldSeg(Pathlines,PathlineSeg,Xdim,Ydim,DominMin,DominMax):
 
 
 class TestPathlineSeg(object):
-    def __init__(self, device, config,samples=10, **kwargs):
+    def __init__(self, device, config,samples=30, **kwargs):
           self.device=device
           self.samples=samples
           self.runName=config["run_name"]
@@ -272,7 +272,7 @@ class TestPathlineSeg(object):
             LicRenderingPathlineSegmentation(UnsteadyField,label_seg,4.0,saveFolder=out_folder,saveName=f"{name}__gt")
                 
         #then   visualize resulst on analytical field
-        analytical_field_Folder= os.path.join( self.data_dir,"analytical")
+        analytical_field_Folder= os.path.join(os.path.dirname(self.data_dir),"analytical")
         outputPathlineLength=16
         outputPathlinesCountK=16        
         outputPathlinesCount=int(outputPathlinesCountK//2) *int(outputPathlinesCountK//2) *5
@@ -287,7 +287,7 @@ class TestPathlineSeg(object):
                     raw_data_file=pathline_file_dir.replace("_pathline.bin",".bin")
                     raw_Binary = read_binary_file(raw_data_file).reshape(5,32,32, 2)
                     
-                    pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))[:,:,:9]#L,K,C
+                    pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))[:,:,:pathlineFeatures]#L,K,C
                     pathlines_tensor=torch.tensor(pathlineClusters)
                     data = (None, pathlines_tensor.unsqueeze(0).to(device))
                     predictition= model(data)
@@ -296,6 +296,8 @@ class TestPathlineSeg(object):
                     UnsteadyField.field=raw_Binary
                     predictition_seg=pathlineSegToFieldSeg(pathlineClusters,predictition,Xdim=32,Ydim=32,DominMin=[-2,-2],DominMax=[2,2])
                     LicRenderingPathlineSegmentation(UnsteadyField,predictition_seg,4.0,saveFolder=out_folder,saveName=f"{name}__pred")
+        else:
+            print(f"{analytical_field_Folder} doesnt exist.") 
                     
                     
                     
@@ -363,7 +365,7 @@ def test_pipeline(model_path=None):
 
 
 if __name__ == '__main__':
-    test_pipeline("models\\bs_64_ep_120_lr_0.0001_20240916_233923_seed_206\\epoch_31.pth.tar")
+    test_pipeline("outputModels\\bs_24_ep_120_lr_0.00014_20240917_085552_seed_4013\\best_checkpoint.pth.tar")
 
 
 
