@@ -9,6 +9,7 @@ slurm_logs/
 ibex_bash/dcgm
 dcgm/
 /outputModels/
+backUPFiles/
 
 CppProjects/PybindCppModules/__pycache__/
 CppProjects/PybindCppModules/Pyds/__pycache__/

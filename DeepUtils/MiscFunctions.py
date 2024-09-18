@@ -9,6 +9,7 @@ import random
 from .utils import EasyConfig
 from typing import List, Tuple
 from .dataset.SteadyVastisDataset import getDatasetRootaMeta
+import shutil
 
 def print_args(args, printer=print):
     printer("==========       args      =============")
@@ -36,21 +37,41 @@ def runNameTagGenerator(config)->Tuple[str, List[str]]:
     runTags= [tagGen0,tagGen1]
     return runName,runTags
 
-def CollectWandbLogfiles(config,arti_code):
-    def collectPyFilesOfAFolder(saveFolder):
-        fileList=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if f.endswith(".py") and "__init__" not in f ]            
-        return fileList
-    fileList0=[]    
-    saveFolder0=collectPyFilesOfAFolder("./DeepUtils/models/segmentation")
-    fileList0.extend(saveFolder0)
-    configFile=getattr(config,"config_yaml",None) 
-    fileList0.append("train.py")
-    fileList0.append(configFile)
-    print("wandb arti_code are:", fileList0)
-    for file in fileList0:
-        if os.path.isfile(file):
-            arti_code.add_file(file, name= file)
-    return arti_code
+def collectPyFilesOfAFolder(saveFolder):
+    fileList=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if f.endswith(".py") and "__init__" not in f ]            
+    return fileList
+
+def CollectFiles4Backup(config,arti_code):
+    if "run_name" in  config:
+        run_name=getattr(config,"run_name")         
+        fileList=[]    
+        saveFolder0=collectPyFilesOfAFolder("./DeepUtils/models/segmentation")
+        fileList.extend(saveFolder0)
+        configFile=getattr(config,"config_yaml",None) 
+        fileList.append("train.py")
+        fileList.append(configFile)
+        #copy file to backup folder 
+        backup_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "./backUPFiles/")
+        backup_folder= os.path.join(backup_folder,run_name)
+        
+        print(f"backup Files {fileList} to:{backup_folder}.." )
+        # Create backup folder if it doesn't exist
+        if not os.path.exists(backup_folder):
+            os.makedirs(backup_folder)
+
+        # Copy the collected files to the backup folder
+        for file in fileList:
+            if file and os.path.exists(file):
+                shutil.copy(file, backup_folder)
+                print(f"Copied {file} to {backup_folder}")
+                
+        if config["wandb"]:
+            for file in fileList:
+                if os.path.isfile(file):
+                    arti_code.add_file(file, name= file)      
+        return arti_code
+    
+    return None
 
 def readDataSetRelatedConfig(cfg):
     # some config paramters  need to rewrite by dataset meta file 

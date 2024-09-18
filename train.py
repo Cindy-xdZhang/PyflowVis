@@ -216,7 +216,7 @@ def train_pipeline():
                         tags=runTags,
                         config=cfg)
             arti_code=wandb.Artifact("code", type="code")
-            arti_code=CollectWandbLogfiles(config=cfg,arti_code=arti_code)
+            arti_code=CollectFiles4Backup(config=cfg,arti_code=arti_code)
             wandb.log_artifact(arti_code) 
         print_args(cfg)
         
