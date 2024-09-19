@@ -382,4 +382,3 @@ class PathlineTransformerWithCNNVecField(nn.Module):
         x=self.ln1(output).reshape(B,2)
         x=F.softmax(x,dim=-1)         
         return x
-
