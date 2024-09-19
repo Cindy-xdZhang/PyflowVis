@@ -2,8 +2,7 @@
 model:
   NAME: BaseSeg
   encoder_args:
-    NAME: PointTransformer
-
+    NAME: PathlineTransformerV0
     KpathlinePerGroup: 5
     in_channels: 10        #if in_channels not specify then it take value from dataset.PathlineFeature (function readDataSetRelatedConfig)
     # PathlineGroups: 64     ##PathlineGroups  is write by function readDataSetRelatedConfig
