@@ -11,31 +11,34 @@
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
+#include"ParalleLICrendering.h"
 
 #include <magic_enum/magic_enum.hpp>
 
 #define RENDERING_LIC_SAVE_DATA
 #define VALIDATE_RECONSTRUCTION_RESULT
 using namespace std;
+#define MY_PI 3.14159265358979323846
 // normal distribution from supplementary material of Vortex Boundary Identification Paper
-std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTheta(0.0, 0.50);
-std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genSx(0.0, 3.59);
-std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genSy(0.0, 2.24);
-std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTx(0.0, 1.34);
-std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTy(0.0, 1.27);
+std::uniform_real_distribution<double> UnsteadyPathlneDataSetGenerator::genTheta(-1.0 * MY_PI, MY_PI);//std::cos/sin take rad.
+std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genSx(0.0, 3.59 * 0.25);
+std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genSy(0.0, 2.24 * 0.25);
+std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTx(0.0, 1.34 * 0.25);
+std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTy(0.0, 1.27 * 0.25);
+
 namespace {
 	constexpr int Xdim = 32, Ydim = 32;
 	constexpr double tmin = 0.0;
-	constexpr double tmax = M_PI * 0.25;//determine dt of observer, thus influence accuracy of observer transformation.
+	constexpr double tmax = 1.0;//determine dt of observer, thus influence accuracy of observer transformation.
 	constexpr int unsteadyFieldTimeStep = 5;//dt of vector field = (pi*0.25)/(5-1)=pi/16
 	constexpr int outputPathlineLength = 16;//dt of vector field = (pi*0.25)/(9-1)=pi/32, influence accuray of pathline pde.
 	constexpr int outputPathlinesCountK = 16;//this parameter is K, make sure K is even number then output K^2 path lines.
 	constexpr int outputPathlinesPerCluster = 5;//this parameter is K, make sure K is even number then output K^2 path lines.
-	//constexpr int disturbNoiseMagnitude = 0.0025;//0.25% noise add to vector field' s analytical expression, then the path line can have noise
+	// constexpr int disturbNoiseMagnitude = 0.001;//0.1% noise add to vector field' s analytical expression, then the path line can have noise
 
 	//since we compute vasitas steady field and transformation, path lines all in analytical way, this domainMinBoundary,domainMaxBoundary is control how many things is happening inside the data.
-	Eigen::Vector2d domainMinBoundary = { -2.0, -2.0 };
-	Eigen::Vector2d domainMaxBoundary = { 2.0, 2.0 };
+	Eigen::Vector2d domainMinBoundary = { -1.0, -1.0 };
+	Eigen::Vector2d domainMaxBoundary = { 1.0, 1.0 };
 
 	// lic parameters
 	constexpr int LicImageSize = 128;
@@ -70,10 +73,10 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> generateRandomABCVectors()
 	std::random_device rd;
 	std::mt19937 gen(rd());
 	// range of velocity and acc is -0.3-0.3, -0.01-0.01(from paper "robust reference frame...")
-	std::uniform_real_distribution<double> dist(-0.3, 0.3);
-	std::uniform_real_distribution<double> dist_acc(-0.005, 0.005); // robust paper in domain [-2,2] acc is range [-0.01,0.01], our domain is [0,2] thus multiply 0.5 of acc range
-	std::uniform_int_distribution<int> dist_int(0, 7);
-	// Generate two random Eigen::Vector3d
+	static std::uniform_real_distribution<double> dist(-0.3, 0.3);
+	static std::uniform_real_distribution<double> dist_acc(-0.01, 0.01); // robust paper in domain [-1,1] acc is range [-0.01,0.01]
+
+	static std::uniform_int_distribution<int> dist_int(0, 7);
 	auto option = dist_int(gen);
 	if (option == 0) {
 		Eigen::Vector3d vec1(dist(gen), dist(gen), dist(gen));
@@ -891,7 +894,7 @@ namespace REPRODUCE {
 		// std::normal_distribution<double> genSy(0, 2.24);
 		// std::normal_distribution<double> genTx(0.0, 1.34);
 		// std::normal_distribution<double> genTy(0.0, 1.27);
-		// std::uniform_int_distribution<int> dist_int(0, 2);
+
 		double minMagintude = INFINITY;
 		double maxMagintude = -INFINITY;
 

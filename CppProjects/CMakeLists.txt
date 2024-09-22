@@ -25,6 +25,8 @@ src/flowGenerator.cpp
 src/flowGenerator.h
 src/commonUtils.cpp
 src/main.cpp
+src/ParalleLICrendering.cpp
+src/ParalleLICrendering.h
 )
 
 add_executable(FlowGenerator ${sources})

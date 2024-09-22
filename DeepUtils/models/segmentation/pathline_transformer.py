@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from ..build import MODELS
 from torch import nn
 from .samplingLayers import *
-
+from ..layers import KANLinear
 
 class KNNPathlineTransformerLayer(nn.Module):
     def __init__(self, dim,k=16):
@@ -13,7 +13,7 @@ class KNNPathlineTransformerLayer(nn.Module):
         self.dim = dim
 
         self.pos_mlp = nn.Sequential(
-            nn.Linear(3, dim),
+            KANLinear(3, dim),
             nn.ReLU(),
             nn.Linear(dim, dim)
         )
@@ -28,7 +28,7 @@ class KNNPathlineTransformerLayer(nn.Module):
         self.linear_k = nn.Linear(dim, dim, bias=False)
         self.linear_v = nn.Linear(dim, dim, bias=False)
     
-        self.linear_out = nn.Linear(dim, dim)
+        self.linear_out =nn.Linear(dim, dim)
 
     def forward(self, x, pos, knn_idx):
         # x: (B, N, C), pos: (B, N, 3)
@@ -44,6 +44,7 @@ class KNNPathlineTransformerLayer(nn.Module):
         v = self.linear_v(knn_feat)  # (B, N, k, C)
 
         energy = q - k + pos_enc  # (B, N, k, C)
+        v=v+pos_enc
         attn = self.attn_mlp(energy)
         attn = F.softmax(attn, dim=-2)  # (B, N, k, C)
 
@@ -108,7 +109,7 @@ class PathlineTransformerV0(nn.Module):
         ])
         self.feature_propagation = nn.Linear(dmodel, dmodel)
         self.norm = nn.LayerNorm(dmodel)
-        self.fc = nn.Linear(dmodel,  num_classes)
+        self.fc = KANLinear(dmodel,  num_classes)
         
         self.output=nn.Sigmoid()
         # self.vector_field_feature_exct=ReferenceFrameCNN(2,32,32,5, self.dim ,dropout=dropout)

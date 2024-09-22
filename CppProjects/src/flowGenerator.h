@@ -5,6 +5,7 @@
 #include <string>
 #include <random>
 #include <vector>
+#define  _CEREAL_TOOLS_
 #include "commonUtils.h"
 #include "VastistasVelocityGenerator.h"
 
@@ -56,7 +57,7 @@ public:
 	// generateUnsteadyFieldPathlineMix will have mixture steady field that has multiple(2-4) vortex & rotating zero field& static field deformed by zero (identity observer)
 	void generateMixUnsteadyFieldPathline(const std::string& dest_folder, int Samples, int ObserversPerSample);
 
-	static std::normal_distribution<double> genTheta; // rotation angle's distribution
+	static std::uniform_real_distribution<double> genTheta; // rotation angle's distribution
 	static std::normal_distribution<double> genSx;
 	static std::normal_distribution<double> genSy;
 	static std::normal_distribution<double> genTx;

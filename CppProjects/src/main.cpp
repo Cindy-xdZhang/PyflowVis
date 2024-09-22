@@ -11,9 +11,9 @@ int main()
 	const std::string DataRootFolder="/ibex/user/zhanx0o/data/";
 
 	auto generator = UnsteadyPathlneDataSetGenerator();
-	generator.GenDataset(85, 20, 30, DataRootFolder+"dbgPathline5/");
-	generator.classicalParametersDeserialization(DataRootFolder+"dbgPathline5/DesSerialize/");
-	generator.analyticalTestCasesGeneration( DataRootFolder+"/dbgPathline/");
+	generator.GenDataset(85, 20, 30, DataRootFolder+"dbgPathline6/");
+	generator.classicalParametersDeserialization(DataRootFolder+"dbgPathline6/DesSerialize/");
+	generator.analyticalTestCasesGeneration( DataRootFolder+"/dbgPathline6/");
 
 	//generator.generateMixUnsteadyFieldPathline("../data/dbgPathline/", 10, 10);
 	//// generateUnsteadyFieldPathline(5, 1, 1, "../data/Pathline/", "train");

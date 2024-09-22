@@ -5,7 +5,7 @@
 #SBATCH -o slurm_logs/%x.%3a.%A.out
 #SBATCH -e slurm_logs/%x.%3a.%A.err
 
-#SBATCH --time=20:00:00
+#SBATCH --time=36:00:00
 #SBATCH --nodes=1
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=6

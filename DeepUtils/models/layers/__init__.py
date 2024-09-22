@@ -7,3 +7,4 @@ from .mlp import Mlp,  ConvMlp
 from .conv import *
 from .knn import knn_point, KNN, DilatedKNN
 from .attention import TransformerEncoder
+from .kan import *
