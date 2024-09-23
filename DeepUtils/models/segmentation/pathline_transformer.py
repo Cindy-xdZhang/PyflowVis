@@ -13,7 +13,7 @@ class KNNPathlineTransformerLayer(nn.Module):
         self.dim = dim
 
         self.pos_mlp = nn.Sequential(
-            KANLinear(3, dim),
+            nn.Linear(3, dim),
             nn.ReLU(),
             nn.Linear(dim, dim)
         )
@@ -102,14 +102,14 @@ class PathlineTransformerV0(nn.Module):
             self.keep_Groups= (self.keep_Groups //2) * 2         
         # self.keep_Groups = PathlineGroups    
         self.raw_pos_embedding = PosE_Initial(3, dmodel//2)#dmodel must be mutiple of inchannels.
-        self.feature_embedding = nn.Linear(7, dmodel//2)
+        self.feature_embedding = nn.Linear(in_channels-3, dmodel//2)
         
         self.transformer_layers = nn.ModuleList([
             KNNPathlineTransformerLayer(dmodel) for _ in range(num_encoder_layers)
         ])
         self.feature_propagation = nn.Linear(dmodel, dmodel)
         self.norm = nn.LayerNorm(dmodel)
-        self.fc = KANLinear(dmodel,  num_classes)
+        self.fc = nn.Linear(dmodel,  num_classes)
         
         self.output=nn.Sigmoid()
         # self.vector_field_feature_exct=ReferenceFrameCNN(2,32,32,5, self.dim ,dropout=dropout)

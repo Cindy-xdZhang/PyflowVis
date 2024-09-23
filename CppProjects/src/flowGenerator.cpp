@@ -34,6 +34,8 @@ namespace {
 	constexpr int outputPathlineLength = 16;//dt of vector field = (pi*0.25)/(9-1)=pi/32, influence accuray of pathline pde.
 	constexpr int outputPathlinesCountK = 16;//this parameter is K, make sure K is even number then output K^2 path lines.
 	constexpr int outputPathlinesPerCluster = 5;//this parameter is K, make sure K is even number then output K^2 path lines.
+
+	int PathlineFeature=-1;//this value will be auto computed during datagenerator.
 	// constexpr int disturbNoiseMagnitude = 0.001;//0.1% noise add to vector field' s analytical expression, then the path line can have noise
 
 	//since we compute vasitas steady field and transformation, path lines all in analytical way, this domainMinBoundary,domainMaxBoundary is control how many things is happening inside the data.
@@ -1093,7 +1095,7 @@ void DataSetGenBase::GenDataset(int Nparamters, int samplePerParameters, int obs
 		archive_o(CEREAL_NVP(tmax));
 		archive_o(CEREAL_NVP(outputPathlineLength));
 		archive_o(CEREAL_NVP(outputPathlinesCountK));
-
+		archive_o(CEREAL_NVP(PathlineFeature));
 		// save min and max
 		archive_o(cereal::make_nvp("minV", this->minV));
 		archive_o(cereal::make_nvp("maxV", this->maxV));
@@ -1225,6 +1227,7 @@ void UnsteadyPathlneDataSetGenerator::GenOneSplit(int Nparamters, int samplePerN
 
 				// the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
 				std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, deformMat, rc_n_si, txy, outputPathlineLength, samplingMethod);
+			 	PathlineFeature= ClusterPathlines[0][0].size();
 
 				// visualize segmentation & pick random k path lines to vis
 				if (taskSampleId % LICImageRenderFrequency == 0)

@@ -1,5 +1,6 @@
 #include"ParalleLICrendering.h"
 #include <execution>
+#include <ctime>
 //  #define DISABLE_CPP_PARALLELISM
 //   define execute policy
 namespace {

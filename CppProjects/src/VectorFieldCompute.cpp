@@ -757,7 +757,7 @@ PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KL
 			auto velocity = inputField.getVectorAnalytical(pos, time);
 			auto distance = sqrt((px - startPoint.x()) * (px - startPoint.x()) + (py - startPoint.y()) * (py - startPoint.y()));
 
-			std::vector<double> pathlinePointAndInfo = { px, py, time, ivd, distance,velocity(0),velocity(1), nablau(0,0),nablau(0,1) ,nablau(1,1) };
+			std::vector<double> pathlinePointAndInfo = { px, py, time, ivd, distance,velocity(0),velocity(1) /*,nablau(0,0),nablau(0,1) ,nablau(1,1)*/ };
 
 
 			checkVectorValues(pathlinePointAndInfo);
@@ -778,8 +778,9 @@ PathlineIntegrationInfoCollect2D(const UnSteadyVectorField2D& inputField, int KL
 		return 0.0;
 		};
 	constexpr double paddingValue = -1000.0;
-	constexpr double paddingValue_Time = -1000 * 3.1415926;
-	std::vector PadValue = { paddingValue , paddingValue , paddingValue_Time , paddingValue , paddingValue , paddingValue , paddingValue ,paddingValue, paddingValue };
+	// constexpr double paddingValue_Time = -1000 * 3.1415926;
+	constexpr double paddingValue_Time = paddingValue;
+	std::vector PadValue = { paddingValue , paddingValue , paddingValue_Time , paddingValue , paddingValue , paddingValue , paddingValue };
 	for (auto& pathline : clusterPathlines) {
 		Eigen::Vector2d start_pos = { pathline.at(0).at(0), pathline.at(0).at(1) };
 		// the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
@@ -902,6 +903,13 @@ std::vector<Eigen::Vector2d> GroupSeeding::GridCrossSampling(int gx, int gy, Eig
 	const double sampleGrid_dx = SamplingDomainRange.x() / (gx - 1);
 	const double sampleGrid_dy = SamplingDomainRange.y() / (gy - 1);
 
+	//if sampleCross_dx = sampleGrid_dx / 3.0 then is's exactly to  regular grid sampling
+	// const double sampleCross_dx = sampleGrid_dx / 3.0;
+	// const double sampleCross_dy = sampleGrid_dy / 3.0;
+	//now update to every cross more close itself and far away  from other cross + small sampling noise.
+	static std::normal_distribution<double> genSampleTxy(0.0, 0.05);	
+	static std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
+
 	const double sampleCross_dx = sampleGrid_dx / 3.0;
 	const double sampleCross_dy = sampleGrid_dy / 3.0;
 	std::vector<Eigen::Vector2d> res;
@@ -909,8 +917,10 @@ std::vector<Eigen::Vector2d> GroupSeeding::GridCrossSampling(int gx, int gy, Eig
 	for (size_t i = 0; i < gy; i++)
 		for (size_t j = 0; j < gx; j++)
 		{
-			const double centerPointX = SamplingDomainStart.x() + sampleGrid_dx * j;
-			const double centerPointY = SamplingDomainStart.y() + sampleGrid_dy * i;
+			double Tx=genSampleTxy(rngSample);
+			double Ty=genSampleTxy(rngSample);
+			const double centerPointX = SamplingDomainStart.x() + sampleGrid_dx * j+Tx;
+			const double centerPointY = SamplingDomainStart.y() + sampleGrid_dy * i+Ty;
 			std::vector<Eigen::Vector2d>  seedings = generateSeedingsCross(centerPointX, centerPointY, sampleCross_dx, sampleCross_dy);
 			res.insert(res.end(), seedings.begin(), seedings.end());
 		};

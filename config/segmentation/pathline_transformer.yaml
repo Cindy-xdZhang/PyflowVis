@@ -4,7 +4,7 @@ model:
   encoder_args:
     NAME: PathlineTransformerV0
     KpathlinePerGroup: 5
-    in_channels: 10        #if in_channels not specify then it take value from dataset.PathlineFeature (function readDataSetRelatedConfig)
+    in_channels: 7        #if in_channels not specify then it take value from dataset.PathlineFeature (function readDataSetRelatedConfig)
     # PathlineGroups: 64     ##PathlineGroups  is write by function readDataSetRelatedConfig
     dmodel: 144 #becasue of pos_embedding,   dmodel must be multiple of 3*2=6, [if not the code will adjust itself.]
     num_encoder_layers: 3
@@ -22,10 +22,10 @@ model:
 # random_seed: 4259
 
 wandb: True 
-batch_size: 48
+batch_size: 100
 
 lr: 0.0001
-epochs: 240
+epochs: 200
 
 val_freq: 5
 # scheduler: TwoStep
@@ -53,7 +53,7 @@ dataloader:
 dataset:
   NAME: UnsteadyVastisPathlineSeg
   # data_dir: 'CppProjects/data/dbgPathline5/X32_Y32_T5'
-  data_dir: '/ibex/user/zhanx0o/data/dbgPathline5/X32_Y32_T5'
+  data_dir: '/ibex/user/zhanx0o/data/dbgPathline6/X32_Y32_T5'
 
 #add WhiteNoise will boost vortex_unet 's performance
 datatransforms:

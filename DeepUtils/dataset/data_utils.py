@@ -140,7 +140,7 @@ def getSegmentationofPathlines(pathlineClusters,si):
     vortexsegmentationLabel = np.zeros((Klines),dtype=np.float32)
     if si ==1.0 or si == 2.0 :
         for lineId in range(Klines):
-            #point features: px, py, time, ivd, distance,v_mag,nablau(0,0),nablau(0,1) ,nablau(1,1)
+            #point features: px, py, time, ivd, distance,v_0, v_1([nablaV...])
             vortexsegmentationLabel[lineId] =pathlineClusters[lineId,0,4]
             #remove the label 
             pathlineClusters[lineId,0,4]=0
