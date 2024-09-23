@@ -210,31 +210,20 @@ class TestSegmentation(object):
 
 
 def pathlineSegToFieldSeg(Pathlines,PathlineSeg,Xdim,Ydim,DominMin,DominMax):
-    from scipy.spatial import cKDTree
     L,K,C=Pathlines.shape
     # Extract seeding points from Pathlines
     seeding_points = Pathlines[ 0,:, :2]  # Assuming first two dimensions are x, y coordinates
-    
-    # Create a grid of points
-    x = np.linspace(DominMin[0], DominMax[0], Xdim)
-    y = np.linspace(DominMin[1], DominMax[1], Ydim)
-    grid_points = np.array(np.meshgrid(x, y)).T.reshape(-1, 2)
-    
-    # Build KD-tree for efficient nearest neighbor search
-    tree = cKDTree(seeding_points)
-    
-    # Find K nearest neighbors for each grid point
-    k = min(K,5)  # Use at most 10 nearest neighbors
-    distances, indices = tree.query(grid_points, k=k)
-
-    
+    dx,dy=(DominMax[0]-DominMin[0])/float(Xdim-1),(DominMax[1]-DominMin[1])/float(Ydim-1)
     # Compute the segmentation for each grid point
     grid_segmentation = np.zeros((Ydim, Xdim), dtype=np.float32)
-    for i, (dist, idx) in enumerate(zip(distances, indices)):
-        weights = 1 / (dist + 1e-6)  # Add small epsilon to avoid division by zero
-        neighbor_labels = PathlineSeg[idx]
-        weighted_labels = weights * neighbor_labels
-        grid_segmentation[i // Xdim, i % Xdim] = np.sum(weighted_labels) / np.sum(weights) 
+    for (idx) in range(K):
+        this_pathline_seeding_pos=seeding_points[idx]
+        corresponding_discrete_gridx=int((this_pathline_seeding_pos[0]-DominMin[0])/(dx))
+        corresponding_discrete_gridy=int((this_pathline_seeding_pos[1]-DominMin[1])/(dy))
+        corresponding_discrete_gridx = max(0, min(corresponding_discrete_gridx, Xdim-1))
+        corresponding_discrete_gridy = max(0, min(corresponding_discrete_gridy, Ydim-1))
+        grid_segmentation[corresponding_discrete_gridy,corresponding_discrete_gridx]+= PathlineSeg[idx]
+        
     return grid_segmentation
 
 
@@ -244,6 +233,10 @@ class TestPathlineSeg(object):
           self.samples=samples
           self.runName=config["run_name"]
           self.data_dir=config["dataset"]["data_dir"]
+          self.outputPathlineLength=config["outputPathlineLength"]
+          self.outputPathlinesCountK=config["outputPathlinesCountK"]        
+          self.pathlineFeatures=config["PathlineFeature"]
+          self.config=config
                
     
     def __call__(self, model,test_data_loader) -> torch.Any:
@@ -251,8 +244,16 @@ class TestPathlineSeg(object):
         # first random select  samples to visualize
         out_folder=f"./testOutput/{self.runName}"
         print(f"TestPathlineSeg save to {out_folder}")
+        Xdim=test_data_loader.dataset.dastasetMetaInfo["Xdim"]
+        Ydim=test_data_loader.dataset.dastasetMetaInfo["Ydim"]
+        Tdim=getattr(test_data_loader.dataset.dastasetMetaInfo,"unsteadyFieldTimeStep",5)
+        DomainMin=test_data_loader.dataset.dastasetMetaInfo["domainMinBoundary"]
+        DomainMax=test_data_loader.dataset.dastasetMetaInfo["domainMaxBoundary"]
+
+        
         for i in range(self.samples):
-            sample=random.randint(0,len(test_data_loader.dataset)-1)
+            # sample=random.randint(0,len(test_data_loader.dataset)-1)
+            sample=i
             data, label=test_data_loader.dataset[sample]
             assert(isinstance(data, list) or isinstance(data, tuple) ) 
             # Unpack the tuple
@@ -264,40 +265,38 @@ class TestPathlineSeg(object):
             label=label.cpu().numpy()
             name=test_data_loader.dataset.getSampleName(sample)
             
-            UnsteadyField=  UnsteadyVectorField2D(32,32,5,[-2,-2],[2,2],np.pi * 0.25)
+            UnsteadyField=  UnsteadyVectorField2D(Xdim,Ydim,Tdim,DomainMin ,DomainMax)
             UnsteadyField.field=vectorFieldImage.transpose(0,-1).cpu().numpy()
-            predictition_seg=pathlineSegToFieldSeg(pathlines,predictition,Xdim=32,Ydim=32,DominMin=[-2,-2],DominMax=[2,2])
-            label_seg=pathlineSegToFieldSeg(pathlines,label,Xdim=32,Ydim=32,DominMin=[-2,-2],DominMax=[2,2])
+            label_seg=pathlineSegToFieldSeg(pathlines,label,Xdim,Ydim,DomainMin,DomainMax)
+            predictition_seg=pathlineSegToFieldSeg(pathlines,predictition,Xdim,Ydim,DomainMin,DomainMax)
             LicRenderingPathlineSegmentation(UnsteadyField,predictition_seg,4.0,saveFolder=out_folder,saveName=f"{name}__pred")
             LicRenderingPathlineSegmentation(UnsteadyField,label_seg,4.0,saveFolder=out_folder,saveName=f"{name}__gt")
                 
         #then   visualize resulst on analytical field
         analytical_field_Folder= os.path.join(os.path.dirname(self.data_dir),"analytical")
-        outputPathlineLength=16
-        outputPathlinesCountK=16        
-        outputPathlinesCount=int(outputPathlinesCountK//2) *int(outputPathlinesCountK//2) *5
-        pathlineFeatures=10
-        if os.path.exists(analytical_field_Folder):
-              pathline_Files = [f  for f in os.listdir(analytical_field_Folder) if f.endswith('_pathline.bin')]
-              for pathline_file in pathline_Files:
-                    name=pathline_file.replace("_pathline.bin","")
+        
+        outputPathlinesCount=int(self.outputPathlinesCountK//2) *int(self.outputPathlinesCountK//2) *5
+        # if os.path.exists(analytical_field_Folder):
+        #       pathline_Files = [f  for f in os.listdir(analytical_field_Folder) if f.endswith('_pathline.bin')]
+        #       for pathline_file in pathline_Files:
+        #             name=pathline_file.replace("_pathline.bin","")
                   
-                    pathline_file_dir= os.path.join(analytical_field_Folder,pathline_file) 
-                    pathlineClusters = read_binary_file(pathline_file_dir).reshape(outputPathlinesCount, outputPathlineLength,pathlineFeatures)
-                    raw_data_file=pathline_file_dir.replace("_pathline.bin",".bin")
-                    raw_Binary = read_binary_file(raw_data_file).reshape(5,32,32, 2)
+        #             pathline_file_dir= os.path.join(analytical_field_Folder,pathline_file) 
+        #             pathlineClusters = read_binary_file(pathline_file_dir).reshape(outputPathlinesCount, self.outputPathlineLength,self.pathlineFeatures)
+        #             raw_data_file=pathline_file_dir.replace("_pathline.bin",".bin")
+        #             raw_Binary = read_binary_file(raw_data_file).reshape(self.config["unsteadyFieldTimeStep"],self.config["Ydim"],self.config["Xdim"], 2)
                     
-                    pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))[:,:,:pathlineFeatures]#L,K,C
-                    pathlines_tensor=torch.tensor(pathlineClusters)
-                    data = (None, pathlines_tensor.unsqueeze(0).to(device))
-                    predictition= model(data)
-                    predictition=predictition[0].cpu().numpy()
-                    UnsteadyField=  UnsteadyVectorField2D(32,32,5,[-2,-2],[2,2],np.pi * 0.25)
-                    UnsteadyField.field=raw_Binary
-                    predictition_seg=pathlineSegToFieldSeg(pathlineClusters,predictition,Xdim=32,Ydim=32,DominMin=[-2,-2],DominMax=[2,2])
-                    LicRenderingPathlineSegmentation(UnsteadyField,predictition_seg,4.0,saveFolder=out_folder,saveName=f"{name}__pred")
-        else:
-            print(f"{analytical_field_Folder} doesnt exist.") 
+        #             pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))[:,:,:self.pathlineFeatures]#L,K,C
+        #             pathlines_tensor=torch.tensor(pathlineClusters)
+        #             data = (None, pathlines_tensor.unsqueeze(0).to(device))
+        #             predictition= model(data)
+        #             predictition=predictition[0].cpu().numpy()
+        #             UnsteadyField=  UnsteadyVectorField2D(32,32,5,[-2,-2],[2,2],np.pi * 0.25)
+        #             UnsteadyField.field=raw_Binary
+        #             predictition_seg=pathlineSegToFieldSeg(pathlineClusters,predictition,Xdim=32,Ydim=32,DominMin=[-2,-2],DominMax=[2,2])
+        #             LicRenderingPathlineSegmentation(UnsteadyField,predictition_seg,4.0,saveFolder=out_folder,saveName=f"{name}__pred")
+        # else:
+        #     print(f"{analytical_field_Folder} doesnt exist.") 
                     
                     
                     
@@ -365,7 +364,7 @@ def test_pipeline(model_path=None):
 
 
 if __name__ == '__main__':
-    test_pipeline("outputModels\\bs_24_ep_120_lr_0.00014_20240917_085552_seed_4013\\best_checkpoint.pth.tar")
+    test_pipeline("outputModels\\bs_48_ep_240_lr_0.0001_20240922_212715_seed_3337\\epoch_211.pth.tar")
 
 
 

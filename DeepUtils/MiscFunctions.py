@@ -77,22 +77,34 @@ def readDataSetRelatedConfig(cfg):
     # some config paramters  need to rewrite by dataset meta file 
     rootInfo=getDatasetRootaMeta(cfg.dataset['data_dir'])
     if isinstance(cfg.datatransforms['kwargs'], dict):   
-        cfg.datatransforms['kwargs'].update(rootInfo) 
+        cfg.datatransforms['kwargs']["minV"]=rootInfo["minV"]
+        cfg.datatransforms['kwargs']["maxV"]=rootInfo["maxV"]
     else: 
         cfg.datatransforms['kwargs']= rootInfo
     PathlineCountK=16
-    PathlineFeature=10
+    outputPathlineLength=16
+    PathlineFeature=7
     if "outputPathlinesCountK" not in rootInfo:
         logging.warning("outputPathlinesCountK not in self.dastasetMetaInfo,assume 16" )
     else:
         PathlineCountK= rootInfo["outputPathlinesCountK"]
+        
     if "PathlineFeature" not in rootInfo:
-        logging.warning("PathlineFeature not in self.dastasetMetaInfo,assume 10" )
+        logging.warning("PathlineFeature not in self.dastasetMetaInfo,assume 7" )
     else:
         PathlineFeature= rootInfo["PathlineFeature"]
         
+    if "outputPathlineLength" not in rootInfo:
+        logging.warning("outputPathlineLength  not in self.dastasetMetaInfo,assume 16" )
+    else:
+        outputPathlineLength= rootInfo["outputPathlineLength"] 
+        
     PathlineGroupsCount=int(PathlineCountK/2)*int(PathlineCountK/2)
+    
     cfg["model"]["encoder_args"]["PathlineGroups"]=PathlineGroupsCount
+    cfg["PathlineFeature"]=PathlineFeature
+    cfg["outputPathlineLength"]=outputPathlineLength
+    cfg["outputPathlinesCountK"]=PathlineCountK
     if "in_channels" not in cfg["model"]["encoder_args"]:
         cfg["model"]["encoder_args"]["in_channels"]=PathlineFeature
     
