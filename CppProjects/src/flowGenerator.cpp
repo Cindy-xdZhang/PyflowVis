@@ -35,7 +35,7 @@ namespace {
 	constexpr int outputPathlinesCountK = 16;//this parameter is K, make sure K is even number then output K^2 path lines.
 	constexpr int outputPathlinesPerCluster = 5;//this parameter is K, make sure K is even number then output K^2 path lines.
 
-	int PathlineFeature=-1;//this value will be auto computed during datagenerator.
+	int PathlineFeature = -1;//this value will be auto computed during datagenerator.
 	// constexpr int disturbNoiseMagnitude = 0.001;//0.1% noise add to vector field' s analytical expression, then the path line can have noise
 
 	//since we compute vasitas steady field and transformation, path lines all in analytical way, this domainMinBoundary,domainMaxBoundary is control how many things is happening inside the data.
@@ -389,10 +389,10 @@ void generateUnsteadyFieldV0(int Nparamters, int samplePerParameters, int observ
 
 	std::normal_distribution<double> genTheta(0.0, 0.50); // rotation angle's distribution
 	// normal distribution from supplementary material of Vortex Boundary Identification Paper
-	std::normal_distribution<double> genSx(0, 3.59);
-	std::normal_distribution<double> genSy(0, 2.24);
-	std::normal_distribution<double> genTx(0.0, 1.34);
-	std::normal_distribution<double> genTy(0.0, 1.27);
+	std::normal_distribution<double> genSx(0, 3.59 * 0.25);
+	std::normal_distribution<double> genSy(0, 2.24 * 0.25);
+	std::normal_distribution<double> genTx(0.0, 1.34 * 0.25);
+	std::normal_distribution<double> genTy(0.0, 1.27 * 0.25);
 	double minMagintude = INFINITY;
 	double maxMagintude = -INFINITY;
 
@@ -710,6 +710,11 @@ namespace DBG_TEST {
 
 
 namespace REPRODUCE {
+	void GenerateSteadyVortexBoundaryDataset(const std::string& in_root_fodler) {
+		REPRODUCE::GenerateSteadyVortexBoundary(250, 100, in_root_fodler, "train");
+		REPRODUCE::GenerateSteadyVortexBoundary(10, 50, in_root_fodler, "validation");
+		REPRODUCE::GenerateSteadyVortexBoundary(10, 50, in_root_fodler, "test");
+	}
 
 	// reproduce paper : Vortex Boundary Identification using Convolutional Neural Network
 	void GenerateSteadyVortexBoundary(int Nparamters, int samplePerParameters, const std::string in_root_fodler, const std::string dataSetSplitTag)
@@ -730,12 +735,12 @@ namespace REPRODUCE {
 			(domainMaxBoundary(1) - domainMinBoundary(1)) / (Ydim - 1)
 		};
 		const auto paramters = generateVastisRC_NParamters(Nparamters, dataSetSplitTag);
-		std::normal_distribution<double> genTheta(0.0, 0.50); // rotation angle's distribution
+		static std::uniform_real_distribution<double> genTheta(-1.0 * MY_PI, MY_PI); // rotation angle's distribution
 		// normal distribution from supplementary material of Vortex Boundary Identification Paper
-		std::normal_distribution<double> genSx(0, 3.59);
-		std::normal_distribution<double> genSy(0, 2.24);
-		std::normal_distribution<double> genTx(0.0, 1.34);
-		std::normal_distribution<double> genTy(0.0, 1.27);
+		static  std::normal_distribution<double> genSx(0, 3.59);
+		static  std::normal_distribution<double> genSy(0, 2.24);
+		static  std::normal_distribution<double> genTx(0.0, 1.34);
+		static  std::normal_distribution<double> genTy(0.0, 1.27);
 		double minMagintude = INFINITY;
 		double maxMagintude = -INFINITY;
 
@@ -790,20 +795,17 @@ namespace REPRODUCE {
 #ifdef RENDERING_LIC_SAVE_DATA
 
 				{
-					auto outputSteadyTexture = LICAlgorithm(steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
-					// add segmentation visualization for steady lic
-					Eigen::Matrix2d deformMat = Eigen::Matrix2d::Identity();
-					deformMat(0, 0) = sx * cos(theta);
-					deformMat(0, 1) = -sy * sin(theta);
-					deformMat(1, 0) = sx * sin(theta);
-					deformMat(1, 1) = sy * cos(theta);
+					if (sample % LICImageRenderFrequency == 0) {
+						auto outputSteadyTexture = LICAlgorithm(steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+						string steadyField_name = "steady_";
+						string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
+						saveAsPNG(outputSteadyTexture, licFilename0);
 
-					string steadyField_name = "steady_";
-					string licFilename0 = task_licfolder + sample_tag_name + steadyField_name + "lic.png";
-					saveAsPNG(outputSteadyTexture, licFilename0);
+					}
 
 					auto rawSteadyFieldData = flatten2DVectorsAs1Dfloat(steadyField.field);
 					auto [minV, maxV] = computeMinMax(rawSteadyFieldData);
+					auto avgNorm = computeAverageAbsNorm(rawSteadyFieldData);
 					if (minV < minMagintude) {
 						minMagintude = minV;
 					}
@@ -1227,7 +1229,7 @@ void UnsteadyPathlneDataSetGenerator::GenOneSplit(int Nparamters, int samplePerN
 
 				// the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
 				std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, deformMat, rc_n_si, txy, outputPathlineLength, samplingMethod);
-			 	PathlineFeature= ClusterPathlines[0][0].size();
+				PathlineFeature = ClusterPathlines[0][0].size();
 
 				// visualize segmentation & pick random k path lines to vis
 				if (taskSampleId % LICImageRenderFrequency == 0)

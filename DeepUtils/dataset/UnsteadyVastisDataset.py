@@ -1,5 +1,5 @@
 import numpy as np
-import os
+import os,logging
 from FLowUtils.VectorField2d import *
 from  .data_utils import loadOneFlowEntryRawData
 import torch,time,tqdm
@@ -7,8 +7,6 @@ from .build import DATASETS
 from .data_utils import *
 from .SteadyVastisDataset import VastisDataset
 from .transforms.basic_transform import PathlineJittorCubic
-
-import logging
 
 @DATASETS.register_module()
 class UnsteadyVastisDataset(VastisDataset):
@@ -39,22 +37,47 @@ class UnsteadyVastisPathlineSeg(VastisDataset):
     def __init__(self, data_dir,split, transform,**kwargs):
         super().__init__( data_dir,split, transform,**kwargs)
         # self.lineTransform=PathlineJittorCubic()
+        self.jitter_epsilon=0.0001
     
     def __getitem__(self, idx):
         data,pathlines=self.data[idx]
         if self.transform is not None:
             data = self.transform(data)   
         # pathlines = self.lineTransform(pathlines)
-        return (data,pathlines) , self.label[idx]
+
+        #shape of pathline is Lsequence,Klines,Cfeatures
+        #now jittor the pathlines: the first [0:2]channel of last dim is position
+        #every pathline points compute its vector to its previous point, and then move along that direction vector with epsilo
+        jittered_pathlines = self.jitter_pathlines(pathlines)
+        return (data,jittered_pathlines) , self.label[idx]
+    
+    def jitter_pathlines(self, pathlines):
+        # pathlines shape: [Lsequence, Klines, Cfeatures]
+        jittered = pathlines.clone()
+        # Compute vectors between consecutive points
+        vectors = jittered[:, :, :2] - torch.roll(jittered[:, :, :2], shifts=1, dims=0)
+        # Set the first row of vectors to zero to avoid wrapping
+        vectors[0] = 0
+        
+        # Normalize vectors
+        magnitudes = torch.norm(vectors, dim=-1, keepdim=True)
+        normalized_vectors = vectors / (magnitudes + 1e-8)  # Add small epsilon to avoid division by zero
+        
+        # Generate random jitter
+        random_jitter = torch.randn_like(normalized_vectors) * self.jitter_epsilon
+        # Apply jitter along the direction vectors
+        jittered[:, :, :2] += normalized_vectors * random_jitter
+        return jittered
+
 
     def loadOneTaskFolder(self,sub_folder:str):
         Xdim,Ydim,time_steps=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"],self.dastasetMetaInfo["unsteadyFieldTimeStep"]
         #find all *.bin data in this subfoder
-        metaFiles = [f for f in os.listdir(sub_folder) if f.endswith('.json') and f!="meta.json"]
+        metaFiles = [f for f in os.listdir(sub_folder) if f.endswith('.json')]
         minV,maxV=   self.dastasetMetaInfo['minV'],self.dastasetMetaInfo['maxV']
         PathlineCountK=16
         PathlineLength=16
-        PathlineFeature=10
+        PathlineFeature=7
         if "outputPathlineLength" not in self.dastasetMetaInfo:
             logging.warning("outputPathlineLength not in self.dastasetMetaInfo,assume 16" )
         else:

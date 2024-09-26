@@ -8,12 +8,22 @@
 int main()
 {
 
-	const std::string DataRootFolder="/ibex/user/zhanx0o/data/";
+	//const std::string DataRootFolder = "/ibex/user/zhanx0o/data/";
+	const std::string DataRootFolder = "CppProjects/data/s";
 
-	auto generator = UnsteadyPathlneDataSetGenerator();
-	generator.GenDataset(85, 20, 30, DataRootFolder+"dbgPathline6/");
-	generator.classicalParametersDeserialization(DataRootFolder+"dbgPathline6/DesSerialize/");
-	generator.analyticalTestCasesGeneration( DataRootFolder+"/dbgPathline6/");
+
+	REPRODUCE::GenerateSteadyVortexBoundary(250, 100, "../data/Steady/", "train");
+	REPRODUCE::GenerateSteadyVortexBoundary(10, 50, "../data/Steady/", "validation");
+	REPRODUCE::GenerateSteadyVortexBoundary(10, 50, "../data/Steady/", "test");
+
+	//// GenerateSteadyVortexBoundary(30, 60, "../data/Steady/", "train");
+//// GenerateSteadyVortexBoundary(10, 20, "../data/Steady/", "validation");
+//// GenerateSteadyVortexBoundary(5, 60, "../data/Steady/", "test");
+
+	/*auto generator = UnsteadyPathlneDataSetGenerator();
+	generator.GenDataset(15, 20, 20, DataRootFolder + "dbgPathline6/");
+	generator.classicalParametersDeserialization(DataRootFolder + "dbgPathline6/DesSerialize/");
+	generator.analyticalTestCasesGeneration(DataRootFolder + "/dbgPathline6/");*/
 
 	//generator.generateMixUnsteadyFieldPathline("../data/dbgPathline/", 10, 10);
 	//// generateUnsteadyFieldPathline(5, 1, 1, "../data/Pathline/", "train");

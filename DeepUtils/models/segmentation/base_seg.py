@@ -45,8 +45,8 @@ class BaseSeg(nn.Module):
 
     def forward(self, data):
         f = self.encoder.forward(data)
-        if self.decoder is not None:
-            f = self.decoder(f).squeeze(-1)
+        # if self.decoder is not None:
+        #     f = self.decoder(f).squeeze(-1)
         # if self.head is not None:
         #     f = self.head(f)
         return f

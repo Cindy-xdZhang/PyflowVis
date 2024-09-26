@@ -109,12 +109,14 @@ class SteadyVastisSegmentation(VastisDataset):
         Xdim,Ydim=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"]
         dm_min,dm_max=self.dastasetMetaInfo["domainMinBoundary"],self.dastasetMetaInfo["domainMaxBoundary"]
         #find all *.bin data in this subfoder
-        binFiles = [f for f in os.listdir(sub_folder) if f.endswith('.bin')]
-        for binFile in binFiles:
-            binPath=os.path.join(sub_folder,binFile)
-            loadField,label=loadOneFlowEntrySteadySegmentation(binPath, Xdim,Ydim,domainMinBoundary=dm_min,dominMaxBoundary=dm_max)
+        metaFiles = [f for f in os.listdir(sub_folder) if f.endswith('.json')]
+        for File in metaFiles:
+            metaPath=os.path.join(sub_folder,File)
+            loadField,label=loadOneFlowEntrySteadySegmentation(metaPath, Xdim,Ydim,domainMinBoundary=dm_min,dominMaxBoundary=dm_max)
+            # dataSlice=torch.tensor(loadField).permute(2,0, 1)
+            #I think this is a bug, when there is no time axis, transpose will switch yx->xy,should use .permute(2,0, 1) instead.
             dataSlice=torch.tensor(loadField).transpose(0, -1)
             self.data.append(dataSlice)
             self.label.append(torch.tensor(label))
             if self.split=="test":
-                self.dataName.append(keep_path_last_n_names(binPath,2))                
+                self.dataName.append(keep_path_last_n_names(metaPath,2))                

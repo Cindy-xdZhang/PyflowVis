@@ -27,6 +27,8 @@ def keep_path_last_n_names(path,n):
 def read_binary_file(filepath, dtype=np.float32) -> np.ndarray:
     with open(filepath, 'rb') as file:
         data = np.fromfile(file, dtype=dtype)
+        if dtype == np.uint8:
+            data=data[8:]
         if dtype == np.float32:
             data=data[2:]
         elif dtype == np.float64:
@@ -44,36 +46,46 @@ def read_json_file(filepath):
 
 
 
-def loadOneFlowEntrySteadySegmentation(binPath,Xdim,Ydim,domainMinBoundary,dominMaxBoundary):
-    raw_Binary = read_binary_file(binPath)
+def loadOneFlowEntrySteadySegmentation(metaPath,Xdim,Ydim,domainMinBoundary,dominMaxBoundary):
     #get meta information
-    meta_file = binPath.replace('.bin', 'meta.json')
-    metaINFo=read_json_file(meta_file)
-    n,rc,si=metaINFo['n_rc_Si']["value0"],metaINFo['n_rc_Si']["value1"],metaINFo['n_rc_Si']["value2"]
-    txy=np.array([metaINFo['txy']["value0"],metaINFo['txy']["value1"]]  )  
-    theta,sx,sy=metaINFo['deform_theta_sx_sy']["value0"],metaINFo['deform_theta_sx_sy']["value1"],metaINFo['deform_theta_sx_sy']["value2"]
-    deformMatA=np.array([
-                    [sx*np.cos(theta), -sy*np.sin(theta)],
-                    [sx*np.sin(theta), sy*np.cos(theta)]])
-    InvA= np.linalg.inv(deformMatA)
-
+    metaINFo=read_json_file(metaPath)
+    bin_file = metaPath.replace('meta.json','.bin' )
     
+    raw_Binary = read_binary_file(bin_file)
     fieldData = raw_Binary.reshape( Ydim,Xdim, 2)
-    gridInterval=[ float(dominMaxBoundary[0]-domainMinBoundary[0])/float(Xdim-1),
-                  float(dominMaxBoundary[0]-domainMinBoundary[0])/float(Ydim-1)    ]
-    vortexsegmentationLabel = np.zeros((Ydim, Xdim,2),dtype=np.float32)
-    if si==0.0:
-        vortexsegmentationLabel[:, :] = np.array([1.0, 0.0], dtype=np.float32)
+
+    if 'rc_n_si' in metaINFo and 'txy' in metaINFo  and 'deform_theta_sx_sy' in metaINFo:
+        rc,n,si=metaINFo['rc_n_si']["value0"],metaINFo['rc_n_si']["value1"],metaINFo['rc_n_si']["value2"]
+        txy=np.array([metaINFo['txy']["value0"],metaINFo['txy']["value1"]]  )  
+        theta,sx,sy=metaINFo['deform_theta_sx_sy']["value0"],metaINFo['deform_theta_sx_sy']["value1"],metaINFo['deform_theta_sx_sy']["value2"]
+        deformMatA=np.array([
+                        [sx*np.cos(theta), -sy*np.sin(theta)],
+                        [sx*np.sin(theta), sy*np.cos(theta)]])
+        InvA= np.linalg.inv(deformMatA)
+        
+        
+        gridInterval=[ float(dominMaxBoundary[0]-domainMinBoundary[0])/float(Xdim-1),
+                    float(dominMaxBoundary[0]-domainMinBoundary[0])/float(Ydim-1)    ]
+        vortexsegmentationLabel = np.zeros((Ydim, Xdim),dtype=np.float32)
+        if si==0.0:
+            vortexsegmentationLabel[:, :] = np.array([0.0], dtype=np.float32)
+        else:
+            for y in range(Ydim):
+                for x in range(Xdim):
+                    # Extract position vector from fieldData
+                    pos=np.array([domainMinBoundary[0]+x*gridInterval[0],domainMinBoundary[1]+y*gridInterval[1]])
+                    transformed_pos=np.dot(InvA, (pos-txy))
+                    dx=rc- np.linalg.norm(transformed_pos)  
+                    #dx>0 ->rc >distance->inside vortex->label to one()[0,1]
+                    vortexsegmentationLabel[y, x] = np.array([1.0],dtype=np.float32) if dx>0 else np.array([0.0],dtype=np.float32) 
+                    
     else:
-        for y in range(Ydim):
-            for x in range(Xdim):
-                # Extract position vector from fieldData
-                pos=np.array([domainMinBoundary[0]+x*gridInterval[0],domainMinBoundary[1]+y*gridInterval[1]])
-                transformed_pos=np.dot(InvA, (pos-txy))
-                dx=rc- np.linalg.norm(transformed_pos)  
-                #dx>0 ->rc >distance->inside vortex->label to one()[0,1]
-                vortexsegmentationLabel[y, x] = np.array([0.0,1.0],dtype=np.float32) if dx>0 else np.array([1.0,0.0],dtype=np.float32) 
+        #try read binary segmetnation file directly
+        segmentation_Binary_path = metaPath.replace('meta.json','_segmentation.bin' )
+        vortexsegmentationLabel = read_binary_file(segmentation_Binary_path,dtype=np.uint8).reshape(Ydim,Xdim).astype(np.float32)
+        
     return fieldData,vortexsegmentationLabel
+
 
 def loadOneFlowEntryRawDataSteady(binPath,Xdim,Ydim):
     raw_Binary = read_binary_file(binPath)

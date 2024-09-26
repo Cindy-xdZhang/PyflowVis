@@ -51,7 +51,7 @@ def CollectFiles4Backup(config,arti_code):
         fileList.append("train.py")
         fileList.append(configFile)
         #copy file to backup folder 
-        backup_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "./backUPFiles/")
+        backup_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "./outputModels/backUPFiles/")
         backup_folder= os.path.join(backup_folder,run_name)
         
         print(f"backup Files {fileList} to:{backup_folder}.." )

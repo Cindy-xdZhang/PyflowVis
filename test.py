@@ -173,40 +173,59 @@ class TestSegmentation(object):
             "IoU": IoU
         }
         return result
-    
-        
-        # #random select  samples to visualize
-        # for i in range(self.samples):
-        #     sample=random.randint(0,len(test_data_loader.dataset)-1)
-        #     data, label=test_data_loader.dataset[sample]
-        #     if isinstance(data, list) or isinstance(data, tuple) :
-        #         # Unpack the tuple
-        #         vectorFieldImage, pathlines = data
-        #         # Move each element to the device
-        #         batch_vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
-        #         pathlines = pathlines.unsqueeze(0).to(device)
-        #         label = label.to(device)
-        #         # Repack into a tuple if needed
-        #         data = (batch_vectorFieldImage, pathlines)
-        #     else:
-        #         # If data is not a tuple, directly move to the device
-        #         data = data.to(device)
-        #         label = label.to(device)    
 
-            
-        #     predictition= model(data)
-        #     predictition=predictition[0].cpu().numpy()
-        #     label=label.cpu().numpy()
-        #     name=test_data_loader.dataset.getSampleName(sample)
-        #     save_segmentation_as_png(predictition,f"./testOutput/{self.runName}/{name}_pred.png",upSample=10.0)
-        #     save_segmentation_as_png(label,f"./testOutput/{self.runName}/{name}_gt.png",upSample=10.0)
-        #     rawVectorField=vectorFieldImage.transpose(0,-1).cpu().numpy()
-            
+class TestVectorFieldSegmentation(object):
+    """ TestSegmentation  is the default test task for Segmentation tasks """
+    def __init__(self, device,config,samples=10,**kwargs):
+          self.device=device
+          self.samples=samples
+          self.runName=config["run_name"]
+          self.config=config
+
+
+    def __call__(self, model,test_data_loader):
+        device=self.device
+        segError=0.0
+        meta_=test_data_loader.dataset.dastasetMetaInfo
+        Xdim,Ydim=meta_["Xdim"],meta_["Ydim"]
+        dm_min,dm_max=meta_["domainMinBoundary"],meta_["domainMaxBoundary"]     
+        # grid_dx,grid_dy=(dm_max[0]-dm_min[0])/float( Xdim-1),(dm_max[1]-dm_min[1])/float( Ydim-1)
+        # minV,maxV=getattr(self.config,"minV",-1.0),getattr(self.config,"maxV",1.0)
+        out_folder=f"./testOutput/{self.runName}"
+        className=str(__class__)
+        print(f"{className} save to {out_folder}")
+        # #random select  samples to visualize
+        for i in range(self.samples):
+            sample=random.randint(0,len(test_data_loader.dataset)-1)
+            data, label=test_data_loader.dataset[sample]
+            if isinstance(data, list) or isinstance(data, tuple) :
+                # Unpack the tuple
+                vectorFieldImage, pathlines = data
+                # Move each element to the device
+                batch_vectorFieldImage = vectorFieldImage.unsqueeze(0).to(device)
+                pathlines = pathlines.unsqueeze(0).to(device)
+                # Repack into a tuple if needed
+                data = (batch_vectorFieldImage, pathlines)
+            else:
+                # If data is not a tuple, directly move to the device
+                data = data.unsqueeze(0).to(device)
+              
+
+            predictition= model(data)
+            predictition=predictition[0].cpu().numpy()
+            label=label.cpu().numpy()
+            name=test_data_loader.dataset.getSampleName(sample)
+            save_segmentation_as_png(predictition,f"{out_folder}/{name}_pred.png",upSample=10.0)
+            save_segmentation_as_png(label,f"{out_folder}/{name}_gt.png",upSample=10.0)
+            # rawVectorField=data.squeeze().transpose(0,-1).cpu().numpy()
+            # rawVectorField=rawVectorField*(maxV-minV)+minV
             # qCriterion=computeQcriterion(rawVectorField,grid_dx,grid_dy)
             # ivd=computeIVD(rawVectorField,grid_dx,grid_dy)
-            # saveCriteriaPicture(qCriterion,f"./testOutput/{run_name}/{name}_q_cri.png",upSample=10.0)
-            # saveCriteriaPicture(ivd,f"./testOutput/{run_name}/{name}_ivd.png",upSample=10.0)
-            # precision, recall, F1, IoU=segmentationCriteria(predictition,labelVortex)
+            # saveCriteriaPicture(qCriterion,f"{out_folder}/{name}_q_cri.png",upSample=10.0)
+            # saveCriteriaPicture(ivd,f"{out_folder}/{name}_ivd.png",upSample=10.0)
+
+
+
 
 
 def pathlineSegToFieldSeg(Pathlines,PathlineSeg,Xdim,Ydim,DominMin,DominMax):
@@ -243,7 +262,8 @@ class TestPathlineSeg(object):
         device=self.device
         # first random select  samples to visualize
         out_folder=f"./testOutput/{self.runName}"
-        print(f"TestPathlineSeg save to {out_folder}")
+        className=str(__class__)
+        print(f"{className} save to {out_folder}")
         Xdim=test_data_loader.dataset.dastasetMetaInfo["Xdim"]
         Ydim=test_data_loader.dataset.dastasetMetaInfo["Ydim"]
         Tdim=getattr(test_data_loader.dataset.dastasetMetaInfo,"unsteadyFieldTimeStep",5)
@@ -251,7 +271,7 @@ class TestPathlineSeg(object):
         DomainMax=test_data_loader.dataset.dastasetMetaInfo["domainMaxBoundary"]
 
         
-        for i in range(self.samples):
+        for i in range(min(self.samples,len(test_data_loader.dataset)-1)):
             # sample=random.randint(0,len(test_data_loader.dataset)-1)
             sample=i
             data, label=test_data_loader.dataset[sample]
@@ -362,9 +382,9 @@ def test_pipeline(model_path=None):
   
 
 
-
+test_model_path="outputModels\\TobiasVortexBoundaryUnet\\bs_256_ep_100_lr_0.0001_20240924_170417_seed_4462\\best_checkpoint.pth.tar"    
 if __name__ == '__main__':
-    test_pipeline("outputModels\\bs_48_ep_240_lr_0.0001_20240922_212715_seed_3337\\epoch_211.pth.tar")
+    test_pipeline(test_model_path)
 
 
 

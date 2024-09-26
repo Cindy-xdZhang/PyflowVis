@@ -47,38 +47,4 @@ class LiuVortexNet(nn.Module):
 
 
 
-@MODELS.register_module()
-class TobiasVortexBoundaryCNN(nn.Module):
-    """ RoboustReferenceFrameCNN is the CNN model from paper: Robust Reference Frame Extraction from Unsteady 2D Vector Fields with Convolutional Neural Networks
-    """
-    def __init__(self,in_channels, DataSizeX,DataSizeY,out_channels=2, dropout= 0.005,**kwargs):
-        super(TobiasVortexBoundaryCNN, self).__init__()
-        # the input tensor of Conv3d should be in the shape of[batch_size, chanel=2,W=16, H=16]
-        self.conv1_1 = nn.Conv2d(in_channels=in_channels, out_channels=64, kernel_size=3, stride=2,padding=1)
-        self.bn1_1 = nn.BatchNorm2d(64)
-        self.conv2_1 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=2,padding=1)
-        self.bn2_1 = nn.BatchNorm2d(128)
 
-        self.flatten = nn.Flatten()
-        DataSizeX = DataSizeX // 4
-        DataSizeY = DataSizeY // 4
-        # Fully connected layer
-        self.fc1 = nn.Linear(128 * DataSizeX * DataSizeY , 128)
-        self.bn_fc_1 = nn.BatchNorm1d(128)
-        self.fc2 = nn.Linear(128, 2)
-        self.bn_fc_2 = nn.BatchNorm1d(2)
-        self.dropout = nn.Dropout(dropout)
-
-        
-
-    def forward(self, x):
-        x = self.dropout( F.relu(self.bn1_1(self.conv1_1(x))))
-        x = self.dropout(F.relu(self.bn2_1(self.conv2_1(x))))
-        # x = F.relu(self.bn3_1(self.conv3_1(x)))
-
-        x = self.flatten(x)
-        x = self.dropout(F.relu(self.bn_fc_1(self.fc1(x))))
-        x = F.relu(self.bn_fc_2(self.fc2(x)))
-        x= F.softmax(x, dim=1)
-        return x
-        

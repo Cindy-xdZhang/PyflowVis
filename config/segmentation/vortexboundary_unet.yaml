@@ -29,19 +29,21 @@ dataloader:
   num_workers: 0
 dataset:
   NAME: SteadyVastisSegmentation
-  data_dir: 'CppProjects/data/Steady/X16_Y16_Steady'v
+  # data_dir: 'CppProjects/data/Steady/X32_Y32'
+  data_dir: 'CppProjects/data/IvdSegRealData/X32_Y32'
 
 #add WhiteNoise will boost vortex_unet 's performance
 datatransforms:
   train: [WhiteNoise]  # rotation does not help
   val: [WhiteNoise]
-  test: [WhiteNoise]
+  test: []
   kwargs:
-    noiseMaginitude: 0.01
+    noiseMaginitude: 0.02
   
 
 test_tasks:
-      tasks: ["TestSegmentation"] 
+      tasks: ["TestSegmentation","TestVectorFieldSegmentation"] 
 
-
-
+save_model_path: 'outputModels/TobiasVortexBoundaryUnet/'
+save_model: True
+save_freq: 20 # saving frequency for ckpt. -1 only saving the latest and the best.

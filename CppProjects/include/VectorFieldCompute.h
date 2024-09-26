@@ -436,7 +436,20 @@ enum class VORTEX_CRITERION {
 	VELICITY_MAGINITUDE
 	// LAVD wip
 };
+template <class T>
+double computeAverageAbsNorm(const std::vector<T>& values)
+{
+	if (values.empty()) {
+		throw std::invalid_argument("The input vector is empty.");
+	}
 
+	T sum = 0;
+	for (const T& val : values) {
+		sum += std::abs(val);
+	}
+
+	return static_cast<double>(sum) / values.size();
+}
 template <class T>
 std::pair<double, double> computeMinMax(const std::vector<T>& values)
 {
