@@ -190,7 +190,8 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
     #In spatical, the range is [-2,2] generate 8 cross, seed poistion distance is sampleGrid_dx / 3.0, that is 4*0.8/((8-1)*3)=0.15237
     #normalize time then time is range (0,1), we will need to compute distance (for knn query),
     #then the range of time will influence distance in space and distance in time, and dt is 1/15=0.06666666 vs. not normalize : pi/(4*15)=0.0523598
-    pathlineClusters[:,:,2]=pathlineClusters[:,:,2]/(0.25*np.pi)     
+    # pathlineClusters[:,:,2]=pathlineClusters[:,:,2]/(0.25*np.pi)     
+    pathlineClusters[:,:,3]=0
     
     
     return (fieldData,pathlineClusters),vortexsegmentationLabel

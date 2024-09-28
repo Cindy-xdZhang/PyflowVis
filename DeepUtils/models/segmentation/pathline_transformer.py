@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from ..build import MODELS
 from torch import nn
 from .samplingLayers import *
-from ..layers import KANLinear
+# from ..layers import KANLinear
 
 class KNNPathlineTransformerLayer(nn.Module):
     def __init__(self, dim,k=16):
@@ -119,7 +119,7 @@ class PathlineTransformerV0(nn.Module):
         _,pathline_src=data
         
         tmp_sampled_pathline,temporal_indices=PathlineTemporalSamplingLayer(pathline_src,random=True)
-        sampled_pathline,pathline_mask=PathlineSpatialSamplingLayer(tmp_sampled_pathline,self.keep_Groups,self.pathlinePerGroup)
+        sampled_pathline,pathline_mask=PathlineSpatialSamplingLayer(tmp_sampled_pathline,self.keep_Groups,self.pathlinePerGroup,random=True)
         B, L, sampleK, C =sampled_pathline.shape
         points=sampled_pathline.reshape(B,L*sampleK,C)   
         # points: (B, N, 3+C)

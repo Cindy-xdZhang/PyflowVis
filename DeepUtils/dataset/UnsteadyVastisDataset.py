@@ -71,9 +71,10 @@ class UnsteadyVastisPathlineSeg(VastisDataset):
 
 
     def loadOneTaskFolder(self,sub_folder:str):
+        print(f"loading {sub_folder}...")
         Xdim,Ydim,time_steps=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"],self.dastasetMetaInfo["unsteadyFieldTimeStep"]
         #find all *.bin data in this subfoder
-        metaFiles = [f for f in os.listdir(sub_folder) if f.endswith('.json')]
+        metaFiles = [f for f in os.listdir(sub_folder) if f.endswith('.json') and f!="meta.json"]
         minV,maxV=   self.dastasetMetaInfo['minV'],self.dastasetMetaInfo['maxV']
         PathlineCountK=16
         PathlineLength=16
@@ -94,7 +95,6 @@ class UnsteadyVastisPathlineSeg(VastisDataset):
         PathlineCount=int(PathlineCountK/2)*int(PathlineCountK/2)*5
         oneFolderData=[None]*len(metaFiles)
         oneFolderLabel=[None]*len(metaFiles)
-
         for idx,metaFile in enumerate(metaFiles) :
             metaPath=os.path.join(sub_folder,metaFile)
             data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,PathlineLength=PathlineLength,PathlineCount=PathlineCount,PathlineFeature=PathlineFeature,mode=self.split) 
