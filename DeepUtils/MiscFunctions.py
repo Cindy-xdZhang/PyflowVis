@@ -50,6 +50,7 @@ def CollectFiles4Backup(config,arti_code):
         configFile=getattr(config,"config_yaml",None) 
         fileList.append("train.py")
         fileList.append(configFile)
+        fileList.append("DeepUtils/dataset/data_utils.py")
         #copy file to backup folder 
         backup_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "./outputModels/backUPFiles/")
         backup_folder= os.path.join(backup_folder,run_name)
