@@ -8,12 +8,13 @@
             "name": "Python: Train Pipeline",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/train.py",
-            // "program": "${workspaceFolder}/test.py",
+            // "program": "${workspaceFolder}/train.py",
+            "program": "${workspaceFolder}/test.py",
+            // "program": "${workspaceFolder}/experiment.py",
             "console": "integratedTerminal",
             "args": [
                 "--config",
-                // "config/classification/vortexboundary.yaml"
+                // "config/segmentation/vortexboundary_unet.yaml"
                 "config/segmentation/pathline_transformer.yaml"
             ]
         }

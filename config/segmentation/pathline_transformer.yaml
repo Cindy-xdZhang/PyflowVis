@@ -21,13 +21,13 @@ model:
 # Training parameters
 # random_seed: 4259
 
-wandb: True 
-batch_size: 100
+# wandb: True 
+batch_size: 4
 
 lr: 0.0001
-epochs: 200
+epochs: 2
 
-val_freq: 5
+val_freq: 1
 # scheduler: TwoStep
 # warmup_epochs: 80 
 # second_lr: 0.00001
@@ -52,8 +52,9 @@ dataloader:
   num_workers: 0
 dataset:
   NAME: UnsteadyVastisPathlineSeg
-  # data_dir: 'CppProjects/data/dbgPathline5/X32_Y32_T5'
-  data_dir: '/ibex/user/zhanx0o/data/dbgPathline6/X32_Y32_T5'
+  data_dir: 'CppProjects/data/realDataFixLabelBug/'
+  # data_dir: 'CppProjects/data/dbgPathline6/X32_Y32_T5'
+  # data_dir: '/ibex/user/zhanx0o/data/dbgPathline6/X32_Y32_T5'
 
 #add WhiteNoise will boost vortex_unet 's performance
 datatransforms:

@@ -382,7 +382,8 @@ def test_pipeline(model_path=None):
   
 
 
-test_model_path="outputModels\\TobiasVortexBoundaryUnet\\bs_256_ep_100_lr_0.0001_20240924_170417_seed_4462\\best_checkpoint.pth.tar"    
+# test_model_path="outputModels\\TobiasVortexBoundaryUnet\\bs_256_ep_100_lr_0.0001_20240924_170417_seed_4462\\best_checkpoint.pth.tar"    
+test_model_path="outputModels\\bs_100_ep_200_lr_0.0001_20240926_123336_seed_3097\\best_checkpoint.pth.tar"    
 if __name__ == '__main__':
     test_pipeline(test_model_path)
 

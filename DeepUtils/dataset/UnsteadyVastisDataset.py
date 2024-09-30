@@ -34,10 +34,12 @@ class UnsteadyVastisDataset(VastisDataset):
 
 @DATASETS.register_module()
 class UnsteadyVastisPathlineSeg(VastisDataset):
-    def __init__(self, data_dir,split, transform,**kwargs):
+    def __init__(self, data_dir,split, transform, mask_out_feature=None,**kwargs):
+        self.mask_out_feature=mask_out_feature if mask_out_feature  else None
         super().__init__( data_dir,split, transform,**kwargs)
         # self.lineTransform=PathlineJittorCubic()
         self.jitter_epsilon=0.0001
+        
     
     def __getitem__(self, idx):
         data,pathlines=self.data[idx]
@@ -72,7 +74,7 @@ class UnsteadyVastisPathlineSeg(VastisDataset):
 
     def loadOneTaskFolder(self,sub_folder:str):
         print(f"loading {sub_folder}...")
-        Xdim,Ydim,time_steps=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"],self.dastasetMetaInfo["unsteadyFieldTimeStep"]
+        Xdim,Ydim,time_steps=getattr(self.dastasetMetaInfo,"Xdim",32),getattr(self.dastasetMetaInfo,"Ydim",32) ,getattr(self.dastasetMetaInfo,"unsteadyFieldTimeStep",5) 
         #find all *.bin data in this subfoder
         metaFiles = [f for f in os.listdir(sub_folder) if f.endswith('.json') and f!="meta.json"]
         minV,maxV=   self.dastasetMetaInfo['minV'],self.dastasetMetaInfo['maxV']
@@ -92,12 +94,14 @@ class UnsteadyVastisPathlineSeg(VastisDataset):
         else:
             PathlineFeature= self.dastasetMetaInfo["PathlineFeature"]
 
-        PathlineCount=int(PathlineCountK/2)*int(PathlineCountK/2)*5
+        PathlineCount=int(PathlineCountK/2)*int(PathlineCountK/2)*4
         oneFolderData=[None]*len(metaFiles)
         oneFolderLabel=[None]*len(metaFiles)
         for idx,metaFile in enumerate(metaFiles) :
             metaPath=os.path.join(sub_folder,metaFile)
-            data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,PathlineLength=PathlineLength,PathlineCount=PathlineCount,PathlineFeature=PathlineFeature,mode=self.split) 
+            data, label=loadUnsteadyFlowPathlineSegmentation(metaPath,time_steps=time_steps,Ydim=Ydim,Xdim=Xdim,
+                                                             PathlineLength=PathlineLength,PathlineCount=PathlineCount,
+                                                             PathlineFeature=PathlineFeature,mask_out_feature= self.mask_out_feature,mode=self.split) 
             fieldData,pathlineData=data
             fieldData=torch.tensor(fieldData).transpose(0, -1)
             pathlineData=torch.tensor(pathlineData)

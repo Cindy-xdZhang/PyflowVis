@@ -76,7 +76,7 @@ def CollectFiles4Backup(config,arti_code):
 def readDataSetRelatedConfig(cfg):
     # some config paramters  need to rewrite by dataset meta file 
     rootInfo=getDatasetRootaMeta(cfg.dataset['data_dir'])
-    if isinstance(cfg.datatransforms['kwargs'], dict):   
+    if 'kwargs' in cfg.datatransforms and isinstance(cfg.datatransforms['kwargs'], dict):   
         cfg.datatransforms['kwargs']["minV"]=rootInfo["minV"]
         cfg.datatransforms['kwargs']["maxV"]=rootInfo["maxV"]
     else: 
@@ -107,7 +107,11 @@ def readDataSetRelatedConfig(cfg):
     cfg["outputPathlinesCountK"]=PathlineCountK
     if "in_channels" not in cfg["model"]["encoder_args"]:
         cfg["model"]["encoder_args"]["in_channels"]=PathlineFeature
-    
+        
+    input_save_model_path=cfg["save_model_path"]
+    model_name=cfg['model']['encoder_args']['NAME']
+    if model_name not in input_save_model_path:
+        cfg["save_model_path"]=os.path.join(input_save_model_path,model_name)
         
 def load_config(path):
     with open(path, 'r') as file:

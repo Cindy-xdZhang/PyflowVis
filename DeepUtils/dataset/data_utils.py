@@ -159,8 +159,29 @@ def getSegmentationofPathlines(pathlineClusters,si):
 
     return vortexsegmentationLabel
 
+#point features: px, py, time, ivd(curl), distance, v_0, v_1([nablaV...])
+feature_mapping = {
+    'ivd': 3,
+    'curl': 3,
+    'abscurl': 3,
+    'distance': 4,
+    'velocity': [5, 6],
+    # 'nablaV': slice(7, None)
+}
+def mask_out_addtional_feature(input_pathlineClusters, mask_out_features):
+    for feature in mask_out_features:
+        if feature in feature_mapping:
+            if isinstance(feature_mapping[feature], int):                
+                input_pathlineClusters[:, :, feature_mapping[feature]] = 0
+            elif isinstance(feature_mapping[feature], list):
+                for idx in feature_mapping[feature]:
+                    input_pathlineClusters[:, :, idx] = 0                        
+    return input_pathlineClusters    
     
-def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineLength,PathlineCount,PathlineFeature,mode="train"):
+    
+    
+
+def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineLength,PathlineCount,PathlineFeature,mask_out_feature,mode="train"):
     #get meta information
     # metaINFo=read_json_file(metaPath)
     # n,rc,si=metaINFo['rc_n_si']["value0"],metaINFo['rc_n_si']["value1"],metaINFo['rc_n_si']["value2"]
@@ -168,7 +189,6 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
         si=0.0
     else:
         si=1.0
-    
     fieldData=None
     if mode=="test":#during test, we need data for visualization, for train and validation, only pathline are need
         rawBinaryPath= metaPath.replace('meta.json', '.bin')
@@ -183,16 +203,25 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
     pathlineClusters=pathlineClusters.reshape(PathlineCount,PathlineLength,PathlineFeature)
     
     vortexsegmentationLabel=getSegmentationofPathlines(pathlineClusters,si)
-    
     # Permute pathline clusters first and second axis
-
-    pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))
-    #In spatical, the range is [-2,2] generate 8 cross, seed poistion distance is sampleGrid_dx / 3.0, that is 4*0.8/((8-1)*3)=0.15237
-    #normalize time then time is range (0,1), we will need to compute distance (for knn query),
-    #then the range of time will influence distance in space and distance in time, and dt is 1/15=0.06666666 vs. not normalize : pi/(4*15)=0.0523598
-    # pathlineClusters[:,:,2]=pathlineClusters[:,:,2]/(0.25*np.pi)     
-    pathlineClusters[:,:,3]=0
+    pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))    
     
+    #for drop information  experiment.
+    if mask_out_feature is not None:
+        pathlineClusters=mask_out_addtional_feature(pathlineClusters,mask_out_features=mask_out_feature)
+    
+    # down sample input
+    # L_Full_length, K, C = pathlineClusters.shape
+    # linesPerGroup=5
+    # total_groups = K // linesPerGroup
+    # group_indices = torch.arange(0, total_groups, step=2)[:keepGroups]
+    # mask = torch.zeros(K, dtype=torch.bool)
+    # for idx in group_indices:
+    #     start = idx * linesPerGroup
+    #     end = start + linesPerGroup
+    #     mask[start:end] = True
+    # sampled_pathline = in_pathline_src[:, :, mask, :]
+
     
     return (fieldData,pathlineClusters),vortexsegmentationLabel
 

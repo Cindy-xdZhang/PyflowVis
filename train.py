@@ -135,7 +135,7 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
                     }, folder_name=saving_path, checkpoint_name= f'best_checkpoint.pth.tar')
                     
             #periodically save model
-            if  config['save_model'] and epoch % config["save_freq"]== 0 and epoch>0 and config["save_freq"]>0:
+            if  config['save_model'] and config["save_freq"]>0 and epoch % config["save_freq"]== 0 and epoch>0 :
                 saving_path= os.path.join(config['save_model_path'],run_Name) 
                 save_checkpoint({
                     'epoch': epoch + 1,

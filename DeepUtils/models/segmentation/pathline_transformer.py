@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from ..build import MODELS
 from torch import nn
 from .samplingLayers import *
-# from ..layers import KANLinear
+# # from ..layers import KANLinear
 
 class KNNPathlineTransformerLayer(nn.Module):
     def __init__(self, dim,k=16):
@@ -73,9 +73,10 @@ class PosE_Initial(nn.Module):
     def forward(self, xyz):
         # xyz=xyz.permute(0,2,1)
         B,  N,_= xyz.shape    
+        device = xyz.device
         feat_dim = self.out_dim // (self.in_dim * 2)
         
-        feat_range = torch.arange(feat_dim).float().cuda()     
+        feat_range = torch.arange(feat_dim).float().to(device)  
         dim_embed = torch.pow(self.alpha, feat_range / feat_dim)
         div_embed = torch.div(self.beta * xyz.unsqueeze(-1), dim_embed)
 
@@ -114,12 +115,28 @@ class PathlineTransformerV0(nn.Module):
         self.output=nn.Sigmoid()
         # self.vector_field_feature_exct=ReferenceFrameCNN(2,32,32,5, self.dim ,dropout=dropout)
 
-        
+    #code of jit script
     def forward(self, data):
-        _,pathline_src=data
+        pathline_src=data
+        L_Full_length=16
+        linesPerGroup=5
+        K_totalLInes=320
+        # tmp_sampled_pathline,temporal_indices=PathlineTemporalSamplingLayer(pathline_src,random=False)
+        temporal_indices = torch.arange(0, L_Full_length, step=2)[:8]
+        temporal_indices[0]=0
+        temporal_indices[-1]=L_Full_length-1
+        temporal_sampled_pathline = pathline_src[:,temporal_indices,:,:]
         
-        tmp_sampled_pathline,temporal_indices=PathlineTemporalSamplingLayer(pathline_src,random=True)
-        sampled_pathline,pathline_mask=PathlineSpatialSamplingLayer(tmp_sampled_pathline,self.keep_Groups,self.pathlinePerGroup,random=True)
+        # sampled_pathline,pathline_mask=PathlineSpatialSamplingLayer(tmp_sampled_pathline,self.keep_Groups,self.pathlinePerGroup,random=False)
+        group_indices = torch.arange(0, 64, step=2)[:self.keep_Groups]
+        pathline_mask = torch.zeros(K_totalLInes, dtype=torch.bool)
+        for idx in group_indices:
+            start = idx * linesPerGroup
+            end = start + linesPerGroup
+            pathline_mask[start:end] = True
+        sampled_pathline = temporal_sampled_pathline[:, :, pathline_mask, :]
+
+        
         B, L, sampleK, C =sampled_pathline.shape
         points=sampled_pathline.reshape(B,L*sampleK,C)   
         # points: (B, N, 3+C)
@@ -147,7 +164,41 @@ class PathlineTransformerV0(nn.Module):
      
         # Apply final layers to get output for all pathlines
         full_output = self.output(self.fc(full_features)).squeeze(-1)
-        return full_output
+        return full_output    
+    
+    # def forward(self, data):
+    #     _,pathline_src=data
+        
+    #     tmp_sampled_pathline,temporal_indices=PathlineTemporalSamplingLayer(pathline_src,random=True)
+    #     sampled_pathline,pathline_mask=PathlineSpatialSamplingLayer(tmp_sampled_pathline,self.keep_Groups,self.pathlinePerGroup,random=True)
+    #     B, L, sampleK, C =sampled_pathline.shape
+    #     points=sampled_pathline.reshape(B,L*sampleK,C)   
+    #     # points: (B, N, 3+C)
+    #     pos = points[:, :, :3]
+    #     # Find k nearest neighbors
+    #     inner = -2 * torch.matmul(pos, pos.transpose(2, 1))
+    #     xx = torch.sum(pos**2, dim=2, keepdim=True)
+    #     pairwise_distance = -xx - inner - xx.transpose(2, 1)
+    #     knn_idx = pairwise_distance.topk(k=self.knn_k, dim=-1)[1]  # (B, N, k)
+        
+    #     pos_emb = self.raw_pos_embedding(pos)
+    #     feature= self.feature_embedding(points[:, :, 3:])
+    #     x=torch.concat((pos_emb,feature),dim=-1)
+        
+    #     for layer in self.transformer_layers:
+    #         x = x + layer(x, pos,knn_idx)
+    #     x = self.norm(x)
+    #     x=x.reshape(B,L,sampleK,self.dim)
+    #     #x shape [B,K,Dimodel]
+    #     # global  pool
+    #     x = x.mean(dim=1)+x.max(dim=1)[0]
+        
+    #     # return  self.output(self.fc(x))
+    #     full_features = self.propagate_features(pathline_src[:,0,:,:], sampled_pathline[:,0,:,:], x,pathline_mask)
+     
+    #     # Apply final layers to get output for all pathlines
+    #     full_output = self.output(self.fc(full_features)).squeeze(-1)
+    #     return full_output
 
     
     

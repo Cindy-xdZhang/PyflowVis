@@ -28,9 +28,10 @@ class BaseCls(nn.Module):
             self.predictor = nn.Identity()
         self.criterion = build_criterion_from_cfg(criterion_args) if criterion_args is not None else None
 
-    def forward(self, data):
+    def forward(self, data) -> torch.Tensor:
         global_feat = self.encoder(data)
-        return self.predictor(global_feat)
+        # return self.predictor(global_feat)
+        return global_feat
 
     def get_loss(self, pred, gt, inputs=None):
         return self.criterion(pred, gt)

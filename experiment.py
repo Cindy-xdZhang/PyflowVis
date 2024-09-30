@@ -48,8 +48,14 @@ class MyModule(torch.nn.Module):
     def forward(self, input):
         output = self.weight (input)
         return output   
-test_model_path="outputModels\\TobiasVortexBoundaryUnet\\bs_256_ep_100_lr_0.0001_20240924_170417_seed_4462\\best_checkpoint.pth.tar"    
+    
+    
+test_model_path="outputModels\\PT_bs_100_ep_200_lr_0.0001_20240928_202906_seed_3481_FullRealD\\best_checkpoint.pth.tar"
 
+
+# test_model_path= "outputModels\\DeSilvaVortexViz\\bs_256_ep_40_lr_0.0005_20240929_155247_seed_3716\\epoch_31.pth.tar"  
+# test_model_path="outputModels\\TobiasVortexBoundaryUnet\\bs_256_ep_100_lr_0.0001_20240924_170417_seed_4462\\best_checkpoint.pth.tar"    
+# test_model_path="outputModels\\bs_100_ep_200_lr_0.0001_20240926_123336_seed_3097\\best_checkpoint.pth.tar"    
 def save_model_as_type_script(model_path):
     cfg=argParseAndPrepareConfig()
     readDataSetRelatedConfig(cfg)
@@ -58,15 +64,16 @@ def save_model_as_type_script(model_path):
     if model_path is not None and os.path.exists(model_path):
         checkpoint=torch.load(model_path) 
         model.load_state_dict(checkpoint['state_dict'])
-        # An example input you would normally provide to your model's forward() method.
-        example = torch.rand(1, 2,32,32)
-        # traced_script_module = torch.jit.trace(model,example)
+        inputPIc =( torch.rand(1, 1,65,65), torch.rand(1, 1000))
+
+        # traced_script_module = torch.jit.trace(model,inputPIc)
         traced_script_module =torch.jit.script(model)
         print(traced_script_module.encoder.code)
         outputPath=model_path.replace(".tar","traced.pt")
         traced_script_module.save(outputPath)
         
-save_model_as_type_script(test_model_path)
+# save_model_as_type_script(test_model_path)
+
 
 
 # Function to load the model and perform inference
@@ -89,3 +96,15 @@ save_model_as_type_script(test_model_path)
 #         return output
         
 
+
+def remove_raw_bin_files():
+    for root, dirs, files in os.walk('CppProjects\\data\\RealDataCross4_256samplesPerGrid'):
+        for file in files:
+            if file.endswith('.bin') and not file.endswith('_pathline.bin'):
+                file_path = os.path.join(root, file)
+                try:
+                    os.remove(file_path)
+                    print(f"Deleted: {file_path}")
+                except Exception as e:
+                    print(f"Error deleting {file_path}: {e}")
+remove_raw_bin_files()

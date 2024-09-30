@@ -1,0 +1,45 @@
+
+model:
+  NAME: BaseCls
+  encoder_args:
+    NAME: DeSilvaVortexViz
+    DataSizeX: 65 
+  criterion_args:
+    NAME: BCELoss 
+
+# ---------------------------------------------------------------------------- #
+# Training cfgs of TobiasVortexBoundaryCNN
+# ---------------------------------------------------------------------------- #
+# Training parameters
+
+lr: 0.0005
+second_lr: 0.0001
+epochs: 40
+warmup_epochs: 10 
+scheduler: TwoStep
+# random_seed: 4259
+# wandb: True 
+
+
+
+dataloader:
+  num_workers: 0
+dataset:
+  NAME: VortexVizDataset
+  data_dir: 'CppProjects/data/VortexViz'
+
+datatransforms:
+  train: []  # rotation does not help
+  val: []
+  test: []
+
+  
+
+test_tasks:
+      tasks: ["TestClassification"] 
+
+save_model: True
+save_freq: 10 # saving frequency for ckpt. -1 only saving the latest and the best.
+save_model_path: 'outputModels/DeSilvaVortexViz'
+
+
