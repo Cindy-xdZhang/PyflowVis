@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from ..build import MODELS
-from typing import Tuple
+
 #REPRODUCE OF PREVIOUS PAPERS
 @MODELS.register_module()
 class DeSilvaVortexViz(nn.Module):

@@ -29,7 +29,7 @@ def TemporalDownSampling(in_points_Cloud_xyz,sampledK):
     # temporal_sampled_feature = in_points_Cloud_feature[:,temporal_indices,:,:]
     return temporal_indices
         
-def PathlineSpatialSamplingLayer(in_pathline_src,keepGroups,linesPerGroup=5,random:bool=False):
+def PathlineSpatialSamplingLayer(in_pathline_src,keepGroups,linesPerGroup,random:bool=False):
     B, L_Full_length, K, C = in_pathline_src.shape
     total_groups = K // linesPerGroup
     group_indices =None
@@ -48,7 +48,7 @@ def PathlineSpatialSamplingLayer(in_pathline_src,keepGroups,linesPerGroup=5,rand
         # sampled_pathline = torch.roll(sampled_pathline, shifts=roll_amount, dims=2)
         return sampled_pathline,mask
     else:
-        group_indices = torch.arange(0, total_groups, step=2)[:keepGroups]
+        group_indices = torch.arange(0, total_groups, step=max(1, total_groups // keepGroups))[:keepGroups]
         mask = torch.zeros(K, dtype=torch.bool)
         for idx in group_indices:
             start = idx * linesPerGroup

@@ -54,7 +54,19 @@ class VastisDataset(torch.utils.data.Dataset):
         #train_directory_path should be  the direct parent folder of all "rc_xxxx_n_xxx"  folders
         split_str =mode if mode!="val" else "validation"
         target_directory_path=os.path.join(self.directory_path,split_str) 
+        # If the target directory doesn't exist, try alternatives
+        if not os.path.exists(target_directory_path):
+            if mode == "val":
+                # For validation, try using the test directory
+                target_directory_path = os.path.join(self.directory_path, "test")
+            elif mode == "test":
+                # For test, try using the validation directory
+                target_directory_path = os.path.join(self.directory_path, "validation")
+                
+        if not os.path.exists(target_directory_path):
+            raise ValueError(f"Could not find a valid directory for mode: {mode}")
         
+        print(f"using folder {target_directory_path} for mode:{mode}")
         rc_n_subfoders=[os.path.join(target_directory_path,folder) for folder in os.listdir(target_directory_path) if os.path.isdir(os.path.join(target_directory_path, folder))]
         for folder_name in tqdm.tqdm(rc_n_subfoders) :           
                 self.loadOneTaskFolder(folder_name)          

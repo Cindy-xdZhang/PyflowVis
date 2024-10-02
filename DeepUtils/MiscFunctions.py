@@ -101,8 +101,10 @@ def readDataSetRelatedConfig(cfg):
         outputPathlineLength= rootInfo["outputPathlineLength"] 
         
     PathlineGroupsCount=int(PathlineCountK/2)*int(PathlineCountK/2)
+    downsample_ratio=getattr(cfg["dataset"],"downSampleRatio",1)
+    keepGroups: int = max(1, int(downsample_ratio * PathlineGroupsCount))
     
-    cfg["model"]["encoder_args"]["PathlineGroups"]=PathlineGroupsCount
+    cfg["model"]["encoder_args"]["PathlineGroups"]=keepGroups
     cfg["PathlineFeature"]=PathlineFeature
     cfg["outputPathlineLength"]=outputPathlineLength
     cfg["outputPathlinesCountK"]=PathlineCountK

@@ -119,7 +119,7 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
                         
             epoch_loss /= len(data_loader)
             # Validate the model
-            if (epoch+1) % valiate_every == 0:
+            if (epoch+1) % valiate_every == 0 or epoch==0:
                 val_loss = validate(model, validation_data_loader, device)  
                 logging.info(f'Epoch {epoch+1}, epoch_Loss: {epoch_loss}, Val Loss: {val_loss}')
                 if config['wandb']:

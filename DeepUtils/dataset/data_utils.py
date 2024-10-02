@@ -1,7 +1,7 @@
 import os
 import json
 import numpy as np
-from scipy.interpolate import CubicSpline
+import torch
 
 def keep_path_last_n_names(path,n):
     """
@@ -179,9 +179,29 @@ def mask_out_addtional_feature(input_pathlineClusters, mask_out_features):
     return input_pathlineClusters    
     
     
+def SpatialDownSampling(in_pathline_src,in_labels, downsample_ratio, linesPerGroup=4):
+    L_Full_length, K, C = in_pathline_src.shape
+    total_groups = K // linesPerGroup
+    keepGroups: int = max(1, int(downsample_ratio * total_groups))
+    # Calculate the stride to evenly distribute the groups
+    stride = max(1, total_groups // keepGroups)
     
+    # Generate indices for the groups to keep
+    group_indices = torch.arange(0, total_groups, step=stride)[:keepGroups]
+    
+    # Create a mask for the lines to keep
+    mask = torch.zeros(K, dtype=torch.bool)
+    for idx in group_indices:
+        start = idx * linesPerGroup
+        end = min(start + linesPerGroup, K)  # Ensure we don't go out of bounds
+        mask[start:end] = True
+    
+    sampled_pathline = in_pathline_src[:, mask, :]
+    labels=in_labels[mask]
+    return sampled_pathline,labels
+          
 
-def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineLength,PathlineCount,PathlineFeature,mask_out_feature,mode="train"):
+def loadUnsteadyFlowPathlineSegmentation(metaPath,PathlineLength,PathlineCount,PathlineFeature,downSampleRatio,mask_out_feature,mode="train"):
     #get meta information
     # metaINFo=read_json_file(metaPath)
     # n,rc,si=metaINFo['rc_n_si']["value0"],metaINFo['rc_n_si']["value1"],metaINFo['rc_n_si']["value2"]
@@ -190,13 +210,14 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
     else:
         si=1.0
     fieldData=None
-    if mode=="test":#during test, we need data for visualization, for train and validation, only pathline are need
-        rawBinaryPath= metaPath.replace('meta.json', '.bin')
-        raw_Binary = read_binary_file(rawBinaryPath)
-        fieldData = raw_Binary.reshape(time_steps, Ydim,Xdim, 2)
-    else:
-        fieldData=np.zeros([1,1,1,1],dtype=np.float32)
+    # if mode=="test":#during test, we need data for visualization, for train and validation, only pathline are need
+    #     rawBinaryPath= metaPath.replace('meta.json', '.bin')
+    #     raw_Binary = read_binary_file(rawBinaryPath)
+    #     fieldData = raw_Binary.reshape(time_steps, Ydim,Xdim, 2)
+    # else:
+    #     fieldData=np.zeros([1,1,1,1],dtype=np.float32)
     # pathlineClusters= np.array(metaINFo["ClusterPathlines"],dtype=np.float32)
+    fieldData=np.zeros([1,1,1,1],dtype=np.float32)
     
     pathlineBinarypath= metaPath.replace('meta.json', '_pathline.bin')
     pathlineClusters=read_binary_file(pathlineBinarypath)
@@ -205,7 +226,7 @@ def loadUnsteadyFlowPathlineSegmentation(metaPath,Xdim,Ydim,time_steps,PathlineL
     vortexsegmentationLabel=getSegmentationofPathlines(pathlineClusters,si)
     # Permute pathline clusters first and second axis
     pathlineClusters = np.transpose(pathlineClusters, (1, 0, 2))    
-    
+    pathlineClusters,vortexsegmentationLabel=SpatialDownSampling(pathlineClusters,vortexsegmentationLabel,downsample_ratio=downSampleRatio,linesPerGroup=4)
     #for drop information  experiment.
     if mask_out_feature is not None:
         pathlineClusters=mask_out_addtional_feature(pathlineClusters,mask_out_features=mask_out_feature)

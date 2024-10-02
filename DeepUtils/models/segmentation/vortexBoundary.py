@@ -6,7 +6,7 @@ from ..build import MODELS
 @MODELS.register_module()
 class TobiasVortexBoundaryCNN(nn.Module):
 
-    def __init__(self,in_channels, DataSizeX,DataSizeY,out_channels=2, dropout= 0.005,**kwargs):
+    def __init__(self,in_channels, DataSizeX,DataSizeY,out_channels=1, dropout= 0.005,**kwargs):
         super(TobiasVortexBoundaryCNN, self).__init__()
         # the input tensor of Conv3d should be in the shape of[batch_size, chanel=2,W=16, H=16]
         self.conv1_1 = nn.Conv2d(in_channels=in_channels, out_channels=64, kernel_size=3, stride=2,padding=1)
@@ -66,8 +66,7 @@ class TobiasVortexBoundaryUnet(nn.Module):
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-       
-
+        self.out_channels=1
         # Down part of U-Net
         in_features = in_channels
         for _ in range( self.n ):
@@ -85,8 +84,8 @@ class TobiasVortexBoundaryUnet(nn.Module):
             )
             self.ups.append(DoubleConv(features, features // 2,dropout))
             features //= 2
-        out_channels=1
-        self.final_conv = nn.Conv2d(features, out_channels, kernel_size=1)
+        
+        self.final_conv = nn.Conv2d(features, self.out_channels, kernel_size=1)
  
 
     def forward(self, x:torch.Tensor):
