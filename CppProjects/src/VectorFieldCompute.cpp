@@ -294,7 +294,7 @@ std::vector<std::vector<Eigen::Vector3d>> LICAlgorithm(
 		}
 	}
 
-	constexpr auto& noiseTexture = stablizedTexture::noiseTexture64;
+	constexpr auto& noiseTexture = stablizedTexture::noiseTexture512;
 	constexpr int TexDim = noiseTexture.size();
 	const double FloatIdx_field2textureMultipilierX = ((double)TexDim - 1.0) / (double)(Xdim - 1.0);
 	const double FloatIdx_field2textureMultipilierY = ((double)TexDim - 1.0) / (double)(Ydim - 1.0);
@@ -907,7 +907,7 @@ std::vector<Eigen::Vector2d> GroupSeeding::GridCrossSampling(int gx, int gy, Eig
 	// const double sampleCross_dx = sampleGrid_dx / 3.0;
 	// const double sampleCross_dy = sampleGrid_dy / 3.0;
 	//now update to every cross more close itself and far away  from other cross + small sampling noise.
-	static std::normal_distribution<double> genSampleTxy(0.0, 0.05);	
+	static std::normal_distribution<double> genSampleTxy(0.0, 0.05);
 	static std::mt19937 rngSample(static_cast<unsigned int>(std::time(nullptr)));
 
 	const double sampleCross_dx = sampleGrid_dx / 3.0;
@@ -917,10 +917,10 @@ std::vector<Eigen::Vector2d> GroupSeeding::GridCrossSampling(int gx, int gy, Eig
 	for (size_t i = 0; i < gy; i++)
 		for (size_t j = 0; j < gx; j++)
 		{
-			double Tx=genSampleTxy(rngSample);
-			double Ty=genSampleTxy(rngSample);
-			const double centerPointX = SamplingDomainStart.x() + sampleGrid_dx * j+Tx;
-			const double centerPointY = SamplingDomainStart.y() + sampleGrid_dy * i+Ty;
+			double Tx = genSampleTxy(rngSample);
+			double Ty = genSampleTxy(rngSample);
+			const double centerPointX = SamplingDomainStart.x() + sampleGrid_dx * j + Tx;
+			const double centerPointY = SamplingDomainStart.y() + sampleGrid_dy * i + Ty;
 			std::vector<Eigen::Vector2d>  seedings = generateSeedingsCross(centerPointX, centerPointY, sampleCross_dx, sampleCross_dy);
 			res.insert(res.end(), seedings.begin(), seedings.end());
 		};
@@ -938,9 +938,9 @@ const SteadyVectorField2D UnSteadyVectorField2D::getVectorfieldSliceAtTime(int t
 
 	if (t >= 0 && t < timeSteps) {
 		if (this->analyticalFlowfunc_ != nullptr) {
-			assert(this->tmax> this->tmin && this->timeSteps>1);
+			assert(this->tmax > this->tmin && this->timeSteps > 1);
 			const auto dt = (this->tmax - this->tmin) / (double)(this->timeSteps - 1);
-			assert(dt>0.0);
+			assert(dt > 0.0);
 			double physical_time = dt * t + this->tmin;
 			vecfield.analyticalFlowfunc_ = [this, physical_time](const Eigen::Vector2d& pos, double use_less_time) {
 				return this->analyticalFlowfunc_(pos, physical_time);

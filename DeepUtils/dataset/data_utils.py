@@ -43,10 +43,57 @@ def read_json_file(filepath):
         data = json.load(file)
     return data
 
+from PIL import Image
+def save_segmentation_as_png(vortexsegmentationLabel, filename, upSample=1.0):
+
+    """
+    Saves a 2D binary segmentation as a PNG file.
+
+    Parameters:
+        vortexsegmentationLabel (numpy.ndarray): The segmentation array of shape (Ydim, Xdim, 2).
+        filename (str): The filename to save the PNG image.
+        upSample (float): Upsampling factor to resize the image. Default is 1.0 (no scaling).
+    """
+    # Create the directory if it does not exist
+    folder = os.path.dirname(filename)  # Extract the folder path from the filename
+    if folder and not os.path.exists(folder):  # Ensure folder is non-empty and doesn't exist
+        os.makedirs(folder)
+        print(f"Created directory: {folder}")
+    
+    # Convert the segmentation to a binary mask
+    if len(vortexsegmentationLabel.shape)==3:
+        binary_mask = np.where(vortexsegmentationLabel[..., 1] > 0.5, 255, 0).astype(np.uint8)
+        
+    binary_mask = np.where(vortexsegmentationLabel > 0.5, 255, 0).astype(np.uint8)
+    
+    # Create an image from the binary mask
+    image = Image.fromarray(binary_mask, mode='L')  # 'L' mode for (8-bit pixels, black and white)
+    
+    # Apply upsampling if needed
+    if upSample != 1.0:
+        new_size = (int(image.width * upSample), int(image.height * upSample))
+        image = image.resize(new_size, Image.NEAREST)  # Use NEAREST for upsampling binary images
+    
+    # Save the image
+    image.save(filename)
+def loadOneFlowEntrySteadySegmentation(binPath,Xdim,Ydim,Rawfeatures):
+
+    raw_Binary = read_binary_file(binPath)
+    fieldData = raw_Binary.reshape( Ydim,Xdim, -1)
+    fieldData=fieldData[:,:,0:2]
+    segmentation_Binary_path = binPath.replace('.bin','_segmentation.bin' )
+    vortexsegmentationLabel = read_binary_file(segmentation_Binary_path,dtype=np.uint8).reshape(Ydim,Xdim).astype(np.float32)
+    return fieldData,vortexsegmentationLabel
+
+def loadOneFlowEntryCulrIVDSteadySegmentation(binPath,Xdim,Ydim):
+    raw_Binary = read_binary_file(binPath)
+    fieldData = raw_Binary.reshape( Ydim,Xdim, 4)
+    segmentation_Binary_path = binPath.replace('.bin','_segmentation.bin' )
+    vortexsegmentationLabel = read_binary_file(segmentation_Binary_path,dtype=np.uint8).reshape(Ydim,Xdim).astype(np.float32)
+    return fieldData,vortexsegmentationLabel
 
 
-
-def loadOneFlowEntrySteadySegmentation(metaPath,Xdim,Ydim,domainMinBoundary,dominMaxBoundary):
+def loadVastisFlowEntrySteadySegmentation(metaPath,Xdim,Ydim,domainMinBoundary,dominMaxBoundary):
     #get meta information
     metaINFo=read_json_file(metaPath)
     bin_file = metaPath.replace('meta.json','.bin' )

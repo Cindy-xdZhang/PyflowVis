@@ -33,7 +33,7 @@ std::vector<std::pair<double, double>> generateVastisRC_NParamters(int n, std::s
 
 	std::random_device rd;
 
-	std::normal_distribution<double> dist_rc(1.87, 0.37); // mean = 1.87, stddev = 0.34
+	std::normal_distribution<double> dist_rc(0.87, 0.37); // mean = 1.87, stddev = 0.34
 	std::normal_distribution<double> dist_n(1.96, 0.61); // mean = 1.96, stddev = 0.61
 
 	int i = 0;

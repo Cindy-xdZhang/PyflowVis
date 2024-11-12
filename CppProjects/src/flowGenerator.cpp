@@ -27,7 +27,7 @@ std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTx(0.0, 1.3
 std::normal_distribution<double> UnsteadyPathlneDataSetGenerator::genTy(0.0, 1.27 * 0.25);
 
 namespace {
-	constexpr int Xdim = 32, Ydim = 32;
+	constexpr int Xdim = 256, Ydim = 256;
 	constexpr double tmin = 0.0;
 	constexpr double tmax = 1.0;//determine dt of observer, thus influence accuracy of observer transformation.
 	constexpr int unsteadyFieldTimeStep = 5;//dt of vector field = (pi*0.25)/(5-1)=pi/16
@@ -43,9 +43,9 @@ namespace {
 	Eigen::Vector2d domainMaxBoundary = { 1.0, 1.0 };
 
 	// lic parameters
-	constexpr int LicImageSize = 128;
-	constexpr int LicSaveFrequency = 3; // every 2 time steps save one
-	const double stepSize = 0.012;
+	constexpr int LicImageSize = 1024;
+	constexpr int LicSaveFrequency = 1; // every 2 time steps save one
+	const double stepSize = 0.002;
 	const int maxLICIteratioOneDirection = 256;
 	constexpr int LICImageRenderFrequency = 20;//
 	constexpr PATHLINE_SEEDING_SAMPLING samplingMethod = PATHLINE_SEEDING_SAMPLING::GRID_CROSS_SEEDING;
@@ -79,47 +79,60 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> generateRandomABCVectors()
 	static std::uniform_real_distribution<double> dist_acc(-0.01, 0.01); // robust paper in domain [-1,1] acc is range [-0.01,0.01]
 
 	static std::uniform_int_distribution<int> dist_int(0, 7);
+
+
 	auto option = dist_int(gen);
 	if (option == 0) {
-		Eigen::Vector3d vec1(dist(gen), dist(gen), dist(gen));
-		Eigen::Vector3d vec2(dist_acc(gen), dist_acc(gen), dist_acc(gen));
-		return std::make_pair(vec1, vec2);
-	}
-	else if (option == 1) {
-		Eigen::Vector3d vec1(dist(gen), dist(gen), 0);
-		Eigen::Vector3d vec2(dist_acc(gen), dist_acc(gen), 0);
-		return std::make_pair(vec1, vec2);
-	}
-	else if (option == 2) {
-		Eigen::Vector3d vec1(dist(gen), dist(gen), 0);
-		Eigen::Vector3d vec2(0, 0, 0);
-		return std::make_pair(vec1, vec2);
-	}
-	else if (option == 3) {
-		Eigen::Vector3d vec1(0, 0, dist(gen));
-		Eigen::Vector3d vec2(0, 0, 0);
-		return std::make_pair(vec1, vec2);
-	}
-	else if (option == 4) {
-		Eigen::Vector3d vec1(0, 0, dist(gen));
-		Eigen::Vector3d vec2(0, 0, dist_acc(gen));
-		return std::make_pair(vec1, vec2);
-	}
-	else if (option == 5) {
-		Eigen::Vector3d vec1(dist(gen), 0, 0);
-		Eigen::Vector3d vec2(dist_acc(gen), 0, 0);
-		return std::make_pair(vec1, vec2);
-	}
-	else if (option == 6) {
-		Eigen::Vector3d vec1(0, dist(gen), 0);
-		Eigen::Vector3d vec2(0, dist_acc(gen), 0);
+		Eigen::Vector3d vec1(0.35, 0, 0);
+		Eigen::Vector3d vec2(0.00, 0, 0);
 		return std::make_pair(vec1, vec2);
 	}
 	else {
-		Eigen::Vector3d vec1(0, 0, 0);
-		Eigen::Vector3d vec2(0, 0, 0);
+		Eigen::Vector3d vec1(0.0, 0, 0.2);
+		Eigen::Vector3d vec2(0.00, 0, 0);
 		return std::make_pair(vec1, vec2);
 	}
+
+	//if (option == 0) {
+	//	Eigen::Vector3d vec1(dist(gen), dist(gen), dist(gen));
+	//	Eigen::Vector3d vec2(dist_acc(gen), dist_acc(gen), dist_acc(gen));
+	//	return std::make_pair(vec1, vec2);
+	//}
+	//else if (option == 1) {
+	//	Eigen::Vector3d vec1(dist(gen), dist(gen), 0);
+	//	Eigen::Vector3d vec2(dist_acc(gen), dist_acc(gen), 0);
+	//	return std::make_pair(vec1, vec2);
+	//}
+	//else if (option == 2) {
+	//	Eigen::Vector3d vec1(dist(gen), dist(gen), 0);
+	//	Eigen::Vector3d vec2(0, 0, 0);
+	//	return std::make_pair(vec1, vec2);
+	//}
+	//else if (option == 3) {
+	//	Eigen::Vector3d vec1(0, 0, dist(gen));
+	//	Eigen::Vector3d vec2(0, 0, 0);
+	//	return std::make_pair(vec1, vec2);
+	//}
+	//else if (option == 4) {
+	//	Eigen::Vector3d vec1(0, 0, dist(gen));
+	//	Eigen::Vector3d vec2(0, 0, dist_acc(gen));
+	//	return std::make_pair(vec1, vec2);
+	//}
+	//else if (option == 5) {
+	//	Eigen::Vector3d vec1(dist(gen), 0, 0);
+	//	Eigen::Vector3d vec2(dist_acc(gen), 0, 0);
+	//	return std::make_pair(vec1, vec2);
+	//}
+	//else if (option == 6) {
+	//	Eigen::Vector3d vec1(0, dist(gen), 0);
+	//	Eigen::Vector3d vec2(0, dist_acc(gen), 0);
+	//	return std::make_pair(vec1, vec2);
+	//}
+	//else {
+	//	Eigen::Vector3d vec1(0, 0, 0);
+	//	Eigen::Vector3d vec2(0, 0, 0);
+	//	return std::make_pair(vec1, vec2);
+	//}
 }
 
 
@@ -1334,13 +1347,13 @@ void UnsteadyPathlneDataSetGenerator::DeSerialize(const std::string& dest_folder
 	auto rawUnsteadyFieldData = flatten3DVectorsAs1Dfloat(unsteady_field.field);
 	// the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
 
-	std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, deformMat, rc_n_si, txy, outputPathlineLength, samplingMethod);
+	//std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, deformMat, rc_n_si, txy, outputPathlineLength, samplingMethod);
 	{
 
-		auto licSegTexture = addSegmentationVisualization(SteadyTexture, steadyField, rc_n_si, txy, deformMat);
-		auto licSegTexturewithPathline = addPathlineVisualization(licSegTexture, domainMinBoundary, domainMaxBoundary, tmin, tmax, ClusterPathlines);
+		//auto licSegTexture = addSegmentationVisualization(SteadyTexture, steadyField, rc_n_si, txy, deformMat);
+		//auto licSegTexturewithPathline = addPathlineVisualization(licSegTexture, domainMinBoundary, domainMaxBoundary, tmin, tmax, ClusterPathlines);
 		string licFilename0 = task_licfolder + sample_tag_name + "_steady_lic.png";
-		saveAsPNG(licSegTexturewithPathline, licFilename0);
+		saveAsPNG(SteadyTexture, licFilename0);
 		auto outputTextures = LICAlgorithm_UnsteadyField(unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, VORTEX_CRITERION::VELICITY_MAGINITUDE);
 		for (size_t i = 0; i < outputTextures.size(); i += LicSaveFrequency) {
 			string tag_name = sample_tag_name + "deformed_" + std::to_string(i);
@@ -1373,7 +1386,7 @@ void UnsteadyPathlneDataSetGenerator::DeSerialize(const std::string& dest_folder
 	string pathlineFilename = dest_folder + sample_tag_name + "_pathline.bin";
 	string segmentationFilename = dest_folder + sample_tag_name + "_segmentation.bin";
 	cerealBinaryOut(rawUnsteadyFieldData, velocityFilename);
-	cerealBinaryOut(flatten3DvecAs1Dfloat(ClusterPathlines), pathlineFilename);
+	//cerealBinaryOut(flatten3DvecAs1Dfloat(ClusterPathlines), pathlineFilename);
 	if (si == (int)VastisVortexType::center_ccw || si == (int)VastisVortexType::center_cw) {
 		auto seg = generateSegmentationBinaryMask(rc_n_si, txy, deformMat, Xdim, Ydim, gridInterval, domainMinBoundary);
 		cerealBinaryOut(flatten2DvecAs1Dfloat(seg), segmentationFilename);
@@ -1442,60 +1455,61 @@ void UnsteadyPathlneDataSetGenerator::analyticalTestCasesGeneration(const std::s
 void UnsteadyPathlneDataSetGenerator::classicalParametersDeserialization(const std::string& dst_folder) {
 	//one VastisParamter is Eigen::Vector2d rc_n, Eigen::Vector2d tx_ty,Eigen::Vector3d sxsytheta, int si.
 	const std::vector<std::tuple<Eigen::Vector2d, Eigen::Vector2d, Eigen::Vector3d, int>> Vastisparams = {
-		std::make_tuple(Eigen::Vector2d(0.3, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 2.0), (int)VastisVortexType::zero_field),
-		std::make_tuple(Eigen::Vector2d(0.57, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 2.0), 1),
-		std::make_tuple(Eigen::Vector2d(0.99, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 2.0), 2),
-		std::make_tuple(Eigen::Vector2d(1.2, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 2.0), 0),
+		//std::make_tuple(Eigen::Vector2d(0.2, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 2.0), (int)VastisVortexType::zero_field),
+		std::make_tuple(Eigen::Vector2d(1.0, 2.0), Eigen::Vector2d(0.2, 0.2), Eigen::Vector3d(1.0, 1.0, M_PI_4), (int)VastisVortexType::saddle),
+		//std::make_tuple(Eigen::Vector2d(0.5, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 2.0),(int)VastisVortexType::center_ccw),
+		/*std::make_tuple(Eigen::Vector2d(0.99, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 2.0), 2),
+
 	   std::make_tuple(Eigen::Vector2d(1.17, 3.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 3.0), 1),
-	   std::make_tuple(Eigen::Vector2d(1.187, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.15, 1.25, 3.0), 2),
+	   std::make_tuple(Eigen::Vector2d(1.187, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.15, 1.25, 3.0), 2),*/
 	};
 	const std::vector<std::tuple<Eigen::Vector3d, Eigen::Vector3d>> ObserverParams = {
 		//no acc 
 		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.0, 0.0,-0.1), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.2), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.25), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.0, 0.0,-0.15), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.5), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.2), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		////std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.25), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		////std::make_tuple(Eigen::Vector3d(0.0, 0.0,-0.15), Eigen::Vector3d(0.0, 0.0, 0.0)),
 
-		std::make_tuple(Eigen::Vector3d(-0.10, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(-0.10, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
 
-		std::make_tuple(Eigen::Vector3d(0.20, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.01, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.20, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.01, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
 
-		std::make_tuple(Eigen::Vector3d(0.0, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.0, 0.2,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.0, 0.01,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.0, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.0, 0.2,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.0, 0.01,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
 
-		std::make_tuple(Eigen::Vector3d(0.1, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.1, 0.2,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.07, 0.01,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.1, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.1, 0.2,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.07, 0.01,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
 
-		std::make_tuple(Eigen::Vector3d(0.1, 0.1,0.02), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.1, 0.2,0.001), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.07, 0.00,0.03), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.00, 0.00,0.1), Eigen::Vector3d(0.0, 0.0, 0.00)),
+		//std::make_tuple(Eigen::Vector3d(0.1, 0.1,0.02), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.1, 0.2,0.001), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.07, 0.00,0.03), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.00, 0.00,0.1), Eigen::Vector3d(0.0, 0.0, 0.00)),
 
-		//with acc 
-		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.0), Eigen::Vector3d(-0.001, 0.0, 0.01)),
-		std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.0), Eigen::Vector3d(0.0, 0.002, 0.00)),
-		std::make_tuple(Eigen::Vector3d(0.10, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.001)),
-		std::make_tuple(Eigen::Vector3d(0.20, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.002)),
-		std::make_tuple(Eigen::Vector3d(0.01, 0.0,0.0), Eigen::Vector3d(0.0, 0.01, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.0, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0002)),
-		std::make_tuple(Eigen::Vector3d(0.0, 0.2,0.0), Eigen::Vector3d(0.001, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.0, 0.01,0.0), Eigen::Vector3d(0.0, 0.001, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.1, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.1, 0.2,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.07, 0.01,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.1, 0.1,0.02), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.1, 0.2,0.001), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.07, 0.00,0.03), Eigen::Vector3d(0.0, 0.0, 0.0)),
-		std::make_tuple(Eigen::Vector3d(0.00, 0.00,0.0), Eigen::Vector3d(0.0, 0.0, 0.01)),
-		std::make_tuple(Eigen::Vector3d(0.00, 0.00,0.1), Eigen::Vector3d(0.0, 0.0, 0.01)),
-		std::make_tuple(Eigen::Vector3d(0.01, 0.22,0.0), Eigen::Vector3d(0.0, 0.0, 0.01)),
+		////with acc 
+		//std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.0), Eigen::Vector3d(-0.001, 0.0, 0.01)),
+		//std::make_tuple(Eigen::Vector3d(0.0, 0.0,0.0), Eigen::Vector3d(0.0, 0.002, 0.00)),
+		//std::make_tuple(Eigen::Vector3d(0.10, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.001)),
+		//std::make_tuple(Eigen::Vector3d(0.20, 0.0,0.0), Eigen::Vector3d(0.0, 0.0, 0.002)),
+		//std::make_tuple(Eigen::Vector3d(0.01, 0.0,0.0), Eigen::Vector3d(0.0, 0.01, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.0, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0002)),
+		//std::make_tuple(Eigen::Vector3d(0.0, 0.2,0.0), Eigen::Vector3d(0.001, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.0, 0.01,0.0), Eigen::Vector3d(0.0, 0.001, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.1, 0.1,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.1, 0.2,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.07, 0.01,0.0), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.1, 0.1,0.02), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.1, 0.2,0.001), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.07, 0.00,0.03), Eigen::Vector3d(0.0, 0.0, 0.0)),
+		//std::make_tuple(Eigen::Vector3d(0.00, 0.00,0.0), Eigen::Vector3d(0.0, 0.0, 0.01)),
+		//std::make_tuple(Eigen::Vector3d(0.00, 0.00,0.1), Eigen::Vector3d(0.0, 0.0, 0.01)),
+		//std::make_tuple(Eigen::Vector3d(0.01, 0.22,0.0), Eigen::Vector3d(0.0, 0.0, 0.01)),
 
 	};
-
+	printf("Deserializing  to folder %s..\n", dst_folder.c_str());
 	int sampleId = 0;
 	for (const auto& param : Vastisparams) {
 		Eigen::Vector2d rc_n;
@@ -1529,7 +1543,7 @@ std::vector<VastisParamter> UnsteadyPathlneDataSetGenerator::generateRandomMixtu
 {
 
 	constexpr double meanOfVortexRc = 1.87;
-	constexpr double minimalDistanceOfTwoVortex = meanOfVortexRc + 0.01; //
+	constexpr double minimalDistanceOfTwoVortex = meanOfVortexRc; //
 
 	static std::uniform_int_distribution<> dis_vortexType(0, 4);
 	std::vector<VastisParamter> vectorFieldMeta;
@@ -1547,12 +1561,20 @@ std::vector<VastisParamter> UnsteadyPathlneDataSetGenerator::generateRandomMixtu
 		return minV;
 		};
 
-	auto genTxty = [&]() -> Eigen::Vector2d {
+	auto genTxty = [&](int numberID) -> Eigen::Vector2d {
+		if (numberID == 0)
+		{
+			return { -0.89569,-0.77156 };
+		}
+		if (numberID == 1)
+		{
+			return { 0.579,0.854446 };
+		}
 		auto tx = genTx(rng);
 		auto ty = genTy(rng);
 		// clamp tx, ty into valid domain
-		tx = std::clamp(tx, domainMinBoundary.x() + 0.05 * domainRange(0), domainMinBoundary.x() + 0.95 * domainRange(0));
-		ty = std::clamp(ty, domainMinBoundary.y() + 0.05 * domainRange(1), domainMinBoundary.y() + 0.95 * domainRange(1));
+		tx = std::clamp(tx, domainMinBoundary.x() + 0.01 * domainRange(0), domainMinBoundary.x() + 0.99 * domainRange(0));
+		ty = std::clamp(ty, domainMinBoundary.y() + 0.01 * domainRange(1), domainMinBoundary.y() + 0.99 * domainRange(1));
 
 		// make sure not too close to   previous vortex cores.
 		Eigen::Vector2d txy = { tx, ty };
@@ -1572,9 +1594,10 @@ std::vector<VastisParamter> UnsteadyPathlneDataSetGenerator::generateRandomMixtu
 		const  std::pair<double, double> rc_n_tuple = generateVastisRC_NParamters(1, "not_train")[0];
 		const auto rc_n = Eigen::Vector2d{ std::get<0>(rc_n_tuple) * radius_divde,std::get<1>(rc_n_tuple) };
 		//	// make sure txty is in good range: that no vortex center are too close.
-		Eigen::Vector2d txy = genTxty();
+		Eigen::Vector2d txy = genTxty(i);
 		Eigen::Vector3d sxsytheta = { 1.0, 1.0, genTheta(rng) };
-		int vortexTypeSi = std::floor((dis_vortexType(rng) + 1) / 2);
+		//int vortexTypeSi = std::floor((dis_vortexType(rng) + 1) / 2)+1;
+		int vortexTypeSi = std::clamp((int)std::floor((dis_vortexType(rng)) / 2), 1, 2);
 
 		hasSaddleField = (vortexTypeSi == (int)(VastisVortexType::saddle)) || hasSaddleField;
 		//we don't accept saddle field mix with vortex field, as we are not 100%  sure where will be the vortex boundary anymore after complicate mixture
@@ -1628,7 +1651,8 @@ void UnsteadyPathlneDataSetGenerator::generateMixUnsteadyFieldPathline(const std
 		VastistasVelocityGenerator generator(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, 0, 0);
 		printf("generate %d samples  \n", ObserversPerSample);
 
-		const int mix = dis_mixture(rng);
+		//const int mix = dis_mixture(rng);
+		const int mix = 2;
 		std::vector<VastisParamter> vectorFieldMeta = generateRandomMixtureVastisParam(mix);
 
 		SteadyVectorField2D  steadyField = generator.generateSteadyMixtureOFVortexBoundaryPaper(vectorFieldMeta);
@@ -1636,8 +1660,9 @@ void UnsteadyPathlneDataSetGenerator::generateMixUnsteadyFieldPathline(const std
 
 
 
-		std::vector<std::vector<Eigen::Vector3d>> outputSteadyTexture = LICAlgorithm(steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection);
+		std::vector<std::vector<Eigen::Vector3d>> outputSteadyTexture = LICAlgorithm(steadyField, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, VORTEX_CRITERION::VELICITY_MAGINITUDE);
 		const auto steadyLicTexture = addSegmentationVis4MixtureVortex(outputSteadyTexture, steadyField, vectorFieldMeta);
+
 		string steadyLicFilePath = Major_task_Licfoldername + to_string(threadID * ObserversPerSample) + "_" + to_string((threadID + 1) * ObserversPerSample - 1) + "steady_lic.png";
 
 		bool IsSaddle = false;
@@ -1647,25 +1672,30 @@ void UnsteadyPathlneDataSetGenerator::generateMixUnsteadyFieldPathline(const std
 			vortexTypeName += string{ magic_enum::enum_name<VastisVortexType>(Si) };
 			IsSaddle = Si == VastisVortexType::saddle;
 		}
+		std::vector<int> ObserverRange(ObserversPerSample);
+		std::generate(ObserverRange.begin(), ObserverRange.end(), [n = 0]() mutable { return n++; });
 
-		for (size_t observerIndex = 0; observerIndex < ObserversPerSample; observerIndex++) {
-			printf(".");
+		for_each(policy, ObserverRange.begin(), ObserverRange.end(), [&](const int observerIndex) {
+
 			const int taskSampleId = threadID * ObserversPerSample + observerIndex;
 			const string sample_tag_name
 				= "sample_" + to_string(taskSampleId) + vortexTypeName;
 
 			const auto& observerParameters = generateRandomABCVectors();
-			const auto& abc = observerParameters.first;
-			const auto& abc_dot = observerParameters.second;
+			auto& abc = observerParameters.first;
+
+			auto& abc_dot = observerParameters.second;
 
 			UnSteadyVectorField2D unsteady_field = Tobias_ObserverTransformation(steadyField, abc, abc_dot, tmin, tmax, unsteadyFieldTimeStep);
 			// the first point is the distance to it self(always zero), use it as the segmentation label for this pathline.
 			std::vector<std::vector<PathlinePointInfo>> ClusterPathlines = PathlineIntegrationInfoCollect2D(unsteady_field, outputPathlinesCountK, outputPathlineLength, samplingMethod);
 			{
 
-				auto licSegTexturewithPathline = addPathlineVisualization(steadyLicTexture, domainMinBoundary, domainMaxBoundary, tmin, tmax, ClusterPathlines);
+				//auto licSegTexturewithPathline = addPathlineVisualization(steadyLicTexture, domainMinBoundary, domainMaxBoundary, tmin, tmax, ClusterPathlines);
 				string licFilename0 = Major_task_Licfoldername + sample_tag_name + "_steady_lic.png";
-				saveAsPNG(licSegTexturewithPathline, licFilename0);
+				string licFilename1 = Major_task_Licfoldername + sample_tag_name + "_steady_seglic.png";
+				saveAsPNG(outputSteadyTexture, licFilename0);
+				saveAsPNG(steadyLicTexture, licFilename0);
 				auto outputTextures = LICAlgorithm_UnsteadyField(unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, VORTEX_CRITERION::VELICITY_MAGINITUDE);
 				for (size_t i = 0; i < outputTextures.size(); i += LicSaveFrequency) {
 					string deform_tag_name = sample_tag_name + "deformed_" + std::to_string(i);
@@ -1673,7 +1703,7 @@ void UnsteadyPathlneDataSetGenerator::generateMixUnsteadyFieldPathline(const std
 					saveAsPNG(outputTextures[i], licFilename);
 				}
 			}
-
+			printf(".");
 			auto rawUnsteadyFieldData = flatten3DVectorsAs1Dfloat(unsteady_field.field);
 			auto [minV, maxV] = computeMinMax(rawUnsteadyFieldData);
 			if (minV < minMagintude) {
@@ -1733,7 +1763,9 @@ void UnsteadyPathlneDataSetGenerator::generateMixUnsteadyFieldPathline(const std
 			}
 
 
-		} // for (size_t observerIndex = 0..)
+			}); // for (size_t observerIndex = 0..)
+
+
 		});//for_each(policy, threadRange.begin(), threadRange.end(), [&](const int threadID) {
 
 	// create Root meta json file, save plane information here instead of every sample's meta file

@@ -89,7 +89,9 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
                     
                 predictition= model(data)                
                 loss=model.get_loss(predictition,label)
-                loss = loss / accumulation_steps  # Normalize the loss
+                # penalty =1/ (0.1+torch.mean((predictition - 0.5) ** 2 ))
+                # loss += 0.01 * penalty 
+                loss = loss / accumulation_steps  # Normalize
                 loss.backward()
                 
                 if (batch_idx + 1) % accumulation_steps == 0:

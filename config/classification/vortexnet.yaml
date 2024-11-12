@@ -4,8 +4,8 @@ model:
   encoder_args:
     NAME: LiuVortexNet
     in_channels: 2
-    DataSizeX: 16
-    DataSizeY: 16
+    DataSizeX: 15
+    DataSizeY: 15
   criterion_args:
     NAME: BCELoss
    
@@ -14,16 +14,18 @@ model:
 # Training cfgs of LiuVortexNet
 # ---------------------------------------------------------------------------- #
 # Training parameters
-batch_size: 512
-lr: 0.00025
-wandb: True 
+batch_size: 256
+lr: 0.0025
+# wandb: True 
 dataloader:
   num_workers: 0
-random_seed: 754
+# random_seed: 754
+gradient_accumulate: 1
+gradient_norm_clip: 2.0
 
 dataset:
-  NAME: SteadyVastisClassification
-  data_dir: 'CppProjects/data/Steady/X16_Y16_Steady'
+  NAME: SteadyVelocityGridCls
+  data_dir: 'CppProjects/data/IvdSegRealDataCLS15x15/'
  
 datatransforms:
   train: [ToTensor,MinMaxNormalization] 
@@ -35,3 +37,9 @@ datatransforms:
 
 test_tasks:
       tasks: ["TestClassification","TestRandomSampless"] 
+
+
+save_model_path: 'outputModels/'
+save_model: True
+save_freq: 30 # saving frequency for ckpt. -1 only saving the latest and the best.
+

@@ -4,6 +4,7 @@ from FLowUtils.VectorField2d import *
 import torch,time,tqdm
 from .build import DATASETS
 from .data_utils import *
+from FLowUtils.GlyphRenderer import glyphsRenderSteadyFieldAlgorthim
 
 def getDatasetRootaMeta(root_directory):
     try_path0=os.path.join(root_directory, 'meta.json')
@@ -18,18 +19,19 @@ def getDatasetRootaMeta(root_directory):
 
 def read_rootMetaGridresolution(meta_file):
     metaINFo = read_json_file(meta_file)
-    if 'tmin' in metaINFo:          
-        tmin=metaINFo['tmin']
-        dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"],tmin] 
-    else:
-        dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"]]
-    if 'tmax' in metaINFo:
-        tmax=metaINFo['tmax']    
-        dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"],tmax]
-    else:
-        dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"]]
-    metaINFo['domainMinBoundary']=dominMinBoundary
-    metaINFo['domainMaxBoundary']=dominMaxBoundary
+    if "domainMinBoundary" in metaINFo and "domainMaxBoundary" in metaINFo:
+        if 'tmin' in metaINFo:          
+            tmin=metaINFo['tmin']
+            dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"],tmin] 
+        else:
+            dominMinBoundary=[metaINFo['domainMinBoundary']["value0"],metaINFo['domainMinBoundary']["value1"]]
+        if 'tmax' in metaINFo:
+            tmax=metaINFo['tmax']    
+            dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"],tmax]
+        else:
+            dominMaxBoundary=[metaINFo['domainMaxBoundary']["value0"],metaINFo['domainMaxBoundary']["value1"]]
+        metaINFo['domainMinBoundary']=dominMinBoundary
+        metaINFo['domainMaxBoundary']=dominMaxBoundary
     return metaINFo
 
 class VastisDataset(torch.utils.data.Dataset):
@@ -90,7 +92,28 @@ class VastisDataset(torch.utils.data.Dataset):
         """
         pass
             
-            
+
+@DATASETS.register_module()
+class SteadyVelocityGridCls(VastisDataset):
+    def __init__(self, data_dir,split, transform,**kwargs):
+        super().__init__( data_dir,split, transform,**kwargs)
+
+    def loadOneTaskFolder(self,sub_folder:str):
+        Xdim,Ydim=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"]
+        #find all *.bin data in this subfoder
+        binFiles = [f for f in os.listdir(sub_folder) if f.endswith('.bin') and "segmentation.bin" not in f ]
+        for binFile in binFiles:
+            binPath=os.path.join(sub_folder,binFile)
+            raw_Binary = read_binary_file(binPath)
+            loadField = raw_Binary.reshape( Ydim,Xdim, 4)[:,:,0:2]
+            segmentation_Binary_path = binPath.replace('.bin','_segmentation.bin' )
+            label = read_binary_file(segmentation_Binary_path,dtype=np.uint8).reshape(Ydim,Xdim).astype(np.float32)
+            label=label[7,7]
+            dataSlice=torch.tensor(loadField).transpose(0, -1)
+            self.data.append(dataSlice)
+            self.label.append(torch.tensor(label))
+            if self.split=="test":
+                self.dataName.append(keep_path_last_n_names(binPath,2))            
         
 @DATASETS.register_module()
 class SteadyVastisClassification(VastisDataset):
@@ -121,14 +144,64 @@ class SteadyVastisSegmentation(VastisDataset):
         Xdim,Ydim=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"]
         dm_min,dm_max=self.dastasetMetaInfo["domainMinBoundary"],self.dastasetMetaInfo["domainMaxBoundary"]
         #find all *.bin data in this subfoder
-        metaFiles = [f for f in os.listdir(sub_folder) if f.endswith('.json')]
-        for File in metaFiles:
-            metaPath=os.path.join(sub_folder,File)
-            loadField,label=loadOneFlowEntrySteadySegmentation(metaPath, Xdim,Ydim,domainMinBoundary=dm_min,dominMaxBoundary=dm_max)
+        index_Files = [f for f in os.listdir(sub_folder) if f.endswith('.bin') and "segmentation.bin" not in f]
+        for File in index_Files:
+            index_file_Path=os.path.join(sub_folder,File)
+            loadField,label=loadVastisFlowEntrySteadySegmentation(index_file_Path, Xdim,Ydim,domainMinBoundary=dm_min,dominMaxBoundary=dm_max)
             # dataSlice=torch.tensor(loadField).permute(2,0, 1)
             #I think this is a bug, when there is no time axis, transpose will switch yx->xy,should use .permute(2,0, 1) instead.
             dataSlice=torch.tensor(loadField).transpose(0, -1)
             self.data.append(dataSlice)
             self.label.append(torch.tensor(label))
             if self.split=="test":
-                self.dataName.append(keep_path_last_n_names(metaPath,2))                
+                self.dataName.append(keep_path_last_n_names(index_file_Path,2))                
+                
+                
+                
+@DATASETS.register_module()
+class SteadyVelocityGridSegmentation(VastisDataset):
+    def __init__(self, data_dir,split, transform,**kwargs):
+        super().__init__( data_dir,split, transform,**kwargs)
+
+    def loadOneTaskFolder(self,sub_folder:str):
+        Xdim,Ydim=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"]
+        raw_featurechannels=4#vx,vy,curl,ivd
+        index_Files = [f for f in os.listdir(sub_folder) if f.endswith('.bin') and "segmentation.bin" not in f]
+        for idx, File in enumerate(index_Files):
+            index_file_Path=os.path.join(sub_folder,File)
+            loadField,label=loadOneFlowEntrySteadySegmentation(index_file_Path, Xdim,Ydim,raw_featurechannels)
+            #check ouput data are fully correct
+            # if label.max()>0 and idx%20==0 or idx%21==0 :
+            #     save_segmentation_as_png(label,f"debug/testlabel_{idx}.png",upSample=10.0)
+            #     img =glyphsRenderSteadyFieldAlgorthim(loadField, (Xdim*10,Ydim*10),gridSkip=1)
+            #     img.save(f"debug/testGlyph_{idx}.png")
+
+            # dataSlice=torch.tensor(loadField).permute(2,0, 1)
+            #I think this is a bug, when there is no time axis, transpose will switch yx->xy,should use .permute(2,0, 1) instead.
+            dataSlice=torch.tensor(loadField).transpose(0, -1)
+            self.data.append(dataSlice)
+            self.label.append(torch.tensor(label))
+            if self.split=="test":
+                self.dataName.append(keep_path_last_n_names(index_file_Path,2))                
+                
+@DATASETS.register_module()
+class SteadyVelocityGridSegmentationMVUnet(VastisDataset):
+    def __init__(self, data_dir,split, transform,**kwargs):
+        super().__init__( data_dir,split, transform,**kwargs)
+
+    def loadOneTaskFolder(self,sub_folder:str):
+        Xdim,Ydim=self.dastasetMetaInfo["Xdim"],self.dastasetMetaInfo["Ydim"]
+        raw_featurechannels=4#vx,vy,curl,ivd
+        index_Files = [f for f in os.listdir(sub_folder) if f.endswith('.bin') and "segmentation.bin" not in f]
+        for idx, File in enumerate(index_Files):
+            index_file_Path=os.path.join(sub_folder,File)
+            loadField,label=loadOneFlowEntryCulrIVDSteadySegmentation(index_file_Path, Xdim,Ydim)
+      
+
+            # dataSlice=torch.tensor(loadField).permute(2,0, 1)
+            #I think this is a bug, when there is no time axis, transpose will switch yx->xy,should use .permute(2,0, 1) instead.
+            dataSlice=torch.tensor(loadField).transpose(0, -1)
+            self.data.append(dataSlice)
+            self.label.append(torch.tensor(label))
+            if self.split=="test":
+                self.dataName.append(keep_path_last_n_names(index_file_Path,2))                

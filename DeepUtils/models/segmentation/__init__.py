@@ -8,3 +8,4 @@ from .segmentationNetworks import *
 from .point_transformers import *
 from .pathline_transformer import *
 from .vortexBoundary import TobiasVortexBoundaryUnet,TobiasVortexBoundaryCNN
+from .MVUnet import DengMVUnet

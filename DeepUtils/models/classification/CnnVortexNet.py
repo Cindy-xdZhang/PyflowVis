@@ -8,17 +8,17 @@ from ..build import MODELS
 #REPRODUCE OF PREVIOUS PAPERS
 @MODELS.register_module()
 class LiuVortexNet(nn.Module):
-    def __init__(self, in_channels, DataSizeX,DataSizeY,out_channels=2, **kwargs):
+    def __init__(self, in_channels, DataSizeX,DataSizeY,out_channels=1, **kwargs):
         super(LiuVortexNet, self).__init__()
         
         self.conv1 = nn.Conv2d(in_channels, 16, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
         self.conv4 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
-        # self.bn1 = nn.BatchNorm2d(16)
-        # self.bn2 = nn.BatchNorm2d(32)
-        # self.bn3 = nn.BatchNorm2d(64)
-        # self.bn4 = nn.BatchNorm2d(64)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.bn3 = nn.BatchNorm2d(64)
+        self.bn4 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU()
         
         # Calculate the size of the flattened features after convolutions
@@ -29,17 +29,17 @@ class LiuVortexNet(nn.Module):
 
     def forward(self, x):
         # Convolutional layers with ReLU activation
-        x = self.relu((self.conv1(x)))
-        x = self.relu((self.conv2(x)))
-        x = self.relu((self.conv3(x)))
-        x = self.relu((self.conv4(x)))
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.relu(self.bn2(self.conv2(x)))
+        x = self.relu(self.bn3(self.conv3(x)))
+        x = self.relu(self.bn4(self.conv4(x)))
         # Flatten the output
         x = x.view(-1, self.flatten_size)
         # Fully connected layers
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x)) 
         x = self.relu(self.fc3(x))
-        x=F.softmax(x, dim=1)
+        x=F.sigmoid(x).squeeze()
         return x
     
 

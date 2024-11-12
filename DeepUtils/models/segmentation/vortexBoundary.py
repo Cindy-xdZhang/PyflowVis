@@ -60,7 +60,7 @@ class DoubleConv(nn.Module):
 
 @MODELS.register_module()
 class TobiasVortexBoundaryUnet(nn.Module):
-    def __init__(self,  in_channels=2,  features=64, dropout= 0.005,**kwargs):
+    def __init__(self,  in_channels=2,  features=64, dropout= 0.01,**kwargs):
         super(TobiasVortexBoundaryUnet, self).__init__()
         self.n = 3
         self.downs = nn.ModuleList()

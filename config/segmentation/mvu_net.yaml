@@ -2,8 +2,8 @@
 model:
   NAME: BaseSeg
   encoder_args:
-    NAME: TobiasVortexBoundaryUnet
-    in_channels: 2
+    NAME: DengMVUnet
+    in_channels: 4
     DataSizeX: 32
     DataSizeY: 32
   criterion_args:
@@ -29,7 +29,7 @@ gradient_norm_clip: 1.0
 dataloader:
   num_workers: 0
 dataset:
-  NAME: SteadyVelocityGridSegmentation
+  NAME: SteadyVelocityGridSegmentationMVUnet
   # data_dir: 'CppProjects/data/Steady/X32_Y32'
   data_dir: 'CppProjects/data/IvdSegRealData/'
 
@@ -45,6 +45,6 @@ datatransforms:
 test_tasks:
       tasks: ["TestSegmentation","TestVectorFieldSegmentation"] 
 
-save_model_path: 'outputModels/TobiasVortexBoundaryUnet/'
+save_model_path: 'outputModels/'
 save_model: True
 save_freq: 30 # saving frequency for ckpt. -1 only saving the latest and the best.

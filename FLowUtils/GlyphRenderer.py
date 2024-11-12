@@ -54,11 +54,11 @@ def scalar_to_color(scalar, min_scalar, max_scalar):
     return (r, g, b)
 
 @typechecked
-def glyphsRenderSteadyFieldAlgorthim(vecfield: SteadyVectorField2D, image_size=(800, 800), ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v),gridSkip=2) -> Image.Image:
+def glyphsRenderSteadyFieldAlgorthim(vecfieldData, image_size=(800, 800), ColorCodingFn=lambda u, v: math.sqrt(u*u + v*v),gridSkip=2) -> Image.Image:
     pushLogLevel = logging.getLogger().getEffectiveLevel()
     logger = logging.getLogger()
     logger .setLevel(logging.WARNING)
-    Ydim, Xdim, _ = vecfield.field.shape
+    Ydim, Xdim, _ = vecfieldData.shape
     img = Image.new('RGB', image_size, 'white')
     draw = ImageDraw.Draw(img)
     
@@ -71,17 +71,16 @@ def glyphsRenderSteadyFieldAlgorthim(vecfield: SteadyVectorField2D, image_size=(
     fieldMaginitude= np.zeros((Ydim, Xdim))
     for y in range(Ydim):
         for x in range(Xdim):
-            u, v = vecfield.field[y, x]
+            u, v = vecfieldData[y, x]
             scalars[y, x] = ColorCodingFn(u, v)
             fieldMaginitude[y, x]=math.sqrt(u*u+v*v)
     min_scalar = np.min(scalars)
     max_scalar = np.max(scalars)
-
     min_mag = np.min(fieldMaginitude)
     max_mag = np.max(fieldMaginitude)
-    vector_feild_scale=1.0
-    if max_mag<=0.25:
-        vector_feild_scale=2/(max_mag+0.0000001)
+    avg_mag = np.average(fieldMaginitude)
+    # vector_feild_scale=1.0
+    vector_feild_scale=10.0
 
     arrayHeadLength=(min(img_width, img_height)/800 )*3
     arrayStemLength=(min(img_width, img_height)/800 )*5
@@ -92,7 +91,7 @@ def glyphsRenderSteadyFieldAlgorthim(vecfield: SteadyVectorField2D, image_size=(
             img_y = int(y * img_height / Ydim)
             
             # Get the vector at this grid point
-            u, v = vecfield.field[y, x]*vector_feild_scale
+            u, v = vecfieldData[y, x]*vector_feild_scale
             
     
             end_x = img_x + int(u * arrayStemLength)
@@ -129,7 +128,7 @@ def glyphsRenderSteadyField(vecfield: SteadyVectorField2D, output_file: str, ima
     - image_size: tuple, the size of the output image.
     - ColorCodingFn: function, a function that maps vector components to a scalar.
     """
-    img = glyphsRenderSteadyFieldAlgorthim(vecfield, image_size, ColorCodingFn,gridSkip)
+    img = glyphsRenderSteadyFieldAlgorthim(vecfield.field, image_size, ColorCodingFn,gridSkip)
     save_name=output_file if output_file.endswith("png") else f"{output_file}.png"
     img.save(save_name)
    

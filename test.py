@@ -5,7 +5,6 @@ import datetime
 from DeepUtils.dataset import build_dataloader_from_cfg
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 from DeepUtils.dataset import UnsteadyVastisDataset
-from PIL import Image
 from FLowUtils.vortexCriteria import *
 from FLowUtils.LicRenderer import *
 from DeepUtils.MiscFunctions import argParseAndPrepareConfig,readDataSetRelatedConfig
@@ -48,38 +47,7 @@ class TestReconstructSteadyField(object):
         print(f"reconstruct  totaldiff ={total_error}")
         return None    
     
-def save_segmentation_as_png(vortexsegmentationLabel, filename, upSample=1.0):
 
-    """
-    Saves a 2D binary segmentation as a PNG file.
-
-    Parameters:
-        vortexsegmentationLabel (numpy.ndarray): The segmentation array of shape (Ydim, Xdim, 2).
-        filename (str): The filename to save the PNG image.
-        upSample (float): Upsampling factor to resize the image. Default is 1.0 (no scaling).
-    """
-    # Create the directory if it does not exist
-    folder = os.path.dirname(filename)  # Extract the folder path from the filename
-    if folder and not os.path.exists(folder):  # Ensure folder is non-empty and doesn't exist
-        os.makedirs(folder)
-        print(f"Created directory: {folder}")
-    
-    # Convert the segmentation to a binary mask
-    if len(vortexsegmentationLabel.shape)==3:
-        binary_mask = np.where(vortexsegmentationLabel[..., 1] > 0.5, 255, 0).astype(np.uint8)
-        
-    binary_mask = np.where(vortexsegmentationLabel > 0.5, 255, 0).astype(np.uint8)
-    
-    # Create an image from the binary mask
-    image = Image.fromarray(binary_mask, mode='L')  # 'L' mode for (8-bit pixels, black and white)
-    
-    # Apply upsampling if needed
-    if upSample != 1.0:
-        new_size = (int(image.width * upSample), int(image.height * upSample))
-        image = image.resize(new_size, Image.NEAREST)  # Use NEAREST for upsampling binary images
-    
-    # Save the image
-    image.save(filename)
 
 def segmentationCriteria(pred, gt):
     """
@@ -138,8 +106,6 @@ class TestSegmentation(object):
         segError=0.0
         meta_=test_data_loader.dataset.dastasetMetaInfo
         Xdim,Ydim=meta_["Xdim"],meta_["Ydim"]
-        dm_min,dm_max=meta_["domainMinBoundary"],meta_["domainMaxBoundary"]
-        grid_dx,grid_dy=(dm_max[0]-dm_min[0])/float( Xdim-1),(dm_max[1]-dm_min[1])/float( Ydim-1)
         test_loss=0
      
         for batch_idx, (data, label) in enumerate(test_data_loader):
