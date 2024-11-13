@@ -17,6 +17,6 @@ CppProjects/PybindCppModules/Pyds/*.pyd
 CppProjects/PybindCppModules/build/
 CppProjects/build/
 CppProjects/data/
-
-
+FlowDataAndVisualizationScripts/data/
+FlowDataAndVisualizationScripts/.ipynb_checkpoints/
 
