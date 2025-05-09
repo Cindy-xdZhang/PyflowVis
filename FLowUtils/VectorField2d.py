@@ -100,6 +100,8 @@ class IVectorFeild2D(ABC):
         self.domainMinBoundary=domainMinBoundary
         self.domainMaxBoundary=domainMaxBoundary
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
+        self.tmin=tmin
+        self.tmax=tmax
 
     @abstractmethod
     def getSlice(self, timeSlice):
@@ -126,17 +128,16 @@ class UnsteadyVectorField2D(IVectorFeild2D):
         self.field = torch.randn(time_steps, Ydim,Xdim, 2)
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
         assert(time_steps>1)
-        self.timeInterval = (tmax-tmin)/(time_steps-1)
+        self.timeInterval =float((tmax-tmin)/(time_steps-1))
         
            
     def getBilinearInterpolateVector(self, posX:float,posY:float,time:int):
         # sliceData=self.field[time]
         vec =bilinear_interpolate(self.field[time],  posX,posY)
         return vec
-       
-
-
-
+    def getTime(self,idt):
+        return self.timeInterval*idt+self.tmin
+    
     def getSlice(self, timeSlice) -> SteadyVectorField2D:
         steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary,self.domainMaxBoundary)
         if isinstance(self.field, torch.Tensor):

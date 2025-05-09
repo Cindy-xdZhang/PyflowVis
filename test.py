@@ -224,7 +224,7 @@ class TestPathlineSeg(object):
           self.config=config
                
     
-    def __call__(self, model,test_data_loader) -> torch.Any:
+    def __call__(self, model,test_data_loader) :
         device=self.device
         # first random select  samples to visualize
         out_folder=f"./testOutput/{self.runName}"

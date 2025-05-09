@@ -3,7 +3,7 @@ import numexpr as ne
 import tqdm
 from numpy import pi
 from .VectorField2d import UnsteadyVectorField2D
-from .LicRenderer import *
+
 import numpy as np
 
 
@@ -97,19 +97,65 @@ def rotation_four_center(grid_size,timestep,domainBoundaryMin=(-2.0,-2.0,0.0),do
         vectorField2d.field*=scale
     return vectorField2d
 
-
-def test_analytical_flow_creator():
-    flow_creator = AnalyticalFlowCreator( grid_size=(200, 200))    
-    flow_creator.setExperssioin('cos(y)', '-cos(x)')
-    vectorField2d= flow_creator.create_flow_field()
-    parameters = {'a': 0.5, 'b': 1.5}
-    flow_creator = AnalyticalFlowCreator( grid_size=(200, 200), parameters=parameters)
-    flow_creator.setExperssioin('a*sin(x)*cos(y)', '-b*cos(x)*sin(y)')
+		
+   
+def beadsFLow(grid_size, timestep, domainBoundaryMin=(-2.0,-2.0,0.0), domainBoundaryMax=(2.0,2.0,2*np.pi), scale=1.0):
+    """
+    Create a beads flow field based on the beads2d problem.
+    
+    :param grid_size: Tuple, the size of the grid (Xdim, Ydim)
+    :param timestep: Int, number of time steps
+    :param domainBoundaryMin: Tuple, minimum boundaries for (x,y,t)
+    :param domainBoundaryMax: Tuple, maximum boundaries for (x,y,t)
+    :param scale: Float, scaling factor for the field
+    :return: UnsteadyVectorField2D object
+    """
+    expression_u = "-1.0 * (y - 1.0 / 3.0 * sin(t)) - (x - 1.0 / 3.0 * cos(t))"
+    expression_v = "(x - 1.0 / 3.0 * cos(t)) - (y - 1.0 / 3.0 * sin(t))"
+    
+    flow_creator = AnalyticalFlowCreator(
+        grid_size=grid_size,
+        time_steps=timestep,
+        domainBoundaryMin=domainBoundaryMin,
+        domainBoundaryMax=domainBoundaryMax
+    )
+    flow_creator.setExperssioin(expression_u, expression_v)
     vectorField2d = flow_creator.create_flow_field()
-    new_parameters = {'a': 1.0, 'b': 2.0}
-    flow_creator.update_parameters(new_parameters)
+    
+    if scale != 1.0:
+        vectorField2d.field *= scale
+    return vectorField2d
+
+def rotation_four_center(grid_size,timestep,domainBoundaryMin=(-2.0,-2.0,0.0),domainBoundaryMax=(2.0,2.0,2*np.pi),scale=1.0):
+    """
+    Create a constant rotation flow field.
+
+    :param scale: Float, the scale of the rotation.
+    :return: Two numpy arrays representing the x and y components of the flow field.
+    """
+
+    expression_u="exp(-y * y - x * x) * (al_t * y * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * y * y * y + (12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * y * y + (6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x + 6.0 * scale * cos(al_t * t) * sin(al_t * t)) * y + (3.0 * scale - 6.0 * scale * (cos(al_t * t) * cos(al_t * t))) * x)"
+    expression_v="-exp(-y * y - x * x) * (al_t * x * exp(y * y + x * x) - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * y * y + ((12.0 * scale * (cos(al_t * t) * cos(al_t * t)) - 6.0 * scale) * x * x - 6.0 * scale * (cos(al_t * t) * cos(al_t * t)) + 3.0 * scale) * y + 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x * x * x - 6.0 * scale * cos(al_t * t) * sin(al_t * t) * x)"
+
+    flow_creator = AnalyticalFlowCreator(grid_size=grid_size,time_steps=timestep,domainBoundaryMin=domainBoundaryMin,domainBoundaryMax=domainBoundaryMax, parameters={'al_t': 1.0, 'scale': 8.0})
+    flow_creator.setExperssioin(expression_u, expression_v)
     vectorField2d= flow_creator.create_flow_field()
-    vectorField2d= rotation_four_center((32,32),32)
+    if scale!=1.0:
+        vectorField2d.field*=scale
+    return vectorField2d
+
+# def test_analytical_flow_creator():
+#     flow_creator = AnalyticalFlowCreator( grid_size=(200, 200))    
+#     flow_creator.setExperssioin('cos(y)', '-cos(x)')
+#     vectorField2d= flow_creator.create_flow_field()
+#     parameters = {'a': 0.5, 'b': 1.5}
+#     flow_creator = AnalyticalFlowCreator( grid_size=(200, 200), parameters=parameters)
+#     flow_creator.setExperssioin('a*sin(x)*cos(y)', '-b*cos(x)*sin(y)')
+#     vectorField2d = flow_creator.create_flow_field()
+#     new_parameters = {'a': 1.0, 'b': 2.0}
+#     flow_creator.update_parameters(new_parameters)
+#     vectorField2d= flow_creator.create_flow_field()
+#     vectorField2d= rotation_four_center((32,32),32)
 
 
 

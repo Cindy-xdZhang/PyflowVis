@@ -1,63 +1,26 @@
 import numpy as np
 import netCDF4 as nc
 from .VectorField2d import UnsteadyVectorField2D, SteadyVectorField2D
-import os
-class IVectorField3D:
-    def __init__(self, Xdim: int, Ydim: int, Zdim: int, domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0], time_steps: int = 1, tmin: float = 0.0, tmax: float = 2 * np.pi):
-        self.Xdim = Xdim
-        self.Ydim = Ydim
-        self.Zdim = Zdim
-        self.domainMinBoundary = domainMinBoundary
-        self.domainMaxBoundary = domainMaxBoundary
-        self.time_steps = time_steps
-        self.tmin = tmin
-        self.tmax = tmax
+from .VectorField3d import *
+import os,time,logging
 
-class SteadyVectorField3D(IVectorField3D):
-    def __init__(self, Xdim: int, Ydim: int, Zdim: int, domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0]):
-        super(SteadyVectorField3D, self).__init__(Xdim, Ydim, Zdim, domainMinBoundary, domainMaxBoundary)
-        self.field = np.zeros((Zdim, Ydim, Xdim, 3), np.float32)
+def measure_execution_time(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        print(f"{func.__name__} executed in {end_time - start_time} seconds")
+        return result
+    return wrapper
 
-    def getSlice(self, timeSlice):
-        return self.field
 
-class UnsteadyVectorField3D(IVectorField3D):
-    def __init__(self, Xdim: int, Ydim: int, Zdim: int, time_steps: int, domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0], tmin: float = 0.0, tmax: float = 2 * np.pi):
-        super(UnsteadyVectorField3D, self).__init__(Xdim, Ydim, Zdim, domainMinBoundary, domainMaxBoundary, time_steps, tmin, tmax)
-        # self.field = torch.randn(time_steps, Zdim, Ydim, Xdim, 3)
-        self.gridInterval = [
-            (domainMaxBoundary[0] - domainMinBoundary[0]) / (Xdim - 1),
-            (domainMaxBoundary[1] - domainMinBoundary[1]) / (Ydim - 1),
-            (domainMaxBoundary[2] - domainMinBoundary[2]) / (Zdim - 1)
-        ]
-        assert(time_steps > 1)
-        self.timeInterval = (tmax - tmin) / (time_steps - 1)
-
-    def getSlice(self, timeSlice) -> SteadyVectorField3D:
-        steadyVectorField3D = SteadyVectorField3D(self.Xdim, self.Ydim, self.Zdim, self.domainMinBoundary, self.domainMaxBoundary)
-        if isinstance(self.field, torch.Tensor):
-            steadyVectorField3D.field = self.field.cpu().numpy()[timeSlice, :, :, :, :]
-        elif isinstance(self.field, np.ndarray):
-            steadyVectorField3D.field = self.field[timeSlice, :, :, :, :]
-        return steadyVectorField3D
-
-    def getDataAsNumpy(self):
-        if isinstance(self.field, torch.Tensor):
-            return self.field.detach().cpu().numpy()
-        elif isinstance(self.field, np.ndarray):
-            return self.field
-
-    def getDataAsTensor(self):
-        if isinstance(self.field, torch.Tensor):
-            return self.field.detach().cpu()
-        elif isinstance(self.field, np.ndarray):
-            return torch.tensor(self.field)
 
 class NetCDFLoader:
     @staticmethod
-    def load_vector_field2d(file_path: str) -> UnsteadyVectorField2D|SteadyVectorField2D:
+    def load_vector_field2d(file_path: str,timestep_begin=-1,timestep_end=-1) -> UnsteadyVectorField2D|SteadyVectorField2D:
         if not os.path.exists(file_path)  or not os.path.isfile(file_path):
-            raise ValueError(f"url wrong")
+            logging.error(f"url wrong")
+            return
             
         with nc.Dataset(file_path, 'r') as dataset:
             # Check dimensions
@@ -68,25 +31,46 @@ class NetCDFLoader:
                     time_axis_name=dim
 
             spatial_dims = [dim for dim in dimensions if str(dim).lower() not in ['time',"const","tdim"]]
-
             if len(spatial_dims) != 2:
                 raise ValueError(f"Expected 2 spatial dimensions, found {len(spatial_dims)}")
+            xdim_axis=None
+            for dim in spatial_dims:
+                if str(dim).lower()  in ["xdim", "X"]:
+                    xdim_axis=dim
+            ydim_axis=None
+            for dim in spatial_dims:
+                if str(dim).lower()  in ["ydim", "Y"]:
+                    ydim_axis=dim
+                    
+            Xdim ,  Ydim = len(dataset.dimensions[xdim_axis]) ,len(dataset.dimensions[ydim_axis]) 
+            
+            
 
-            Ydim, Xdim = [len(dataset.dimensions[dim]) for dim in spatial_dims]
-            time_steps = len(dataset.dimensions[time_axis_name]) if time_axis_name is not None else 1
-
-            # Extract domain boundaries
-            x = dataset.variables[spatial_dims[1]][:]
-            y = dataset.variables[spatial_dims[0]][:]
-            domainMinBoundary = [x.min(), y.min()]
-            domainMaxBoundary = [x.max(), y.max()]
-
-            # Extract time information
+            # Adjust time steps based on input parameters
             if time_axis_name is not None:
-                time = dataset.variables[time_axis_name][:]
+                total_timesteps =len(dataset.dimensions[time_axis_name]) if time_axis_name is not None else 1
+                # Handle negative indices and validate range
+                if timestep_begin < 0:
+                    timestep_begin = 0
+                if timestep_end < 0:
+                    timestep_end = total_timesteps
+                if timestep_begin >= total_timesteps:
+                    raise ValueError(f"timestep_begin ({timestep_begin}) exceeds available timesteps ({total_timesteps})")
+                if timestep_end > total_timesteps:
+                    timestep_end = total_timesteps
+                if timestep_begin >= timestep_end:
+                    raise ValueError(f"Invalid time range: begin={timestep_begin}, end={timestep_end}")
+                time_steps = timestep_end - timestep_begin
+                time = dataset.variables[time_axis_name][timestep_begin:timestep_end]
                 tmin, tmax = time.min(), time.max()
             else:
-                tmin, tmax = 0, 1
+                 raise ValueError("Could not find time_axis_name in the NetCDF file")
+
+            # Extract domain boundaries
+            x = dataset.variables[xdim_axis][:]
+            y = dataset.variables[ydim_axis][:]
+            domainMinBoundary = [x.min(), y.min()]
+            domainMaxBoundary = [x.max(), y.max()]
 
             # Create UnsteadyVectorField2D instance
             vector_field = UnsteadyVectorField2D(Xdim, Ydim, time_steps, domainMinBoundary, domainMaxBoundary, tmin, tmax)
@@ -103,23 +87,21 @@ class NetCDFLoader:
             field_data = None
             for names in component_names:
                 if all(name in dataset.variables for name in names):
-                    field_data = np.zeros((time_steps,  Xdim,Ydim, 2))
+                    field_data = np.zeros((time_steps, Ydim,Xdim, 2))
                     for i, var_name in enumerate(names):
-                        if time_axis_name is not None:
-                            field_data[:, :, :, i] = dataset.variables[var_name][:]
-                        else:
-                            field_data[0, :, :, i] = dataset.variables[var_name][:]
+                        field_data[:, :, :, i] =dataset.variables[var_name][timestep_begin:timestep_end]
                     break
-
-            if field_data is None:
-                raise ValueError("Could not find vector components in the NetCDF file")
-
-            vector_field.field = field_data.transpose(1,2)
-
+            # field_data is numpy array shape [t,x,y,w] ->permute axis to [t,y,x ,w]
+            # vector_field.field = np.transpose(field_data, (0, 2, 1, 3))
+            vector_field.field =field_data
         return vector_field
     
     @staticmethod
-    def load_vector_field3d(file_path: str,variable_names) -> UnsteadyVectorField3D|SteadyVectorField3D:
+ 
+
+    @staticmethod
+    @measure_execution_time
+    def load_vector_field3d(file_path: str,timestep_begin=-1,timestep_end=-1) -> UnsteadyVectorField3D:
         """Load a 3D vector field from a NetCDF file. It tries multiple naming conventions for the vector components, including:
             u, v, w;x, y, z;a, b, c;Component1, Component2, Component3;velocity_x, velocity_y, velocity_z
         Args:
@@ -128,39 +110,69 @@ class NetCDFLoader:
             UnsteadyVectorField3D: The loaded vector field
         """
         with nc.Dataset(file_path, 'r') as dataset:
-            # Check dimensions
+             # Check dimensions
             dimensions = list(dataset.dimensions.keys())
-            has_time = 'time' in dimensions
-            spatial_dims = [dim for dim in dimensions if dim not in ['time','const']]
+            time_axis_name=None
+            for dim in dimensions:
+                if str(dim).lower()  in ["time", "tdim"]:
+                    time_axis_name=dim
+
+            spatial_dims = [dim for dim in dimensions if dim not in ['time','const',"tdim"]]
 
             if len(spatial_dims) != 3:
                 raise ValueError(f"Expected 3 spatial dimensions, found {len(spatial_dims)}")
 
-            Zdim, Ydim, Xdim = [len(dataset.dimensions[dim]) for dim in spatial_dims]
-            time_steps = len(dataset.dimensions['time']) if has_time else 1
+            xdim_axis=None
+            for dim in spatial_dims:
+                if str(dim).lower()  in ["xdim", "X"]:
+                    xdim_axis=dim
+            ydim_axis=None
+            for dim in spatial_dims:
+                if str(dim).lower()  in ["ydim", "Y"]:
+                    ydim_axis=dim
+            zdim_axis=None
+            for dim in spatial_dims:
+                if str(dim).lower()  in ["zdim", "Z"]:
+                    zdim_axis=dim
+                    
+            Xdim ,  Ydim, Zdim = len(dataset.dimensions[xdim_axis]) ,len(dataset.dimensions[ydim_axis]) ,len(dataset.dimensions[zdim_axis]) 
+            
+            # Adjust time steps based on input parameters
+            if time_axis_name is not None:
+                total_timesteps =len(dataset.dimensions[time_axis_name]) if time_axis_name is not None else 1
+                if timestep_begin >= timestep_end:
+                    raise ValueError(f"Invalid time range: begin={timestep_begin}, end={timestep_end}")
+                # Handle negative indices and validate range
+                if timestep_begin < 0:
+                    timestep_begin = 0
+                if timestep_end < 0:
+                    timestep_end = total_timesteps
+                if timestep_begin >= total_timesteps:
+                   timestep_begin = 0
+                if timestep_end > total_timesteps:
+                    timestep_end = total_timesteps
+                time_steps = timestep_end - timestep_begin
+                time = dataset.variables[time_axis_name][timestep_begin:timestep_end]
+                tmin, tmax = time.min(), time.max()
+            else:
+                 raise ValueError("Could not find time_axis_name in the NetCDF file")
+
 
             # Extract domain boundaries
-            x = dataset.variables[spatial_dims[2]][:]
-            y = dataset.variables[spatial_dims[1]][:]
-            z = dataset.variables[spatial_dims[0]][:]
+            x = dataset.variables[xdim_axis][:]
+            y = dataset.variables[ydim_axis][:]
+            z = dataset.variables[zdim_axis][:]
             domainMinBoundary = [x.min(), y.min(), z.min()]
             domainMaxBoundary = [x.max(), y.max(), z.max()]
 
 
             vector_field = None
-            # Extract time information
-            if has_time:
-                time = dataset.variables['time'][:]
-                tmin, tmax = time.min(), time.max()
-                # Create UnsteadyVectorField3D instance
-                vector_field = UnsteadyVectorField3D(Xdim, Ydim, Zdim, time_steps, domainMinBoundary, domainMaxBoundary, tmin, tmax)
-                
-            else:
-                tmin, tmax = 0, 1
-                vector_field = SteadyVectorField3D(Xdim, Ydim, Zdim, domainMinBoundary, domainMaxBoundary)
-
-            
-
+  
+            time = dataset.variables[time_axis_name][:]
+            tmin, tmax = time.min(), time.max()
+            # Create UnsteadyVectorField3D instance
+            vector_field = UnsteadyVectorField3D(Xdim, Ydim, Zdim, time_steps, domainMinBoundary, domainMaxBoundary, tmin, tmax)
+    
             # Try different naming conventions for vector components
             component_names = [
                 ['u', 'v', 'w'],
@@ -169,25 +181,19 @@ class NetCDFLoader:
                 ['Component1', 'Component2', 'Component3'],
                 ['velocity_x', 'velocity_y', 'velocity_z']
             ]
-            if variable_names is not None:
-                component_names.insert(0, variable_names)
-                
+   
             field_data = None
             for names in component_names:
                 if all(name in dataset.variables for name in names):
                     field_data = np.zeros((time_steps, Zdim, Ydim, Xdim, 3))
                     for i, var_name in enumerate(names):
-                        if has_time:
-                            field_data[:, :, :, :, i] = dataset.variables[var_name][:]
-                        else:
-                            field_data[0, :, :, :, i] = dataset.variables[var_name][:]
+                        field_data[:, :, :, :,i] =dataset.variables[var_name][timestep_begin:timestep_end]
                     break
 
             if field_data is None:
                 raise ValueError("Could not find vector components in the NetCDF file")
 
-            vector_field.field = torch.tensor(field_data)
+            vector_field.field = field_data
 
         return vector_field
-    
 

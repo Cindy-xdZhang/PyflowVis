@@ -20,7 +20,6 @@ class VertexArrayObject(Object):
         self.vbo_ids = gl.glGenBuffers(2)#vertex buffer and texture buffer
         self.ebo_id = gl.glGenBuffers(1)
         self.init()
-        
         self.material=None
         self.create_variable("modelMat",np.eye(4,dtype=np.float32),False)
   
@@ -117,7 +116,8 @@ class VertexArrayObject(Object):
 
 
 
-    def draw(self):
+    def render(self):
+
         # Bind VAO
         if self.material is not None:
             self.material.shader_program.setUniformScope([self.parentScene, self.cameraObject,self])
@@ -164,6 +164,7 @@ class VertexArrayObject(Object):
         self.appendVertexGeometryNoCommit(geometryVerts, elements, textureCoords)
 
     def appendConeWithoutCommit(self,centerPos:np.ndarray[np.float32,3], direction:np.ndarray[np.float32,3], radius:float, height:float, segments:int):
+        velocity_mag=np.linalg.norm(direction)
         direction=direction / np.linalg.norm(direction)
         startPos = centerPos - direction * height * 0.5
 
@@ -180,7 +181,7 @@ class VertexArrayObject(Object):
 
 
         # Append cone vertices
-        vTop = startPos + direction * height
+        vTop = startPos + direction * height*velocity_mag
         lastV = orth2
         textureCoords=[]
         temporayVertex=[None]*9*segments
@@ -308,15 +309,16 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         self.create_variable_callback("segments",10,dirtyCallBack,False,10)
         self.create_variable_callback("radius",0.01,dirtyCallBack,False,0.01)
         self.create_variable_callback("height",0.1,dirtyCallBack,False,0.1)
+        self.create_variable_callback("sampling",0.5,dirtyCallBack,True,0.1)
 
         self.create_variable_gui("color",(0.2,-.2,0.2),False,{'widget': 'color_picker'})
         self.dirty = True
 
-    def draw(self):
+    def render(self):
         if self.dirty==True:
             actFieldWidget=self.parentScene.getObject("ActiveField")
             self.updateVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
-        super().draw()
+        super().render()
         return 
 
     def updateVectorGlyph(self,vector_field, time: float=0.0):
@@ -332,7 +334,7 @@ class VertexArrayVectorGlyph(VertexArrayObject):
             return
     
         # Calculate the interpolation index
-        time_idx = (time - vector_field.domainMinBoundary[2]) / vector_field.timeInterval
+        time_idx = (time - vector_field.tmin) / vector_field.timeInterval
         lower_idx = int(np.floor(time_idx))
         upper_idx = int(np.ceil(time_idx))
         alpha = time_idx - lower_idx
@@ -341,23 +343,65 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         lower_idx = max(0, min(vector_field.time_steps - 1, lower_idx))
         upper_idx = max(0, min(vector_field.time_steps - 1, upper_idx))
 
-        # Get the two time slices of the vector field
-        lower_field = vector_field.field[lower_idx].detach().numpy()
-        upper_field = vector_field.field[upper_idx].detach().numpy()
+        # Get the two time slices and convert to numpy if needed
+        lower_field = vector_field.field[lower_idx]
+        upper_field = vector_field.field[upper_idx]
+        # Convert PyTorch tensors to numpy if necessary
+        if hasattr(lower_field, 'detach'):  # Check if it's a PyTorch tensor
+            lower_field = lower_field.detach().numpy()
+            upper_field = upper_field.detach().numpy()
 
         # Interpolate between the two time slices
         interpolated_field = (1 - alpha) * lower_field + alpha * upper_field
         radius=self.getValue("radius")
         hight=self.getValue("height")
         segments=self.getValue("segments")
+        scale=self.getValue("scale")
+        sampling_distance=max(self.getValue("sampling"),0.0001)
+        # Calculate number of samples in each direction
+        num_samples_x = int((vector_field.domainMaxBoundary[0]-vector_field.domainMinBoundary[0]) / sampling_distance)
+        num_samples_y = int((vector_field.domainMaxBoundary[1]-vector_field.domainMinBoundary[1]) / sampling_distance)
+        
         self.erase()
-        for y in range(interpolated_field.shape[0]):
-            for x in range(interpolated_field.shape[1]):
-                vx, vy = interpolated_field[y, x,:]  # Extract the vector components
-                posX,posY=x * vector_field.gridInterval[0]+vector_field.domainMinBoundary[0], y * vector_field.gridInterval[1]+vector_field.domainMinBoundary[1]
-                direction = np.array([vx, vy, 0.0],dtype=np.float32)  # Create a vector from the components
-                # Draw the vector glyph            
-                self.appendConeWithoutCommit(np.array([posX,posY,0.0],dtype=np.float32),direction, radius, hight, segments)
+        for y in range(num_samples_y):
+            for x in range(num_samples_x):
+                # Calculate actual position
+                posX = vector_field.domainMinBoundary[0] + x * sampling_distance
+                posY = vector_field.domainMinBoundary[1] + y * sampling_distance
+                # Convert position to grid coordinates for interpolation
+                grid_x = (posX - vector_field.domainMinBoundary[0]) / vector_field.gridInterval[0]
+                grid_y = (posY - vector_field.domainMinBoundary[1]) / vector_field.gridInterval[1]
+                
+                # Get interpolated vector at this position
+                x_idx = int(grid_x)
+                y_idx = int(grid_y)
+                
+                # Skip if outside field bounds
+                if (x_idx >= interpolated_field.shape[1] - 1 or 
+                    y_idx >= interpolated_field.shape[0] - 1 or 
+                    x_idx < 0 or y_idx < 0):
+                    continue
+                
+                # Bilinear interpolation weights
+                fx = grid_x - x_idx
+                fy = grid_y - y_idx
+                
+                # Get vectors at surrounding grid points
+                v00 = interpolated_field[y_idx, x_idx]
+                v10 = interpolated_field[y_idx, x_idx + 1]
+                v01 = interpolated_field[y_idx + 1, x_idx]
+                v11 = interpolated_field[y_idx + 1, x_idx + 1]
+                
+                # Bilinear interpolation
+                vx = (1 - fx) * (1 - fy) * v00[0] + fx * (1 - fy) * v10[0] + \
+                     (1 - fx) * fy * v01[0] + fx * fy * v11[0]
+                vy = (1 - fx) * (1 - fy) * v00[1] + fx * (1 - fy) * v10[1] + \
+                     (1 - fx) * fy * v01[1] + fx * fy * v11[1]
+                vx=vx*scale
+                vy=vy*scale
+                direction = np.array([vx, vy, 0.0], dtype=np.float32)
+                self.appendConeWithoutCommit(np.array([posX, posY, 0.0], dtype=np.float32),
+                                          direction, radius, hight, segments)
         self.commit()
         self.dirty=False
           
@@ -387,10 +431,10 @@ class CoordinateSystem(Object):
    
     def drawGui(self):
         pass
-    def draw(self):
+    def render(self):
        for axis in self.Vaos:
             axis.cameraObject=self.cameraObject
-            axis.draw()
+            axis.render()
    
         
     

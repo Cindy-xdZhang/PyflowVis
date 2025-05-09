@@ -1456,8 +1456,8 @@ void UnsteadyPathlneDataSetGenerator::classicalParametersDeserialization(const s
 	//one VastisParamter is Eigen::Vector2d rc_n, Eigen::Vector2d tx_ty,Eigen::Vector3d sxsytheta, int si.
 	const std::vector<std::tuple<Eigen::Vector2d, Eigen::Vector2d, Eigen::Vector3d, int>> Vastisparams = {
 		//std::make_tuple(Eigen::Vector2d(0.2, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 2.0), (int)VastisVortexType::zero_field),
-		std::make_tuple(Eigen::Vector2d(1.0, 2.0), Eigen::Vector2d(0.2, 0.2), Eigen::Vector3d(1.0, 1.0, M_PI_4), (int)VastisVortexType::saddle),
-		//std::make_tuple(Eigen::Vector2d(0.5, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 2.0),(int)VastisVortexType::center_ccw),
+		std::make_tuple(Eigen::Vector2d(1.0, 2.0), Eigen::Vector2d(0.2, 0.2), Eigen::Vector3d(1.0, 1.0, M_PI_4), (int)VastisVortexType::center_ccw),
+		std::make_tuple(Eigen::Vector2d(0.5, 20.0), Eigen::Vector2d(0.5, 0.0), Eigen::Vector3d(0.30, 1.0, 2.0),(int)VastisVortexType::center_ccw),
 		/*std::make_tuple(Eigen::Vector2d(0.99, 2.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 2.0), 2),
 
 	   std::make_tuple(Eigen::Vector2d(1.17, 3.0), Eigen::Vector2d(0.0, 0.0), Eigen::Vector3d(1.0, 1.0, 3.0), 1),
@@ -1595,7 +1595,7 @@ std::vector<VastisParamter> UnsteadyPathlneDataSetGenerator::generateRandomMixtu
 		const auto rc_n = Eigen::Vector2d{ std::get<0>(rc_n_tuple) * radius_divde,std::get<1>(rc_n_tuple) };
 		//	// make sure txty is in good range: that no vortex center are too close.
 		Eigen::Vector2d txy = genTxty(i);
-		Eigen::Vector3d sxsytheta = { 1.0, 1.0, genTheta(rng) };
+		Eigen::Vector3d sxsytheta = { 0.5*genSx(rng)+0.5, 1.0, genTheta(rng) };
 		//int vortexTypeSi = std::floor((dis_vortexType(rng) + 1) / 2)+1;
 		int vortexTypeSi = std::clamp((int)std::floor((dis_vortexType(rng)) / 2), 1, 2);
 
@@ -1693,14 +1693,13 @@ void UnsteadyPathlneDataSetGenerator::generateMixUnsteadyFieldPathline(const std
 
 				//auto licSegTexturewithPathline = addPathlineVisualization(steadyLicTexture, domainMinBoundary, domainMaxBoundary, tmin, tmax, ClusterPathlines);
 				string licFilename0 = Major_task_Licfoldername + sample_tag_name + "_steady_lic.png";
-				string licFilename1 = Major_task_Licfoldername + sample_tag_name + "_steady_seglic.png";
-				saveAsPNG(outputSteadyTexture, licFilename0);
 				saveAsPNG(steadyLicTexture, licFilename0);
 				auto outputTextures = LICAlgorithm_UnsteadyField(unsteady_field, LicImageSize, LicImageSize, stepSize, maxLICIteratioOneDirection, VORTEX_CRITERION::VELICITY_MAGINITUDE);
 				for (size_t i = 0; i < outputTextures.size(); i += LicSaveFrequency) {
 					string deform_tag_name = sample_tag_name + "deformed_" + std::to_string(i);
 					string licFilename = Major_task_Licfoldername + deform_tag_name + "lic.png";
-					saveAsPNG(outputTextures[i], licFilename);
+					const auto LicTexturewith = addSegmentationVis4MixtureVortex(outputTextures[i], steadyField, vectorFieldMeta);
+					saveAsPNG(LicTexturewith, licFilename);
 				}
 			}
 			printf(".");

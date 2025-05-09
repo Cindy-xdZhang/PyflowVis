@@ -61,6 +61,7 @@ def operate_on_dict(dict_to_operate, key_list, new_value, index=0):
     
 class Object:
     def __init__(self, name:str,autoSaveFolderPath = "autosave"):
+        #GUI field
         self.name = name
         self.persistentPropertyDefaultValues={}
         self.persistentProperties = {}
@@ -71,6 +72,8 @@ class Object:
         self.callbacks={}
         self.optionValues = {}
         self.GuiVisible=True
+        
+        #self.renderVisible control whethor to call render() function
         self.renderVisible=False
         self.parentScene=None
         self.cameraObject=None
@@ -134,7 +137,9 @@ class Object:
     
     def draw(self):
         if self.renderVisible:
-            self.render()        
+            self.render()     
+            
+               
     @typechecked
     def addAction(self, action_name:str, function: callable):
         # Add a new action to the actions dictionary
@@ -420,6 +425,7 @@ class Scene(Object):
                     changed, new_visible = imgui.checkbox(f"##{obj_name}", visible)
                     if changed:
                         obj.setGuiVisibility(new_visible) 
+                        obj.setRenderingVisibility(new_visible) 
             imgui.end()
         #draw all the objects in the scene
         for obj in self.objects.values():

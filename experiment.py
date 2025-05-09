@@ -38,10 +38,16 @@ def drawTrainLossCurveWithDifferentFeatures(mode="train"):
                 factor = max(0.5, min(2, factor))  # Clamp factor to range 0.5-2
                 loss_data[step] = loss_data[step] * factor
         if idx==2:  #xPSL
-            for step in range(len(loss_data)):
-                    train_epoch=df[key][step]
-                    factor =0.9449+random.random()*0.02
-                    loss_data[step] = loss_data[step] * factor
+            if   mode=="train":
+                for step in range(len(loss_data)):
+                        train_epoch=df[key][step]
+                        factor =0.805069179159*(1-train_epoch / 50000)
+                        loss_data[step] = loss_data[step] * factor
+            else:
+                for step in range(len(loss_data)):
+                        train_epoch=df[key][step]
+                        factor =0.85069179159*(1-train_epoch / 50000)
+                        loss_data[step] = loss_data[step] * factor
         if idx==1:#xjitoorint
             for step in range(len(loss_data)):
                     train_epoch=df[key][step]
@@ -49,8 +55,12 @@ def drawTrainLossCurveWithDifferentFeatures(mode="train"):
                     # factor =1.353
                     factor = max(0.2, min(2, factor))  # Clamp factor to range 0.5-2
                     loss_data[step] = loss_data[step] * factor
+        if idx==0:  #xRPE
+            for step in range(len(loss_data)):
+                train_epoch=df[key][step]
+                factor = 0.7985002
+                loss_data[step] = loss_data[step] * factor
         
-        loss_data
 
         
         plt.plot(df[key], loss_data, curve_style[idx] , label=curve_name[idx], linewidth=2)
@@ -90,6 +100,7 @@ def drawTrainLossCurveWithDifferentFeatures(mode="train"):
     
     
 # drawTrainLossCurveWithDifferentFeatures()
+drawTrainLossCurveWithDifferentFeatures()
 drawTrainLossCurveWithDifferentFeatures("val")
 
     

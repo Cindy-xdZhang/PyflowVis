@@ -120,21 +120,23 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
                 scheduler.step(epoch)       
                         
             epoch_loss /= len(data_loader)
+            
             # Validate the model
-            if (epoch+1) % valiate_every == 0 or epoch==0:
-                val_loss = validate(model, validation_data_loader, device)  
-                logging.info(f'Epoch {epoch+1}, epoch_Loss: {epoch_loss}, Val Loss: {val_loss}')
-                if config['wandb']:
-                    wandb.log({"epoch": epoch+1,  "epoch_Loss": epoch_loss, "val_loss": val_loss})
-                #save best model 
-                if val_loss < best_val_loss and config['save_model'] :
-                    best_val_loss = val_loss
-                    saving_path= os.path.join(config['save_model_path'],run_Name) 
-                    save_checkpoint({
-                        'epoch': epoch + 1,
-                        'state_dict': model.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                    }, folder_name=saving_path, checkpoint_name= f'best_checkpoint.pth.tar')
+            if validation_data_loader is not None:
+                if (epoch+1) % valiate_every == 0 or epoch==0:
+                    val_loss = validate(model, validation_data_loader, device)  
+                    logging.info(f'Epoch {epoch+1}, epoch_Loss: {epoch_loss}, Val Loss: {val_loss}')
+                    if config['wandb']:
+                        wandb.log({"epoch": epoch+1,  "epoch_Loss": epoch_loss, "val_loss": val_loss})
+                    #save best model 
+                    if val_loss < best_val_loss and config['save_model'] :
+                        best_val_loss = val_loss
+                        saving_path= os.path.join(config['save_model_path'],run_Name) 
+                        save_checkpoint({
+                            'epoch': epoch + 1,
+                            'state_dict': model.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                        }, folder_name=saving_path, checkpoint_name= f'best_checkpoint.pth.tar')
                     
             #periodically save model
             if  config['save_model'] and config["save_freq"]>0 and epoch % config["save_freq"]== 0 and epoch>0 :
@@ -167,11 +169,6 @@ def train_model(model, data_loader, validation_data_loader, optimizer,scheduler,
 
 
 
-        
-        
-        
-    
-
 
 def train_pipeline():
     print("torch.cuda.is_available():",torch.cuda.is_available())  # Should return True
@@ -183,7 +180,7 @@ def train_pipeline():
         cfg['run_name']=run_Name
         logging.info(f"run name: {run_Name}, run tags: {runTags}")
         #get dataset realted config paramters,like PathlineGroupsCount, minV,maxV, etc.
-        readDataSetRelatedConfig(cfg)
+        # readDataSetRelatedConfig(cfg)
         model = build_model_from_cfg(cfg.model)
         model.to(cfg['device'])
     
@@ -198,13 +195,16 @@ def train_pipeline():
                                                 )
         print(f"length of training dataset: {len(train_loader.dataset)}")
 
-        val_loader = build_dataloader_from_cfg(cfg.batch_size,
-                                                cfg.dataset,
-                                                cfg.dataloader,
-                                                datatransforms_cfg=cfg.datatransforms,
-                                                split='val'                                             
-                                                )
-        print(f"length of val dataset: {len(val_loader.dataset)}")
+        if cfg["val_freq"]>0:
+            val_loader = build_dataloader_from_cfg(cfg.batch_size,
+                                                    cfg.dataset,
+                                                    cfg.dataloader,
+                                                    datatransforms_cfg=cfg.datatransforms,
+                                                    split='val'                                             
+                                                    )
+            print(f"length of val dataset: {len(val_loader.dataset)}")
+        else:
+            val_loader=None
 
       
        # optimizer & scheduler

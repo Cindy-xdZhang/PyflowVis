@@ -25,9 +25,10 @@ int main()
 	/*auto generator = UnsteadyPathlneDataSetGenerator();
 	generator.GenDataset(15, 20, 20, DataRootFolder + "dbgPathline6/");
 	generator.analyticalTestCasesGeneration(DataRootFolder + "/dbgPathline6/");*/
+	//generator.analyticalTestCasesGeneration(DataRootFolder + "/dbgPathline6/");
 
+	generator.generateMixUnsteadyFieldPathline("../data/mixturePICture/", 10, 1);
 	//generator.classicalParametersDeserialization(DataRootFolder + "images/DesSerialize/");
-	generator.generateMixUnsteadyFieldPathline("../data/mixturePICture/", 1, 10);
 	//// generateUnsteadyFieldPathline(5, 1, 1, "../data/Pathline/", "train");
 	////  generateUnsteadyField(15, 20, 100, "../data/Robust/", "train"); // 30000
 	////  generateUnsteadyField(10, 10, 10, "../data/Robust/", "validation"); // 1000

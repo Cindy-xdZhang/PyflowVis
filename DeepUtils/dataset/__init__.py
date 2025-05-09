@@ -4,3 +4,4 @@ from .data_utils import *
 from .SteadyVastisDataset import *
 from .UnsteadyVastisDataset import *
 from .vortexVizDataset import *
+from .FTLEDataset import *

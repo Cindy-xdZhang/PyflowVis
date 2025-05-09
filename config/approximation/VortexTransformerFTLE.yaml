@@ -2,17 +2,17 @@
 model:
   NAME: BaseSeg
   encoder_args:
-    NAME: PathlineTransformerV0
-    KpathlinePerGroup: 4
+    NAME: LineTransformer4FTLE
+    KpathlinePerGroup: 2
     in_channels: 7        #if in_channels not specify then it take value from dataset.PathlineFeature (function readDataSetRelatedConfig)
-    PathlineGroups: 64     ##PathlineGroups  is write by function readDataSetRelatedConfig
+    PathlineGroups: 2500    ##PathlineGroups  is no longer write by function readDataSetRelatedConfig
     dmodel: 144 #becasue of pos_embedding,   dmodel must be multiple of 3*2=6, [if not the code will adjust itself.]
     num_encoder_layers: 3
-    k: 16
+    k: 16 # query KNN
 
 
   criterion_args:
-    NAME: BCELoss
+    NAME: MSELoss
    
 
 # ---------------------------------------------------------------------------- #
@@ -22,12 +22,12 @@ model:
 # random_seed: 4259
 
 # wandb: True 
-batch_size: 4
+batch_size: 8
 
-lr: 0.0001
-epochs: 1
+lr: 0.00001
+epochs: 100
 
-val_freq: 1
+val_freq: 0
 # scheduler: TwoStep
 # warmup_epochs: 80 
 # second_lr: 0.00001
@@ -41,7 +41,7 @@ warmup_epochs:  2
 warmup_lr_init: 5.0e-5
 min_lr: 0.000005
 
-save_model: true
+save_model: false
 save_freq: 30 # saving frequency for ckpt. -1 only saving the latest and the best.
 
 # scheduler: TwoStep
@@ -51,11 +51,9 @@ save_freq: 30 # saving frequency for ckpt. -1 only saving the latest and the bes
 dataloader:
   num_workers: 0
 dataset:
-  NAME: UnsteadyVastisPathlineSeg
-  # data_dir: 'CppProjects/data/RealDataCross4_256samplesPerGrid/'
-  data_dir: 'C:\\Users\\xingdi\\OneDrive - KAUST\\sources\\PyflowVis\\CppProjects\\data\\RealDataCross4_256samplesPerGrid'
-
-  downSampleRatio: 0.03125 #0.25,0.125
+  NAME: Pathline2FTLEDataset
+  data_dir: 'FlowDataAndVisualizationScripts\data'
+  # downSampleRatio: 0.03125 #0.25,0.125
   # data_dir: 'CppProjects/data/realDataFixLabelBug/'
   # data_dir: 'CppProjects/data/dbgPathline6/X32_Y32_T5'
   # data_dir: '/ibex/user/zhanx0o/data/dbgPathline6/X32_Y32_T5'

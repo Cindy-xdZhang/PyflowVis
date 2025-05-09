@@ -117,17 +117,15 @@ def LicRenderingUnsteady(field:UnsteadyVectorField2D,licImageSize:int,timeStepSK
 
 
 
-
-  
 @typechecked
-def LicRenderingSteadyCpp(vecfield: SteadyVectorField2D,licImageSize:int,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
+def LicRenderingSteadyCpp(vecfield: SteadyVectorField2D,licImageSizeX:int,licImageSizeY:int,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
     """
     Render a steady 2D vector field as an LIC image and save to a PNG file.
     """ 
 
     assert(cppMoudules['CppLicRenderingModule'].licRenderingPybindCPP is not None)
 
-    lic_result = cppMoudules['CppLicRenderingModule'].licRenderingPybindCPP( vecfield.field, vecfield.Xdim, vecfield.Ydim, vecfield.domainMinBoundary[0], vecfield.domainMaxBoundary[0], vecfield.domainMinBoundary[1], vecfield.domainMaxBoundary[1],licImageSize,stepSize,MaxIntegrationSteps)
+    lic_result = cppMoudules['CppLicRenderingModule'].licRenderingPybindCPPv2( vecfield.field, vecfield.Xdim, vecfield.Ydim, vecfield.domainMinBoundary[0], vecfield.domainMaxBoundary[0], vecfield.domainMinBoundary[1], vecfield.domainMaxBoundary[1],licImageSizeX,licImageSizeY,stepSize,MaxIntegrationSteps)
 
     lic_normalized = np.clip(lic_result, 0, np.max(lic_result))  # Clip negative values to 0
     # Step 4: Convert to an image and save
@@ -141,6 +139,7 @@ def LicRenderingSteadyCpp(vecfield: SteadyVectorField2D,licImageSize:int,saveFol
     img.save(savePath)
     return img
 
+  
 
 
 @typechecked
@@ -189,9 +188,8 @@ def LicRenderingPathlineSegmentation(vecfield: UnsteadyVectorField2D, Segmentati
     blended_image.save(blended_save_path)
     return blended_image
 
-
 @typechecked
-def LicRenderingUnsteadyCpp(vecfield:UnsteadyVectorField2D,licImageSize:int,timeStepSKip:int=2,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
+def LicRenderingUnsteadyCpp(vecfield:UnsteadyVectorField2D,licImageSizeX:int,licImageSizeY:int,timeStepSKip:int=2,saveFolder:str="./",saveName:str="vector_field_lic",stepSize=0.01, MaxIntegrationSteps=128):
     if not os.path.exists(saveFolder):
         os.makedirs(saveFolder)
 
@@ -201,7 +199,8 @@ def LicRenderingUnsteadyCpp(vecfield:UnsteadyVectorField2D,licImageSize:int,time
         # print(f"Processing time step {i}")
         steadyVectorField2D = vecfield.getSlice(i)
         save_name=f"{saveName}_{i}"
-        LicRenderingSteadyCpp(steadyVectorField2D ,licImageSize, saveFolder=saveFolder,saveName =save_name,stepSize=stepSize,MaxIntegrationSteps=MaxIntegrationSteps)
+        LicRenderingSteadyCpp(steadyVectorField2D ,licImageSizeX,licImageSizeY, saveFolder=saveFolder,saveName =save_name,stepSize=stepSize,MaxIntegrationSteps=MaxIntegrationSteps)
+    
     
     
 @typechecked        

@@ -29,7 +29,11 @@ def draw_uint_input(label, value, min_value=0, max_value=4294967295):
     return changed, value
 
 def draw_float_input(label, value):
-    changed, new_value = imgui.input_float(label, value)
+    changed, new_value = imgui.input_float(
+        label, 
+        value,
+        flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE
+    )
     return changed, new_value
 
 
@@ -195,7 +199,30 @@ def input_vecn_int_float(label, vecn_input):
     return changed, vecn
 
 
-
+def draw_file_dialog(label, value):
+    """
+    Draw a file dialog button next to a text input.
+    Returns changed (bool) and new_value (str)
+    """
+    changed, new_value = imgui.input_text(label, value, 256)
+    
+    imgui.same_line()
+    if imgui.button(f"Browse##{label}"):
+        # Note: This is a placeholder. You'll need to implement actual file dialog
+        # using something like tkinter.filedialog or a native file dialog library
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()  # Hide the main window
+            file_path = filedialog.askopenfilename()
+            if file_path:  # Only update if a file was selected
+                new_value = file_path
+                changed = True
+        except ImportError:
+            logging.warning("tkinter not available for file dialog")
+    
+    return changed, new_value
 
 valid_customizations = {
             'float': [{'widget': 'slider_float', 'min': 0.0, 'max': 1.0}, {'widget': 'input'}],
@@ -210,7 +237,7 @@ valid_customizations = {
             'ivec3': [{'widget': 'input'},{'widget': 'drag'}],
             'ivec4': [{'widget': 'input'},{'widget': 'drag'}],
             'bool': [{'widget': 'checkbox'}],
-            'str': [{'widget': 'input'}],
+            'str': [{'widget': 'input'},{"widget":"file_dialog"}],
             'ivecn': [{'widget': 'input'}],
             'vecn': [{'widget': 'input'},{'widget': 'plot_lines'}],
             'options':[{'widget': 'combo'}]
@@ -251,7 +278,7 @@ def getTypeName(value) -> Any | str:
 
 class ValueGuiCustomization:
     '''ValueGuiCustomization class to store the customization parameters for draw the gui for a value;
-    The usage is to create a ValueGuiCustomization object with "name" "type" and append it to the an Object .
+    The usage is to create a ValueGuiCustomization object with "name": "type"(e.g., "bool:checkbox") and append it to the an Object .
     The Object's propertie with that name and type will be drawn in the gui with the customization parameters.
     Mismatch in name or type will make the valueguicustomization get ignored.
     '''
@@ -285,7 +312,7 @@ class ValueGuiCustomization:
 
 
 
-def get_imgui_widget_for_type(Value_type:str, customization:ValueGuiCustomization=None):
+def get_imgui_widget_for_type(variable_type:str, customization:ValueGuiCustomization=None):
     """
     Selects and returns the appropriate ImGui widget based on customization type and entry.
 
@@ -345,6 +372,7 @@ def get_imgui_widget_for_type(Value_type:str, customization:ValueGuiCustomizatio
         },
         'str': {
             'input': lambda  label, value: draw_str_input( label, value),
+            'file_dialog': lambda label, value: draw_file_dialog(label, value),
         },
         'options': {
             'combo': lambda  label,value_list,current_selection:draw_options_combo(label, value_list, current_selection)
@@ -352,14 +380,14 @@ def get_imgui_widget_for_type(Value_type:str, customization:ValueGuiCustomizatio
         # add more
     }
 
-    widget_map = widget_map_by_type.get(Value_type)
-    if widget_map:
-        callable=widget_map.get(customization.get('widget'), None) if customization else None
+    variable_type_possible_widget_opitions = widget_map_by_type.get(variable_type)
+    if variable_type_possible_widget_opitions:
+        callable=variable_type_possible_widget_opitions.get(customization.get('widget'), None) if customization else None
         if callable is None:
-            first_key = next(iter(widget_map))
-            callable=widget_map[first_key]
+            first_key = next(iter(variable_type_possible_widget_opitions))
+            callable=variable_type_possible_widget_opitions[first_key]
         return callable
-    logging.error(f"Error: No ImGui widget found for  '{Value_type}' .")
+    logging.error(f"Error: No ImGui widget found for  '{variable_type}' .")
     return None
       
  
