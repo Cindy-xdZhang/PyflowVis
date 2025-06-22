@@ -9,7 +9,6 @@ A simplified Python fluid visualization renderer and GUI based on imgui, possibl
 ### Install dependency for PyFlowVis
 ``` 
 pip install -r requirements gui.txt
-python main.py
 ```
 ### Start the visualization Engine
 ```
@@ -49,6 +48,16 @@ class GuiTest(Object):
    
 4. For pure cpp program , write it in  'CppProjects' folder and build with CMake, e.g. Vastitas data generator.
 
+# TODO list General
+0. optc optimize di term +ci term(most important thing!)
+1. add Lic and texture manager for the plane.
+2. add mouse click intersection with pickable object
+3. reference frame transformation
+
+## possible optimize 
+1. multiple thread rendering using glMultiDrawArrays
+2. vertex array object operate geometry,indices,texture as list, could using numpy.array for fast operation.
+
 
 
 
@@ -56,12 +65,11 @@ class GuiTest(Object):
 # Project 1: VortexTransformer: End‐to‐End Objective Vortex Detection in 2D Unsteady Flow Using Transformers
 ![Weixin Screenshot_20250429110328](https://github.com/user-attachments/assets/4c3b0712-e8bc-4838-bf4a-463938b3da9c)
 
-Implementation code for the project: "VortexTransformer: End‐to‐End Objective Vortex Detection in 2D Unsteady Flow Using Transformers".
 The implementation of the "VortexTransformer: End‐to‐End Objective Vortex Detection in 2D Unsteady Flow Using Transformers" project includes three parts:
 
 > + A.  Vastitas training data generation implemented in C++: CppProjects/src/flowGenerator.cpp and main.cpp.
 > + B.  licrender implemented with pybind/C++ for fast Line Integral Convolution (LIC) rendering from Python: CppProjects/PybindCppModules
-> + C.  VortexTransformer model components: DeepUtils\models\segmentation\pathline_transformer.py
+> + C.  VortexTransformer model components: [`DeepUtils\models\segmentation\pathline_transformer.py`](./DeepUtils\models\segmentation\pathline_transformer.py)
 
 ### Install dependency for project 1
 ``` 
@@ -85,14 +93,42 @@ python train.py  --config config/segmentation/pathline_transformer.yaml
 python test.py  --config config/segmentation/pathline_transformer.yaml             
 ``` 
 
-# TODO list General
-0. optc optimize di term +ci term(most important thing!)
-1. add Lic and texture manager for the plane.
-2. add mouse click intersection with pickable object
-3. reference frame transformation
+If you use this code, please cite:
+```
+@inproceedings{zhang2025vortextransformer,
+  title={VortexTransformer: End-to-End Objective Vortex Detection in 2D Unsteady Flow Using Transformers},
+  author={Zhang, Xingdi and Rautek, Peter and Hadwiger, Markus},
+  booktitle={Computer Graphics Forum},
+  pages={e70042},
+  year={2025},
+  organization={Wiley Online Library}
+}
+```
 
-## possible optimize 
-1. multiple thread rendering using glMultiDrawArrays
-2. vertex array object operate geometry,indices,texture as list, could using numpy.array for fast operation.
 
 
+
+
+
+
+
+
+# Project 2: Exploring 3D Unsteady Flow using 6D Observer Space Interactions
+
+![teaser3D](./assets/readmePics/teaser.png)
+
+### Code
+We provide C++ code for the algorithm proposed in our paper "Exploring 3D Unsteady Flow using 6D Observer Space Interactions." Please note that while our implementation relies on a custom C++-based visualization engine, we are unable to share the full engine source code. Instead, we provide extracted and slightly modified portions of the code to improve readability and accessibility.
+
+The implementation for Observer-Relative Pathline Filtering and Observer-Relative Isosurface Animation are available in [`CppProjects/src/interactive_observer_explore3d.cpp`](./CppProjects/src/interactive_observer_explore3d.cpp). For a more complete understanding of the algorithm, please refer to the supplementary materials of our paper, which include pseudocode outlining the core components of the proposed method. 
+
+
+If you use this code, please cite:
+
+```
+@inproceedings{zhang2025Explore3DUnsteadyFlow,
+  title={Exploring 3D Unsteady Flow using 6D Observer Space Interactions},
+  author={Zhang, Xingdi and Rautek, Peter and  Ageeli,Amani and  Theu{\ss}l,Thomas  and   Hadwiger, Markus},
+  year={2025},
+}
+```
