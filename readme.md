@@ -120,7 +120,20 @@ If you use this code, please cite:
 ### Code
 We provide C++ code for the algorithm proposed in our paper "Exploring 3D Unsteady Flow using 6D Observer Space Interactions." Please note that while our implementation relies on a custom C++-based visualization engine, we are unable to share the full engine source code. Instead, we provide extracted and slightly modified portions of the code to improve readability and accessibility.
 
-The implementation for Observer-Relative Pathline Filtering and Observer-Relative Isosurface Animation are available in [`CppProjects/src/interactive_observer_explore3d.cpp`](./CppProjects/src/interactive_observer_explore3d.cpp). For a more complete understanding of the algorithm, please refer to the supplementary materials of our paper, which include pseudocode outlining the core components of the proposed method. 
+The implementation includes the following key components:
+
+- Observer-Relative scalar field transformation: [`CppProjects/src/explore_3d_vector_field/interactive_observed_iso_surface.cpp`](./CppProjects/src/explore_3d_vector_field/interactive_observed_iso_surface.cpp)
+- Observer-Relative Pathline Filtering: [`CppProjects/src/explore_3d_vector_field/interactive_observed_pathline.cpp`](./CppProjects/src/explore_3d_vector_field/interactive_observed_pathline.cpp) 
+- Observer-Relative Isosurface Animation: [`CppProjects/src/explore_3d_vector_field/interactive_observed_iso_surface.cpp`](./CppProjects/src/explore_3d_vector_field/interactive_observed_iso_surface.cpp)
+
+The implementation relies on several utility classes and interfaces defined in:
+- `IsoSurface.h/cpp`: Isosurface computation
+- `ReferenceFrame3d.h/cpp`: Reference frame transformations
+- `Discrete3DFlowField.h/cpp`: 3D vector field data structures, pathine, streamline integration.
+
+For a complete understanding of the algorithms, please refer to the supplementary materials of our paper which include detailed pseudocode for all core components.
+Our code relies on VTK-9.4.1.
+
 
 
 If you use this code, please cite:
@@ -128,7 +141,7 @@ If you use this code, please cite:
 ```
 @inproceedings{zhang2025Explore3DUnsteadyFlow,
   title={Exploring 3D Unsteady Flow using 6D Observer Space Interactions},
-  author={Zhang, Xingdi and Rautek, Peter and  Ageeli,Amani and  Theu{\ss}l,Thomas  and   Hadwiger, Markus},
+  author={Zhang, Xingdi and  Ageeli,Amani and  Theu{\ss}l,Thomas and  Hadwiger, Markus and  Rautek, Peter },
   year={2025},
 }
 ```
