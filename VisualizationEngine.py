@@ -92,7 +92,7 @@ class VisualizationEngine:
             # Rendering
             gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         
-            self.scene.draw_all()
+            self.scene.render_all()
 
             imgui.new_frame()
             self.scene.drawGui()

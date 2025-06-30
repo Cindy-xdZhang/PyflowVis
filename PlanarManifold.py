@@ -1,4 +1,4 @@
-from VertexArrayObject import *
+from GuiObjcts.VertexArrayObject import *
 from VisualizationEngine import getEngine
 from shaderManager import *
 

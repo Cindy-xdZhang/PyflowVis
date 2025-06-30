@@ -1,6 +1,6 @@
 # PyFlowVis:
 
-![alt text](assets/misc/image-1.png)
+<img src="assets/readmePics/framework.png" alt="alt text" width="720"/>
 
 This repository is a hybrid C++ Python framework for flow visualization, containing:
 A simplified Python fluid visualization renderer and GUI based on imgui, possibly with several projects related to flow visualization.
@@ -127,9 +127,9 @@ The implementation includes the following key components:
 - Observer-Relative Isosurface Animation: [`CppProjects/src/explore_3d_vector_field/interactive_observed_iso_surface.cpp`](./CppProjects/src/explore_3d_vector_field/interactive_observed_iso_surface.cpp)
 
 The implementation relies on several utility classes and interfaces defined in:
-- `IsoSurface.h/cpp`: Isosurface computation
-- `ReferenceFrame3d.h/cpp`: Reference frame transformations
-- `Discrete3DFlowField.h/cpp`: 3D vector field data structures, pathine, streamline integration.
+- [`IsoSurface.h/cpp`](./CppProjects/src/explore_3d_vector_field/IsoSurface.cpp): Isosurface computation
+- [`ReferenceFrame3d.h/cpp`](./CppProjects/src/explore_3d_vector_field/ReferenceFrame3d.cpp): Reference frame transformations
+- [`Discrete3DFlowField.h/cpp`](./CppProjects/src/explore_3d_vector_field/Discrete3DFlowField.cpp): 3D vector field data structures, pathine, streamline integration.
 
 For a complete understanding of the algorithms, please refer to the supplementary materials of our paper which include detailed pseudocode for all core components.
 Our code relies on VTK-9.4.1.
@@ -141,7 +141,7 @@ If you use this code, please cite:
 ```
 @inproceedings{zhang2025Explore3DUnsteadyFlow,
   title={Exploring 3D Unsteady Flow using 6D Observer Space Interactions},
-  author={Zhang, Xingdi and  Ageeli,Amani and  Theu{\ss}l,Thomas and  Hadwiger, Markus and  Rautek, Peter },
+  author={Zhang, Xingdi and  Ageeli,Amani and  Theu{\ss}l,Thomas and  Hadwiger, Markus and  Rautek, Peter},
   year={2025},
 }
 ```

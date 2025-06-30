@@ -134,10 +134,12 @@ class Object:
         return None
     
  
-    
+    #An object draw including two parts:
+    #1. drawGui() is called by the scene to draw the object's properties in the gui, controled by  GuiVisible,called by the scene.drawALlGUi
+    #2. render() is to draw the object's geometry, controled by  renderVisible
     def draw(self):
         if self.renderVisible:
-            self.render()     
+            self.render()        
             
                
     @typechecked
@@ -213,9 +215,16 @@ class Object:
         else:            
             self.nonPersistentProperties[name] = value
 
-    def create_variable_callback(self, name:str, value:any, callback:callable,persistent:bool=False, default_value=None) -> None:
+    def create_variable_callback(self, name:str, value:any, callback:callable,persistent:bool=False,  default_value=None) -> None:
         self.create_variable(name, value, persistent, default_value)
         self.addCallback(name,callback)
+
+    def create_variable_callback_with_gui_customization(self, name:str, value:any, callback:callable,persistent:bool=False,  default_value=None,customizationsParamter:Dict[str,Any]=None) -> None:
+        self.create_variable(name, value, persistent, default_value)
+        self.addCallback(name,callback)
+        if customizationsParamter is not None:
+            cust=ValueGuiCustomization(name,getTypeName(value),customizationsParamter)
+            self.appendGuiCustomization(cust)
 
     def setValue(self, name:str, value):
         self.updateValue(name, value)
@@ -383,7 +392,7 @@ class Scene(Object):
         return self.objects.get(name, None)    
     
   
-    def draw_all(self):
+    def render_all(self):
         for obj in self.objects.values():
             obj.draw()
             

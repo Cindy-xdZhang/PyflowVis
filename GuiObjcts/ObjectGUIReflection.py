@@ -3,6 +3,9 @@ from typing import Dict, Any
 import numpy as np
 import ctypes
 import logging
+import tkinter as tk
+from tkinter import filedialog
+
 ###
 ###all gui widget functions
 ###
@@ -211,8 +214,6 @@ def draw_file_dialog(label, value):
         # Note: This is a placeholder. You'll need to implement actual file dialog
         # using something like tkinter.filedialog or a native file dialog library
         try:
-            import tkinter as tk
-            from tkinter import filedialog
             root = tk.Tk()
             root.withdraw()  # Hide the main window
             file_path = filedialog.askopenfilename()

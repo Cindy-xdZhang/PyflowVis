@@ -1,14 +1,16 @@
 from VisualizationEngine import *
-from train import *
 from FLowUtils.AnalyticalFlowCreator import *
 from DeepUtils.utils import EasyConfig
-from VertexArrayObject import *
+from GuiObjcts.VertexArrayObject import *
 from GuiObjcts.ObjectGUIReflection import ValueGuiCustomization
 from shaderManager import *
 from FLowUtils.VectorField2d import *
 from FLowUtils.netCDFLoader import *
 from NLPCommand import *
 from  PlanarManifold import *
+from misc.fileMonitor import *
+
+
 
 def screen_to_world(x, y, width, height, modelview, projection, viewport):    
     y = height - y  # OpenGL's y axis  is reversed of pygame's y axis
@@ -113,22 +115,17 @@ class NetCDFLoaderOBJ(Object):
         self.addAction("load cdf file", lambda x:self.loadCDF()) 
         
     def loadCDF(self):
-        path=self.getValue("path")
-      
-        vectorfield=NetCDFLoader.load_vector_field2d(path)
+        resolved_path=self.getValue("path")
+        time_step_begin=self.getValue("time_step_begin")
+        time_step_end=self.getValue("time_step_end")
+        vectorfield=NetCDFLoader.load_vector_field2d(resolved_path,time_step_begin,time_step_end)
         scene=self.getParentScene()
         # Extract name from path - get last folder/file name
-        name=path2name(path)
+        name=path2name(resolved_path)
         scene.getObject("ActiveField").insertField(name,vectorfield)
         
             
     
-        
-        
-
-                    
-
-
 
 
 
@@ -141,6 +138,8 @@ def main():
     config = EasyConfig()
     config.load("config/renderingConfig.yaml", recursive=False)
     engine=VisualizationEngine(config=config['rendering'])
+    # glocal_pfs = ProtocolFileSystem()
+    # glocal_pfs.register("assets", "C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets")
     size=config['rendering']["window_size"]
 
     
