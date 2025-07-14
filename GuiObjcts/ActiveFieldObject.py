@@ -28,7 +28,7 @@ class ActiveField(Object):
         self.create_variable_gui("time",0.0,False, {'widget': 'input'})
         self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
         #list of str is treated specially  as option in my gui implementation, don't need to specify customization, it always render as combo box
-        self.create_variable_gui("active field",[""],False)
+        self.create_variable_gui("active field",[],False)
 
         def dirtyCallBack(obj:ActiveField) -> None:
             vectorGlyph=obj.parentScene.getObject("vectorGlyph")
@@ -82,6 +82,9 @@ class ActiveField(Object):
         if fieldName not in fieldNameList:
             fieldNameList.append(fieldName)
             self.setValue("active field",fieldNameList)
+        # if  only one field exist,  make it active
+        if len(fieldNameList)==1:
+            self.updateOptionValue("active field",fieldNameList[0])
 
     def getActiveFieldName(self)->str:
         return self.getOptionValue("active field")

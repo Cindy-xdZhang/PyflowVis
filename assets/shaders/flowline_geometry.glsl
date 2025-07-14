@@ -14,14 +14,13 @@ uniform mat4 projMat;
 
 uniform float lineWeight;
 uniform float zOffset;
-uniform unsigned int flowlineGroupID; 
+//uniform unsigned int flowlineGroupID; 
 //layout (triangle_strip, max_vertices=4) out;
 
 in VS_OUT {
     vec3 position;
-    //vec3 tangent;
     float attrib;
-     float attrib2;
+    float attrib2;
     float opacity;
 } gs_in[];
 
@@ -37,8 +36,7 @@ void main() {
     //vec3 direction = gs_in[1].position.xyz - gs_in[0].position.xyz;
     //direction = normalize(direction);
     float use_line_wight=lineWeight;
-    if(flowlineGroupID==1)
-        use_line_wight=0.25*use_line_wight;
+
     
     vec4 previous = gl_in[0].gl_Position; 
     vec4 start = gl_in[1].gl_Position;

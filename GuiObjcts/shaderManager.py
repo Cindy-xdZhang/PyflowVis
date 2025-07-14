@@ -134,15 +134,18 @@ class Shader:
 
 # Class to link vertex and fragment shaders into a shader program
 class ShaderProgram:
-    def __init__(self, key_name,vertex_shader_path, fragment_shader_path):
+    def __init__(self, key_name,vertex_shader_path, fragment_shader_path,geometry_shader_path=None):
         self.key_name = key_name
         self.vertex_shader_path = vertex_shader_path
         self.fragment_shader_path = fragment_shader_path
-        self.file_manager = FileMonitor([vertex_shader_path, fragment_shader_path])
+        self.geometry_shader_path = geometry_shader_path
+        self.file_manager = FileMonitor([vertex_shader_path, fragment_shader_path,geometry_shader_path]) if geometry_shader_path is not None else FileMonitor([vertex_shader_path, fragment_shader_path])
+
         self.needReload = False
         self.program_id = None
         self.vertex_shader_id = None
         self.fragment_shader_id= None
+        self.geometry_shader_id= None
         self.activeTextureUnitCounter=0
         self._compile_and_link()       
     
@@ -153,16 +156,29 @@ class ShaderProgram:
             gl.glDetachShader(self.program_id,self.vertex_shader_id)
         if self.fragment_shader_id is not None:
             gl.glDetachShader(self.program_id,self.fragment_shader_id)
+        if self.geometry_shader_id is not None:
+            gl.glDetachShader(self.program_id,self.geometry_shader_id)
 
+
+
+      
         # Create and attach vertex shader
         vertex_shader = Shader(self.vertex_shader_path, gl.GL_VERTEX_SHADER)
         self.vertex_shader_id = vertex_shader.get_id()
         # Create and attach fragment shader
         fragment_shader = Shader(self.fragment_shader_path, gl.GL_FRAGMENT_SHADER)
         self.fragment_shader_id =fragment_shader.get_id()
+
+    
+
+
         # Attach shaders
         gl.glAttachShader(self.program_id, vertex_shader.get_id())
         gl.glAttachShader(self.program_id, fragment_shader.get_id())
+        if self.geometry_shader_path is not None:
+            geometry_shader = Shader(self.geometry_shader_path, gl.GL_GEOMETRY_SHADER)
+            self.geometry_shader_id = geometry_shader.get_id()
+            gl.glAttachShader(self.program_id, self.geometry_shader_id)
         # Link program
         gl.glLinkProgram(self.program_id)
 
@@ -180,12 +196,14 @@ class ShaderProgram:
             gl.glUseProgram(0)
 
     def deleteProgram(self):
-            if self.program_id >0:
-                gl.glDeleteProgram(self.program_id)
-            if self.vertex_shader.get_id() >0:
-                gl.glDeleteShader(self.vertex_shader.get_id())
-            if self.fragment_shader.get_id() >0:
-                gl.glDeleteShader(self.fragment_shader.get_id())
+        if self.program_id >0:
+            gl.glDeleteProgram(self.program_id)
+        if self.vertex_shader.get_id() >0:
+            gl.glDeleteShader(self.vertex_shader.get_id())
+        if self.fragment_shader.get_id() >0:
+            gl.glDeleteShader(self.fragment_shader.get_id())
+        if self.geometry_shader_path is not None:
+            gl.glDeleteShader(self.geometry_shader_id)
             
 
     def check_for_updates(self):
@@ -317,45 +335,6 @@ class ShaderProgram:
         gl.glUseProgram(self.program_id)
 
 
-        
-class Material(Object):
-    def __init__(self,material_name:str, shader_program_name:str=None ,texture0:str=None,texture1:str=None):
-        """material is collection of shdader,texture for rendering an object
-
-        Args:
-            shader_program_name(string): the name of shader program from the shader manager
-            texture0 (string): texture  name to retrieve the shader program from the shader manager;
-            texture1 (string): texture name to retrieve the shader program from the shader manager;
-            (maximum 2 texture)
-        """
-        super().__init__(material_name)
-        self.shader_name=shader_program_name
-        sm=getShaderManager()
-        if self.shader_name is not None and self.shader_name in sm.shaders:
-            shader_program = sm.get_program(self.shader_name)
-            self.shader_program=shader_program
-
-        tm=getTextureManager()
-        if texture0 is not None:
-            if  texture0=="builtIn":
-                self.create_variable("colorMaps1Darray",getTextureManager().getBuiltInTextureIdArray())
-            else:
-                self.texture0 = texture0
-                self.texture0_id = tm.get_texture(self.texture0) if self.texture0 in sm.shaders else None
-
-
-    def apply(self,UniformObjectScope):
-        """apply the material (shader program+texture +uniforms) to the current rendering context
-            However, currently only the shader program is useful.
-        """
-        UniformObjectScope.append(self)
-        self.shader_program.setUniformScope(UniformObjectScope)
-        self.shader_program.Use()
-        # if self.texture0_id is not None and self.texture0 >0:
-        #     gl.glActiveTexture(gl.GL_TEXTURE0)
-        #     gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture0_id)
-        #     gl.glUniform1i(gl.glGetUniformLocation(self.shader_program, "texture0"), 0)
-    
 
 
 @singleton
@@ -368,12 +347,12 @@ class ShaderManager(Object):
         #compile built-in shader programs
         self.add_shader_program("monoColor","assets/shaders/simple_vertex.glsl","assets/shaders/simple_fragment.glsl")
         self.add_shader_program("colormapMat","assets/shaders/simple_vertex.glsl","assets/shaders/colorMap_fragment.glsl")
-        # self.add_shader_program("flowlineMat","assets/shaders/flowline_vertex.glsl","assets/shaders/flowline_fragment.glsl")
+        self.add_shader_program("flowlineMat","assets/shaders/flowline_vertex.glsl","assets/shaders/flowline_fragment.glsl","assets/shaders/flowline_geometry.glsl")
 
    
     # Adds a shader program with a given key
-    def add_shader_program(self, key, vertex_shader_path, fragment_shader_path):
-        self.shaders[key] = ShaderProgram(key,vertex_shader_path, fragment_shader_path)
+    def add_shader_program(self, key, vertex_shader_path, fragment_shader_path,geometry_shader_path=None):
+        self.shaders[key] = ShaderProgram(key,vertex_shader_path, fragment_shader_path,geometry_shader_path)
       
     # Uses the shader program specified by the given key
     def use_program(self, key:str):
@@ -409,7 +388,49 @@ def test_shader_manager():
     shader_program.setUniform('myFloat', 0.5)
    
 
+            
+class Material(Object):
+    def __init__(self,material_name:str, shader_program_name:str=None ,texture0:str=None,texture1:str=None):
+        """material is collection of shdader,texture for rendering an object
+
+        Args:
+            shader_program_name(string): the name of shader program from the shader manager
+            texture0 (string): texture  name to retrieve the shader program from the shader manager;
+            texture1 (string): texture name to retrieve the shader program from the shader manager;
+            (maximum 2 texture)
+        """
+        super().__init__(material_name)
+        self.shader_name=shader_program_name
+        sm=getShaderManager()
+        if self.shader_name is not None and self.shader_name in sm.shaders:
+            shader_program = sm.get_program(self.shader_name)
+            self.shader_program=shader_program
+        if self.shader_program is None:
+            logger.error(f"Shader program {self.shader_name} not found.")
+            raise ValueError(f"Shader program {self.shader_name} not found.")
+
+        tm=getTextureManager()
+        if texture0 is not None:
+            if  texture0=="builtIn":
+                self.create_variable("colorMaps1Darray",getTextureManager().getBuiltInTextureIdArray())
+            else:
+                self.texture0 = texture0
+                self.texture0_id = tm.get_texture(self.texture0) if self.texture0 in sm.shaders else None
+
+
+    def apply(self,UniformObjectScope):
+        """apply the material (shader program+texture +uniforms) to the current rendering context
+            However, currently only the shader program is useful.
+        """
+        UniformObjectScope.append(self)
+        self.shader_program.setUniformScope(UniformObjectScope)
+        self.shader_program.Use()
+        # if self.texture0_id is not None and self.texture0 >0:
+        #     gl.glActiveTexture(gl.GL_TEXTURE0)
+        #     gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture0_id)
+        #     gl.glUniform1i(gl.glGetUniformLocation(self.shader_program, "texture0"), 0)
     
+
 
 if __name__ == '__main__':
     test_shader_manager()

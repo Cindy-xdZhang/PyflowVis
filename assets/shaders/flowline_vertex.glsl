@@ -1,5 +1,5 @@
 #version 460 core
-layout(location = 0) in vec4 in_position;
+layout(location = 0) in vec3 in_position;
 layout(location = 1) in vec2 in_attribs;
 
 
@@ -15,9 +15,18 @@ out VS_OUT {
 } vs_out;
 
 void main() {
-    vs_out.position = vec3(modelMat * vec4(in_position, 1.0));
-    vs_out.attrib = in_attrib;
-    vs_out.attrib2 = in_attrib2;
-    vs_out.opacity = in_opacity;
-    gl_Position = projMat * viewMat * modelMat * vec4(in_position, 1.0);
+
+     //observer transforamtion+uplifting
+    //vec3 resultpos = vec3(transformedInSpace, 0) + n;
+
+    vec3 resultpos =in_position;
+    gl_Position = viewMat * modelMat * vec4(resultpos, 1);
+    vs_out.position = resultpos;
+
+    vs_out.attrib = in_attribs.x;
+    vs_out.attrib2 = in_attribs.y;
+
+    //opcaity control ignore for now.
+    float animation_opacity = 1.0;
+    vs_out.opacity = animation_opacity ;
 }

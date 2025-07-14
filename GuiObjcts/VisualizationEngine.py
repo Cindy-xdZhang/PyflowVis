@@ -22,6 +22,9 @@ class VisualizationEngine:
         pygame.init()
         self.screen=pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE|pygame.HWSURFACE)
          # Set up OpenGL context
+        version = gl.glGetString(gl.GL_VERSION)
+        print("OpenGL version:", version.decode())
+
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glEnable(gl.GL_TEXTURE_2D)  # Enable texture mapping
         gl.glClearColor(0.1, 0.1, 0.1, 1)

@@ -376,6 +376,7 @@ class Scene(Object):
     def __init__(self, name,autoSaveFolderPath="autosave"):
         super().__init__(name,autoSaveFolderPath)
         self.objects = {}
+        self.create_variable("light",np.array([1.0,1.0,1.0],dtype=np.float32))
 
 
     def add_object(self, obj):
