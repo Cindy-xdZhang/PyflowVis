@@ -83,8 +83,8 @@ class VectorFieldLinearOperation():
         # lie_derivative = dxL * v[..., 1] - dyL * v[..., 0]
         # return lie_derivative.unsqueeze(-1)
 
-class IVectorFeild2D(ABC):
-    """IVectorFeild2D is an abstract base class for 2D vector fields, it provideds necessary api and grid information.
+class IDiscreteField2D(ABC):
+    """IDiscreteField2D is an abstract base class for 2D vector/scalar fields with grid discretization, it provideds necessary api and grid information.
 
     Args:
         Xdim (int): x  dimension of the vector field
@@ -93,7 +93,7 @@ class IVectorFeild2D(ABC):
         domainMinBoundary (list, optional): [xmin, ymin]. Defaults to [-2.0,-2.0,].
         domainMaxBoundary (list, optional): [xmax, ymax]. Defaults to [2.0,2.0].
     """        
-    def __init__(self,Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0],timsteps:int=-1,tmin=0.0,tmax=2*np.pi):
+    def __init__(self,Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0],timsteps:int=1,tmin=0.0,tmax=0.0):
         self.Xdim= Xdim
         self.Ydim = Ydim
         self.time_steps = timsteps
@@ -102,41 +102,186 @@ class IVectorFeild2D(ABC):
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
         self.tmin=tmin
         self.tmax=tmax
+        self.timeInterval = (tmax-tmin)/(timsteps-1)
+        self.valid=(self.domainMinBoundary[0]  <= self.domainMaxBoundary[0] and self.domainMinBoundary[1]  <= self.domainMaxBoundary[1])and (1 <= Xdim  and 1 <= Ydim)  and (timsteps>=1) and (self.timeInterval>=0)
+        assert self.valid
+        self.__name = f"Unnamed_Field_{Xdim}x{Ydim}_{timsteps}t_ID{np.random.randint(0, 10000)}"
+
+    def getName(self):
+        return self.__name
+    def setName(self, name):
+        self.__name=name
 
     @abstractmethod
     def getSlice(self, timeSlice):
         pass
+     
+    def getMinTime(self):
+        return self.tmin
+    def getMaxTime(self):
+        return self.tmax
+    
+    def getPhysicalTime(self,idt:int)->float:
+        return self.timeInterval*idt+self.tmin
+    def getFloatGridTime(self,time:float)->float:
+        return float((time - self.tmin) / self.timeInterval)
+    def getIntGridTime(self,time:float)->int:
+        return int((time - self.tmin) / self.timeInterval)
+    def convert_physical_pos_2_grid_pos(self, posX:float,posY:float):
+        # Convert physical coordinates to grid indices
+        float_grid_x = (posX - self.domainMinBoundary[0]) / self.gridInterval[0]
+        float_grid_y = (posY - self.domainMinBoundary[1]) / self.gridInterval[1]
+        return float_grid_x,float_grid_y 
+    def convert_grid_pos_2_physical_pos(self, grid_x:float,grid_y:float):
+        physical_x = grid_x * self.gridInterval[0] + self.domainMinBoundary[0]
+        physical_y = grid_y * self.gridInterval[1] + self.domainMinBoundary[1]
+        return physical_x,physical_y
+    
 
-
-
-
-
-class SteadyVectorField2D(IVectorFeild2D):
+class SteadyVectorField2D(IDiscreteField2D):
     def __init__(self, Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0]):
         super(SteadyVectorField2D, self).__init__(Xdim, Ydim,domainMinBoundary,domainMaxBoundary)
-        # Initialize the vector field parameters with random values, considering the time dimension
         self.field = np.zeros( (Ydim,Xdim,2),np.float32)
     def getSlice(self, timeSlice):
         return  self.field
-
+    
+    def get_vector(self, posX: float, posY: float, time: float) -> np.ndarray:
+        """Get interpolated vector at arbitrary position.
+        
+        Args:
+            posX (float): X coordinate
+            posY (float): Y coordinate 
+            time (float): Time step
+            
+        Returns:
+            np.ndarray: 2D vector at specified position using bilinear interpolation
+        """
+        float_grid_x,float_grid_y=self.convert_physical_pos_2_grid_pos(posX,posY)
+        # Get vectors at surrounding grid points
+        x0 = int(np.floor(float_grid_x))
+        x1 = int(np.ceil(float_grid_x))
+        y0 = int(np.floor(float_grid_y))
+        y1 = int(np.ceil(float_grid_y))
+        
+        # Clamp to grid boundaries
+        x0 = max(0, min(x0, self.Xdim-1))
+        x1 = max(0, min(x1, self.Xdim-1))
+        y0 = max(0, min(y0, self.Ydim-1))
+        y1 = max(0, min(y1, self.Ydim-1))
+        # Get interpolation weights
+        wx = posX - x0
+        wy = posY - y0
+        # Get vectors at grid points
+        v00 = self.get_vector_at_grid(x0, y0)
+        v10 = self.get_vector_at_grid(x1, y0)
+        v01 = self.get_vector_at_grid(x0, y1)
+        v11 = self.get_vector_at_grid(x1, y1)
+        
+        # Bilinear interpolation
+        v0 = v00 * (1-wx) + v10 * wx
+        v1 = v01 * (1-wx) + v11 * wx
+        return v0 * (1-wy) + v1 * wy
+    
+    def get_vector_at_grid(self, x: int, y: int, time: int) -> np.ndarray:
+        """Get vector at grid point.
+        
+        Args:
+            x (int): Grid X index
+            y (int): Grid Y index
+            time (int): Time step index
+            
+        Returns:
+            np.ndarray: 3D vector at grid point
+        """
+        return self.field[ y, x, :]
     
 
-class UnsteadyVectorField2D(IVectorFeild2D):
+class UnsteadyVectorField2D(IDiscreteField2D):
     def __init__(self, Xdim:int, Ydim:int,time_steps:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0], tmin=0.0,tmax=2*np.pi):
-        IVectorFeild2D.__init__(self,Xdim, Ydim,domainMinBoundary,domainMaxBoundary,time_steps,tmin,tmax)
+        super(UnsteadyVectorField2D, self).__init__(Xdim, Ydim,domainMinBoundary,domainMaxBoundary,time_steps,tmin,tmax)
         # Initialize the vector field parameters with random values, considering the time dimension
         self.field = torch.randn(time_steps, Ydim,Xdim, 2)
-        self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
-        assert(time_steps>1)
-        self.timeInterval =float((tmax-tmin)/(time_steps-1))
         
-           
-    def getBilinearInterpolateVector(self, posX:float,posY:float,time:int):
-        # sliceData=self.field[time]
+    def get_vector_at_float_pos_int_slice(self, posX:float,posY:float,time:int):
+        float_grid_x,float_grid_y=self.convert_physical_pos_2_grid_pos(posX,posY)
         vec =bilinear_interpolate(self.field[time],  posX,posY)
         return vec
-    def getTime(self,idt):
-        return self.timeInterval*idt+self.tmin
+    
+    def get_vector(self, posX: float, posY: float, time: float) -> np.ndarray:
+        """Get interpolated vector at arbitrary position using trilinear interpolation.
+        
+        Args:
+            posX (float): X coordinate
+            posY (float): Y coordinate 
+            time (float): physcial Time 
+            
+        Returns:
+            np.ndarray: 2D vector at specified position using trilinear interpolation
+        """
+        # Convert physical coordinates to grid coordinates
+        float_grid_x, float_grid_y = self.convert_physical_pos_2_grid_pos(posX, posY)
+        float_grid_time = self.getFloatGridTime(time)
+        
+        # Get surrounding time indices
+        t0 = int(np.floor(float_grid_time))
+        t1 = int(np.ceil(float_grid_time))
+        t0 = max(0, min(t0, self.time_steps-1))
+        t1 = max(0, min(t1, self.time_steps-1))
+        
+        # Get vectors at surrounding grid points
+        x0 = int(np.floor(float_grid_x))
+        x1 = int(np.ceil(float_grid_x))
+        y0 = int(np.floor(float_grid_y))
+        y1 = int(np.ceil(float_grid_y))
+        
+        # Clamp to grid boundaries
+        x0 = max(0, min(x0, self.Xdim-1))
+        x1 = max(0, min(x1, self.Xdim-1))
+        y0 = max(0, min(y0, self.Ydim-1))
+        y1 = max(0, min(y1, self.Ydim-1))
+        
+        # Get interpolation weights
+        wx = float_grid_x - x0
+        wy = float_grid_y - y0
+        wt = float_grid_time - t0
+        
+        # Get vectors at grid points for both time steps
+        v000 = self.get_vector_at_grid(x0, y0, t0)
+        v100 = self.get_vector_at_grid(x1, y0, t0)
+        v010 = self.get_vector_at_grid(x0, y1, t0)
+        v110 = self.get_vector_at_grid(x1, y1, t0)
+        
+        v001 = self.get_vector_at_grid(x0, y0, t1)
+        v101 = self.get_vector_at_grid(x1, y0, t1)
+        v011 = self.get_vector_at_grid(x0, y1, t1)
+        v111 = self.get_vector_at_grid(x1, y1, t1)
+        
+        # Bilinear interpolation for t0
+        v0_t0 = v000 * (1-wx) + v100 * wx
+        v1_t0 = v010 * (1-wx) + v110 * wx
+        v_t0 = v0_t0 * (1-wy) + v1_t0 * wy
+        
+        # Bilinear interpolation for t1
+        v0_t1 = v001 * (1-wx) + v101 * wx
+        v1_t1 = v011 * (1-wx) + v111 * wx
+        v_t1 = v0_t1 * (1-wy) + v1_t1 * wy
+        
+        # Linear interpolation in time
+        return v_t0 * (1-wt) + v_t1 * wt
+    
+    def get_vector_at_grid(self, x: int, y: int, time: int) -> np.ndarray:
+        """Get vector at grid point.
+        
+        Args:
+            x (int): Grid X index
+            y (int): Grid Y index
+            time (int): Time step index
+            
+        Returns:
+            np.ndarray: 3D vector at grid point
+        """
+        return self.field[time, y, x, :]
+       
     
     def getSlice(self, timeSlice) -> SteadyVectorField2D:
         steadyVectorField2D = SteadyVectorField2D(self.Xdim, self.Ydim,self.domainMinBoundary,self.domainMaxBoundary)
@@ -172,6 +317,39 @@ class UnsteadyVectorField2D(IVectorFeild2D):
         self.field = self.field.detach().cpu().numpy()
         
 
+
+class ScalarField2D(IDiscreteField2D):
+    def __init__(self, Xdim, Ydim, time_steps, dtype=np.float32,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2*np.pi]):
+        """_summary_
+        Args:
+            Xdim (_type_): _description_
+            Ydim (_type_): _description_
+            time_steps (_type_): _description_
+            domainMinBoundary (list, optional): [xmin, ymin,tmin]. Defaults to [-2.0,-2.0,0.0].
+            domainMaxBoundary (list, optional): [xmax, ymax,tmin]. Defaults to [2.0,2.0,2*np.pi].
+        """
+        super(ScalarField2D, self).__init__()
+        assert dtype in [np.float32, np.float64,np.int8,np.int16,np.int32,np.int64,np.uint8,np.uint16,np.uint32,np.uint64,np.float32,np.float64]
+        self.dtype=dtype
+        
+    def initData(self):
+        self.field =np.ndarray((self.time_steps,self.Ydim,self.Xdim),dtype=self.dtype)
+
+    def setInitialScalarField(self, scalar_field):
+        self.field = nn.Parameter(torch.tensor(scalar_field))
+    
+    def forward(self,inputFieldV):
+        diff, magnitudeR=VectorFieldLinearOperation.difference(inputFieldV,self.field)
+        killingEnergy=VectorFieldLinearOperation.compute_killing_energy(self)
+        return killingEnergy+magnitudeR
+    
+    # Cereal serialization and deserialization functions
+    # def serialize(self, archive):
+    #     archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
+
+    # def deserialize(self, archive):
+    #     archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
+
 class UnsteadyVectorField2DTrainable(nn.Module,UnsteadyVectorField2D):
     def __init__(self, Xdim:int, Ydim:int,time_steps:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0], tmin=0.0,tmax=2*np.pi):
         nn.Module.__init__(self)
@@ -193,55 +371,5 @@ class UnsteadyVectorField2DTrainable(nn.Module,UnsteadyVectorField2D):
         
 
 
-class ClassWithName():
-    def __init__(self, name=""):
-        self.__name = name
-    def getName(self):
-        return self.__name
-    def setName(self, name):
-        self.__name=name
-    
 
-
-
-class ScalarField2D(ClassWithName):
-    def __init__(self, Xdim, Ydim, time_steps, dtype=np.float32,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2*np.pi]):
-        """_summary_
-        Args:
-            Xdim (_type_): _description_
-            Ydim (_type_): _description_
-            time_steps (_type_): _description_
-            domainMinBoundary (list, optional): [xmin, ymin,tmin]. Defaults to [-2.0,-2.0,0.0].
-            domainMaxBoundary (list, optional): [xmax, ymax,tmin]. Defaults to [2.0,2.0,2*np.pi].
-        """
-        super(ScalarField2D, self).__init__()
-        self.Xdim= Xdim
-        self.Ydim = Ydim
-        self.time_steps = time_steps
-        # Initialize the scalar field parameters with random values, considering the time dimension
-        self.field = nn.Parameter(torch.randn(time_steps, Ydim,Xdim))
-        self.domainMinBoundary=domainMinBoundary
-        self.domainMaxBoundary=domainMaxBoundary
-        self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
-        self.timeInterval = (domainMaxBoundary[2]-domainMinBoundary[2])/(time_steps-1)
-        assert dtype in [np.float32, np.float64,np.int8,np.int16,np.int32,np.int64,np.uint8,np.uint16,np.uint32,np.uint64,np.float32,np.float64]
-        self.dtype=dtype
-        
-    def initData(self):
-        self.field =np.ndarray((self.time_steps,self.Ydim,self.Xdim),dtype=self.dtype)
-
-    def setInitialScalarField(self, scalar_field):
-        self.field = nn.Parameter(torch.tensor(scalar_field))
-    
-    def forward(self,inputFieldV):
-        diff, magnitudeR=VectorFieldLinearOperation.difference(inputFieldV,self.field)
-        killingEnergy=VectorFieldLinearOperation.compute_killing_energy(self)
-        return killingEnergy+magnitudeR
-    
-    # Cereal serialization and deserialization functions
-    # def serialize(self, archive):
-    #     archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
-
-    # def deserialize(self, archive):
-    #     archive(self.field, self.domainMinBoundary, self.domainMaxBoundary, self.gridInterval, self.timeInterval)
 

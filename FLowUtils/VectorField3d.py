@@ -41,6 +41,45 @@ class UnsteadyVectorField3D(IVectorField3D):
         steadyVectorField3D.field = self.field[timeSlice, :, :, :, :]
         return steadyVectorField3D
 
+    def get_vector(self, posX: float, posY: float, posZ: float, time: float) -> np.ndarray:
+        """Get interpolated vector at arbitrary position.
+        
+        Args:
+            posX (float): X coordinate
+            posY (float): Y coordinate 
+            posZ (float): Z coordinate
+            time (float): Time step
+            
+        Returns:
+            np.ndarray: 3D vector at specified position
+        """
+        # TODO: Implement trilinear interpolation
+        # For now just return nearest grid point
+        grid_x = int(round(posX))
+        grid_y = int(round(posY)) 
+        grid_z = int(round(posZ))
+        return self.get_vector_at_grid(grid_x, grid_y, grid_z, time)
+    
+    def get_vector_at_grid(self, x: int, y: int, z: int, time: int) -> np.ndarray:
+        """Get vector at grid point.
+        
+        Args:
+            x (int): Grid X index
+            y (int): Grid Y index
+            z (int): Grid Z index
+            time (int): Time step index
+            
+        Returns:
+            np.ndarray: 3D vector at grid point
+        """
+        return self.field[time, z, y, x, :]
+
+
+
+
+
+
+
     # def getDataAsNumpy(self):
     #     if isinstance(self.field, torch.Tensor):
     #         return self.field.detach().cpu().numpy()

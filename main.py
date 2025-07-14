@@ -1,16 +1,15 @@
-from VisualizationEngine import *
+from GuiObjcts.VisualizationEngine import *
 from FLowUtils.AnalyticalFlowCreator import *
 from DeepUtils.utils import EasyConfig
 from GuiObjcts.VertexArrayObject import *
+from GuiObjcts.vectorGlyphObject import *
 from GuiObjcts.ObjectGUIReflection import ValueGuiCustomization
-from shaderManager import *
+from GuiObjcts.shaderManager import *
 from FLowUtils.VectorField2d import *
-from FLowUtils.netCDFLoader import *
-from NLPCommand import *
-from  PlanarManifold import *
+from  GuiObjcts.PlanarManifold import *
 from misc.fileMonitor import *
-
-
+from GuiObjcts.netCDFObject import *
+from GuiObjcts.FlowLineRenderObject import *
 
 def screen_to_world(x, y, width, height, modelview, projection, viewport):    
     y = height - y  # OpenGL's y axis  is reversed of pygame's y axis
@@ -54,11 +53,6 @@ class GuiTest(Object):
    
    
         
-def path2name(path):
-    name = path.split('/')[-1].split('\\')[-1]  # Handle both forward and back slashes
-    if '.' in name:  # Remove extension if present
-        name = name.rsplit('.', 1)[0]
-    return name
 
 
 class Renderable:
@@ -105,27 +99,7 @@ class Renderable:
             self.check_collision(world_coordinates[:3])
             
 
-class NetCDFLoaderOBJ(Object):
-    def __init__(self):
-        super().__init__("NetCDF")
-        self.create_variable_gui("time_step_begin",-1,False, {'widget': 'input'})
-        self.create_variable_gui("time_step_end",-1,False)
-        # Update the path variable to use a file dialog widget
-        self.create_variable_gui("path", "", False, {'widget': 'file_dialog'})
-        self.addAction("load cdf file", lambda x:self.loadCDF()) 
-        
-    def loadCDF(self):
-        resolved_path=self.getValue("path")
-        time_step_begin=self.getValue("time_step_begin")
-        time_step_end=self.getValue("time_step_end")
-        vectorfield=NetCDFLoader.load_vector_field2d(resolved_path,time_step_begin,time_step_end)
-        scene=self.getParentScene()
-        # Extract name from path - get last folder/file name
-        name=path2name(resolved_path)
-        scene.getObject("ActiveField").insertField(name,vectorfield)
-        
-            
-    
+
 
 
 
@@ -148,34 +122,27 @@ def main():
     lic_texture_data = lic_texture_data.astype('uint8')
     renderable_object = Renderable(lic_texture_data,5,2,-5)
     shaderManager=getShaderManager()
-    shaderManager.add_shader_program("simpleColor","assets/shaders/simple_vertex.glsl","assets/shaders/simple_fragment.glsl")
-    shaderManager.add_shader_program("colormapMat","assets/shaders/simple_vertex.glsl","assets/shaders/colorMap_fragment.glsl")
+    
     defaultMat=shaderManager.getDefautlMaterial()
    
-    # renderParamterPage=LicParameter("LicParameter")
     camera = Camera(60.0, (0, 0, 5), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
     coord=CoordinateSystem(engine.scene)
     planarManifold=PlanarManifold(32,32)
     actFieldWidget=ActiveField()
     VectorGlyph=VertexArrayVectorGlyph()
     VectorGlyph.setMaterial(defaultMat)
-    # nlpc=  NLPCommandObject()
     commandBar=MainUICommand("mainCommandUI")
     test=GuiTest()
     netCDF=NetCDFLoaderOBJ()
-    
-   #! todo: implement the following actions to the command bar
-    
-    # commandBar.addAction("optc training", lambda obj: load_vector_field(Engine.scene,"autosave") )
-    # commandBar.addAction("save vector field", lambda obj: save_vector_field(Engine.scene,".autosave/"+actFieldWidget.getActiveFieldName()+".json") )
-    # commandBar.addAction("load vector field", lambda obj: load_vector_field(Engine.scene,"autosave") )
-
-    engine.addObjects2Scene([coord,planarManifold, actFieldWidget,commandBar,camera,VectorGlyph,netCDF]   )
+    flowline=FlowLineObject()   
+    engine.addObjects2Scene([coord,planarManifold, actFieldWidget,commandBar,camera,VectorGlyph,netCDF,flowline]   )
     engine.eventRegister.register(lambda event: camera.eventCallBacks(event))
     engine.eventRegister.register(lambda event: actFieldWidget.eventCallBacks(event))
     engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
 
+    vectorField2d= rotation_four_center((32,32),32)
+    actFieldWidget.insertField("rfc",vectorField2d)
 
 
     # args=config['training']
@@ -183,15 +150,11 @@ def main():
     # device=torch.device("cpu")
     # args['device'] = device    
     # args["epochs"]=50
-    
-    vectorField2d= rotation_four_center((32,32),32)
-    actFieldWidget.insertField("rfc",vectorField2d)
     # resUfield=ObserverFieldOptimization(vectorField2d,args)
     # actFieldWidget.insertField("Result field",resUfield)
     # circle=VertexArrayObject("Cone")
     # circle.appendConeWithoutCommit(np.array([0,-1,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32), 0.5, 2, 32)
     # circle.commit()
-    
     # engine.scene.add_object(nlpc)
     # plane.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([1,0,0],dtype=np.float32),0.05,1.0, 0.2, 0.1, 8)
     # plane.commit()
@@ -200,9 +163,7 @@ def main():
     # plane.appendVertexGeometry(vertices, indices, textures)
     # plane.setMaterial(defaultMat)
     # Engine.scene.add_oject(plane)
-
     # plane2=VertexArrayObject("plane2")
-    
     # plane2.appendVertexGeometry(vertices, indices, textures)
     # plane2.setMaterial(defaultMat)
     # scene.add_object(plane2)

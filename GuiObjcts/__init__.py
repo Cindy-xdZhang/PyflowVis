@@ -1,4 +1,10 @@
 from .Object import Object,Scene,getLoggingWidget,LoggingWidget
-from .ActiveFieldObject import ActiveField
+from .ObjectGUIReflection import *
+from .ActiveFieldObject import *
 from .mainCommandUI import MainUICommand
 from .CameraObject import Camera
+from .VisualizationEngine import *
+from .VertexArrayObject import *
+from .PlanarManifold import *
+from .FlowLineRenderObject import *
+

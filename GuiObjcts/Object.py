@@ -243,13 +243,20 @@ class Object:
                 cb(self)
             
 
+    def __floatConvert__(self,value:Any)->float:
+        #convert np.float32,np.float64, to float
+        if isinstance(value,np.float32) or isinstance(value,np.float64) or isinstance(value,float):
+            return float(value)
+        else:
+            return value
 
     def updateValue(self, name:str, value:Any)->None:
+        value=self.__floatConvert__(value)
         # Override to catch properties being set directly
         if name in self.persistentProperties:
             assert(type(value)==type(self.persistentProperties[name]))
             self.persistentProperties[name] = value            
-        elif name in self.nonPersistentProperties:
+        elif name in self.nonPersistentProperties:            
             assert(type(value)==type(self.nonPersistentProperties[name]))
             self.nonPersistentProperties[name] = value 
         else:

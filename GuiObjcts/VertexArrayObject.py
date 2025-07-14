@@ -2,7 +2,7 @@
 from OpenGL import GL as gl
 from .Object import Object,Scene
 import numpy as np    
-from shaderManager import getShaderManager,ShaderProgram
+from GuiObjcts.shaderManager import getShaderManager,ShaderProgram,Material
 from functools import wraps
 
 
@@ -20,8 +20,13 @@ class VertexArrayObject(Object):
         self.vbo_ids = gl.glGenBuffers(2)#vertex buffer and texture buffer
         self.ebo_id = gl.glGenBuffers(1)
         self.init()
-        self.material=None
+        self.material:Material=None
         self.create_variable("modelMat",np.eye(4,dtype=np.float32),False)
+        
+        # Performance optimization flags
+        self._buffer_dirty = True
+        self._last_vertex_count = 0
+        self._last_index_count = 0
   
     def setMaterial(self,material) -> None:
         self.material=material
@@ -54,6 +59,7 @@ class VertexArrayObject(Object):
         self.vertex_tex_coords  = []
         self.indices = []
         self.vetex_count=0
+        self._buffer_dirty = True
         self.commit()
         
     def appendVertexGeometryNoCommit(self, vertex_data, index_data,texture_date) -> None:
@@ -63,6 +69,50 @@ class VertexArrayObject(Object):
         self.indices.extend(index_data_flattern)
         self.vertex_tex_coords.extend(texture_date)
         self.vetex_count+=len(vertex_data)//3
+        self._buffer_dirty = True
+        
+    def appendVertexGeometryBatch(self, vertex_data_list, index_data_list, texture_data_list) -> None:
+        """Batch append multiple geometry chunks for better performance"""
+        total_vertices = 0
+        total_indices = 0
+        total_tex_coords = 0
+        
+        # Pre-calculate total sizes
+        for vertices, indices, tex_coords in zip(vertex_data_list, index_data_list, texture_data_list):
+            total_vertices += len(vertices)
+            total_indices += len(indices)
+            total_tex_coords += len(tex_coords)
+        
+        # Pre-allocate lists with known size
+        self.vertex_geometry = [None] * total_vertices
+        self.indices = [None] * total_indices
+        self.vertex_tex_coords = [None] * total_tex_coords
+        
+        # Fill in the data
+        v_offset = 0
+        i_offset = 0
+        t_offset = 0
+        
+        for vertices, indices, tex_coords in zip(vertex_data_list, index_data_list, texture_data_list):
+            # Copy vertex data
+            v_end = v_offset + len(vertices)
+            self.vertex_geometry[v_offset:v_end] = vertices
+            v_offset = v_end
+            
+            # Copy index data with offset
+            i_end = i_offset + len(indices)
+            for i in range(len(indices)):
+                self.indices[i_offset + i] = indices[i] + self.vetex_count
+            i_offset = i_end
+            
+            # Copy texture data
+            t_end = t_offset + len(tex_coords)
+            self.vertex_tex_coords[t_offset:t_end] = tex_coords
+            t_offset = t_end
+            
+            self.vetex_count += len(vertices) // 3
+        
+        self._buffer_dirty = True
 
     def appendTriangleWithoutCommit(self,pos0, pos1, pos2):
         # Assuming pos0, pos1, pos2 are numpy arrays or can be converted into numpy arrays
@@ -81,20 +131,6 @@ class VertexArrayObject(Object):
 
 
 
-    # def flattern(self)->None:
-    #     self.vertex_geometry = []
-    #     self.vertex_tex_coords = []
-    #     self.indices = []
-    #     indiceOffset=0
-    #     for submesh in self.submeshes:
-    #         self.vertex_geometry.extend(submesh.vertex_geometry)
-    #         self.vertex_tex_coords.extend(submesh.vertex_tex_coords)
-    #         indices_offset=[idx+indiceOffset for idx in submesh.indices]
-    #         self.indices.extend(indices_offset)
-    #         indiceOffset+=len(submesh.vertex_geometry)//3
-
-        
-
     def commit(self) -> None:
   
         # self.flattern()
@@ -102,26 +138,40 @@ class VertexArrayObject(Object):
         vertex_tex_coords = np.array(self.vertex_tex_coords, dtype=np.float32)
         indices = np.array(self.indices, dtype=np.uint32)
 
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_ids[0])
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertex_geometry.nbytes, vertex_geometry, gl.GL_STATIC_DRAW)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        # Check if buffers need updating
+        current_vertex_count = len(vertex_geometry)
+        current_index_count = len(indices)
+        
+        if (self._buffer_dirty or 
+            current_vertex_count != self._last_vertex_count or 
+            current_index_count != self._last_index_count):
+            
+            # Update vertex buffer
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_ids[0])
+            gl.glBufferData(gl.GL_ARRAY_BUFFER, vertex_geometry.nbytes, vertex_geometry, gl.GL_STATIC_DRAW)
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
 
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_ids[1])
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertex_tex_coords.nbytes, vertex_tex_coords, gl.GL_STATIC_DRAW)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+            # Update texture coordinate buffer
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_ids[1])
+            gl.glBufferData(gl.GL_ARRAY_BUFFER, vertex_tex_coords.nbytes, vertex_tex_coords, gl.GL_STATIC_DRAW)
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
 
-        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo_id)
-        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, gl.GL_STATIC_DRAW)
-        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
+            # Update index buffer
+            gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo_id)
+            gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, gl.GL_STATIC_DRAW)
+            gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
+            
+            # Update tracking variables
+            self._last_vertex_count = current_vertex_count
+            self._last_index_count = current_index_count
+            self._buffer_dirty = False
 
 
 
     def render(self):
-
         # Bind VAO
         if self.material is not None:
-            self.material.shader_program.setUniformScope([self.parentScene, self.cameraObject,self])
-            self.material.apply()
+            self.material.apply([self.parentScene, self.cameraObject,self])
 
         gl.glBindVertexArray(self.vao_id)  
         # Draw elements
@@ -130,7 +180,43 @@ class VertexArrayObject(Object):
         # Unbind VAO
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)
+        
+    def _generate_circle_geometry(self, centerPos, normal, radius, segments):
+        """Generate circle geometry similar to appendCircleWithoutCommit but return data instead of appending"""
+        # Calculate orthogonal vectors to the normal for circle's plane
+        orth0 = np.array([normal[1], -normal[0], normal[2]])
+        if orth0[0]*orth0[0] + orth0[1]*orth0[1] < 0.001:
+            orth0 = np.array([normal[2], normal[1], normal[0]])
+        orth0 = orth0 / np.linalg.norm(orth0)
+        orth1 = np.cross(normal, orth0)
+        orth1 = orth1 / np.linalg.norm(orth1)
+        orth2 = np.cross(normal, orth1)
+        orth2 = orth2 / np.linalg.norm(orth2)
 
+        # Initialize lists for vertices, textures, and indices
+        firstPos = centerPos + orth2 * radius
+        geometryVerts = [centerPos[0], centerPos[1], centerPos[2], firstPos[0], firstPos[1], firstPos[2]]      
+        textureCoords = [0.0, 0.0, 0.0, 1.0]
+        elements = []
+        
+        # Generate vertices around the circle
+        for i in range(1, segments):
+            angle = i * 2 * np.pi / segments
+            s = np.sin(angle)
+            c = np.cos(angle)
+
+            v = s * orth1 + c * orth2
+            vCirc = centerPos + v * radius
+            geometryVerts.extend([vCirc[0], vCirc[1], vCirc[2]])
+    
+            textureCoords.extend([(s + 1.0) * 0.5, (c + 1.0) * 0.5])
+            elements.extend([0, i, i + 1])
+            
+        # Connect the last segment to the first
+        elements.extend([0, segments, 1])
+        
+        return geometryVerts, elements, textureCoords
+    
     def appendCircleWithoutCommit(self,centerPos:np.ndarray[np.float32,3], normal:np.ndarray[np.float32,3], radius:float, segments:int):
         # Calculate orthogonal vectors to the normal for circle's plane
         orth0 = np.array([normal[1],-normal[0],normal[2]])
@@ -194,14 +280,7 @@ class VertexArrayObject(Object):
             lastVBottom = startPos + lastV * radius
           
             lastV = v
-            # self.appendTriangleWithoutCommit(lastVBottom, vBottom, vTop) is replaced by the following code:
-
             temporayVertex[(i-1)*9:i*9-1] =[lastVBottom[0], lastVBottom[1], lastVBottom[2], vBottom[0], vBottom[1], vBottom[2], vTop[0], vTop[1], vTop[2]]
-            # previoussize=indexCount
-            # temporayIndex[(i-1)*3:i*3-1]=[previoussize, previoussize+1,previoussize+ 2]
-            # indexCount+=3
-            # texCoords = [0.0, 0.0,1.0, 0.0,1.0, 1.0]
-            # textureCoords.extend([0.0, 0.0,1.0, 0.0, 1.0, 1.0])
 
         
         v=orth2
@@ -216,6 +295,9 @@ class VertexArrayObject(Object):
         # self.appendTriangleWithoutCommit(lastVBottom, vBottom, vTop)
          #    put caps to the cylinder
         self.appendCircleWithoutCommit(startPos, direction, radius, segments)
+
+
+
 
     def appendCylinderWithoutCommit(self, centerPos, direction, radius, height, segments):
         # Normalize the direction vector
@@ -274,140 +356,7 @@ class VertexArrayObject(Object):
         self.appendConeWithoutCommit(coneCenterPos, direction, coneRadius, coneHeight, segments)
 
 
-
-
-def call_on_dirty(func):
-    """
-    Decorator to skip calling the function if the parameters have not changed.
-    """
-    func._call_signature = None
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        # Create a tuple representing the current call signature
-        current_call_signature = (args, tuple(kwargs.items()))
-
-        # Check if the call signature has changed since the last call
-        if current_call_signature != func._call_signature:
-            # Update the call signature
-            func._call_signature = current_call_signature
-            # Call the original function
-            return func(*args, **kwargs)
-        else:
-            # Skip calling the function
-            pass
-
-    return wrapper
-
-
-class VertexArrayVectorGlyph(VertexArrayObject):
-    def __init__(self, name="vectorGlyph"):
-        super().__init__(name)
-        def dirtyCallBack(obj) -> None:
-            obj.dirty=True
-        def udpateRenderVisibilityCallBack(obj) -> None:
-            obj.renderVisible=obj.getValue("draw")
-        self.create_variable_callback("draw",True,udpateRenderVisibilityCallBack,False)
-        self.create_variable_callback("scale",1.0,dirtyCallBack,False,1.0)
-        self.create_variable_callback("segments",10,dirtyCallBack,False,10)
-        self.create_variable_callback("radius",0.01,dirtyCallBack,False,0.01)
-        self.create_variable_callback("height",0.1,dirtyCallBack,False,0.1)
-        self.create_variable_callback_with_gui_customization("sampling",0.5,dirtyCallBack,False,0.5, {'widget': 'slider_float', 'min': 0.0, 'max': 1.0})
-        self.create_variable_gui("color",(0.2,-.2,0.2),False,{'widget': 'color_picker'})
-        self.dirty = True    
-        self.renderVisible = True    
-    def render(self):
-        if self.dirty==True:
-            actFieldWidget=self.parentScene.getObject("ActiveField")
-            self.updateVectorGlyph(actFieldWidget.getActiveField(), actFieldWidget.time())
-        super().render()
-        return 
-
-    def updateVectorGlyph(self,vector_field, time: float=0.0):
-        """
-        Draw vector glyphs representing a vector field interpolated between two time steps.
-
-        :param vector_field: A VectorField2D object representing the vector field.
-        :param time: The specific time to interpolate the vector field at.
-        :param position: The position where to start drawing the vector field.
-        :param scale: Scale factor for drawing glyphs.
-        """
-        if vector_field is None or self.dirty==False:
-            return
     
-        # Calculate the interpolation index
-        time_idx = (time - vector_field.tmin) / vector_field.timeInterval
-        lower_idx = int(np.floor(time_idx))
-        upper_idx = int(np.ceil(time_idx))
-        alpha = time_idx - lower_idx
-
-        # Ensure indices are within the bounds of the vector field time steps
-        lower_idx = max(0, min(vector_field.time_steps - 1, lower_idx))
-        upper_idx = max(0, min(vector_field.time_steps - 1, upper_idx))
-
-        # Get the two time slices and convert to numpy if needed
-        lower_field = vector_field.field[lower_idx]
-        upper_field = vector_field.field[upper_idx]
-        # Convert PyTorch tensors to numpy if necessary
-        if hasattr(lower_field, 'detach'):  # Check if it's a PyTorch tensor
-            lower_field = lower_field.detach().numpy()
-            upper_field = upper_field.detach().numpy()
-
-        # Interpolate between the two time slices
-        interpolated_field = (1 - alpha) * lower_field + alpha * upper_field
-        radius=self.getValue("radius")
-        hight=self.getValue("height")
-        segments=self.getValue("segments")
-        scale=self.getValue("scale")
-        sampling_distance=max(self.getValue("sampling"),0.0001)
-        # Calculate number of samples in each direction
-        num_samples_x = int((vector_field.domainMaxBoundary[0]-vector_field.domainMinBoundary[0]) / sampling_distance)
-        num_samples_y = int((vector_field.domainMaxBoundary[1]-vector_field.domainMinBoundary[1]) / sampling_distance)
-        
-        self.erase()
-        for y in range(num_samples_y):
-            for x in range(num_samples_x):
-                # Calculate actual position
-                posX = vector_field.domainMinBoundary[0] + x * sampling_distance
-                posY = vector_field.domainMinBoundary[1] + y * sampling_distance
-                # Convert position to grid coordinates for interpolation
-                grid_x = (posX - vector_field.domainMinBoundary[0]) / vector_field.gridInterval[0]
-                grid_y = (posY - vector_field.domainMinBoundary[1]) / vector_field.gridInterval[1]
-                
-                # Get interpolated vector at this position
-                x_idx = int(grid_x)
-                y_idx = int(grid_y)
-                
-                # Skip if outside field bounds
-                if (x_idx >= interpolated_field.shape[1] - 1 or 
-                    y_idx >= interpolated_field.shape[0] - 1 or 
-                    x_idx < 0 or y_idx < 0):
-                    continue
-                
-                # Bilinear interpolation weights
-                fx = grid_x - x_idx
-                fy = grid_y - y_idx
-                
-                # Get vectors at surrounding grid points
-                v00 = interpolated_field[y_idx, x_idx]
-                v10 = interpolated_field[y_idx, x_idx + 1]
-                v01 = interpolated_field[y_idx + 1, x_idx]
-                v11 = interpolated_field[y_idx + 1, x_idx + 1]
-                
-                # Bilinear interpolation
-                vx = (1 - fx) * (1 - fy) * v00[0] + fx * (1 - fy) * v10[0] + \
-                     (1 - fx) * fy * v01[0] + fx * fy * v11[0]
-                vy = (1 - fx) * (1 - fy) * v00[1] + fx * (1 - fy) * v10[1] + \
-                     (1 - fx) * fy * v01[1] + fx * fy * v11[1]
-                vx=vx*scale
-                vy=vy*scale
-                direction = np.array([vx, vy, 0.0], dtype=np.float32)
-                self.appendConeWithoutCommit(np.array([posX, posY, 0.0], dtype=np.float32),
-                                          direction, radius, hight, segments)
-        self.commit()
-        self.dirty=False
-          
-        
 class CoordinateSystem(Object):
                        
     def __init__(self, sceneArg:Scene):

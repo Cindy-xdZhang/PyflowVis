@@ -7,9 +7,9 @@ from imgui.integrations.pygame import PygameRenderer
 import numpy as np
 import logging
 from GuiObjcts  import *
-from EventRegistrar import EventRegistrar
+from GuiObjcts.EventRegistrar import EventRegistrar
 from GuiObjcts.Object import Scene, singleton
-from shaderManager import *
+from GuiObjcts.shaderManager import *
 from DeepUtils.MiscFunctions import initLogging
 def getEngine():
     return VisualizationEngine({})
@@ -34,17 +34,8 @@ class VisualizationEngine:
         self.impl=PygameRenderer()
         self.eventRegister=EventRegistrar(self.impl)
         self.camera=None        
-        self.initTextures()
         initLogging()
 
-
-    def initTextures(self):
-        textureIDarray, self.textuireimageNames= init_color_maps_texture_array()
-        self.scene.create_variable("colorMaps1Darray",textureIDarray)
-
-    def getTextureNames(self):
-        return self.textuireimageNames  if  hasattr(self,"textuireimageNames") else None
-    
     def initFront(self):
         pass
         # pygame.font.init()
@@ -52,7 +43,9 @@ class VisualizationEngine:
         # self.font = pygame.font.SysFont("Arial", font_size)
 
  
-
+    def getBuiltInTextureNames(self):
+        return getTextureManager().getBuiltInTextureNames()
+    
     def addObjects2Scene(self,ObjectList=None):
         # all the objects in the scene
         for obj in ObjectList:

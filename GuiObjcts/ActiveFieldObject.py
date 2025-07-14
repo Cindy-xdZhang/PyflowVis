@@ -29,10 +29,18 @@ class ActiveField(Object):
         self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
         #list of str is treated specially  as option in my gui implementation, don't need to specify customization, it always render as combo box
         self.create_variable_gui("active field",[""],False)
+
         def dirtyCallBack(obj:ActiveField) -> None:
             vectorGlyph=obj.parentScene.getObject("vectorGlyph")
             if vectorGlyph is not None:
                 vectorGlyph.dirty=True
+            flowlineOBj=obj.parentScene.getObject("flowline")
+            if flowlineOBj is not None and flowlineOBj.getValue("pathline_active"):
+                flowlineOBj.pathline_dirty=True
+            if flowlineOBj is not None and flowlineOBj.getValue("streamline_active"):
+                flowlineOBj.streamline_dirty=True
+
+
         self.addCallback("time",dirtyCallBack)
 
         self.create_variable_gui("active scalar field",[""],False)

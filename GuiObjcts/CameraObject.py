@@ -178,7 +178,7 @@ class Camera(Object):
         elif direction == 'out' and self.fov < 120:
             self.fov += 1.0
         # self.projection_matrix = self.get_projection_matrix()
-        logger.debug(f"Zoom in: FOV changed from {old_fov} to {self.fov}")
+        # logger.debug(f"Zoom in: FOV changed from {old_fov} to {self.fov}")
 
 
     def eventCallBacks(self,event):

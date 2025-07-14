@@ -1,6 +1,6 @@
 from GuiObjcts.VertexArrayObject import *
-from VisualizationEngine import getEngine
-from shaderManager import *
+from .VisualizationEngine import getEngine
+from GuiObjcts.shaderManager import *
 
 class PlanarManifold(VertexArrayObject):
     def __init__(self, Xdim, Ydim,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0]):
@@ -14,9 +14,9 @@ class PlanarManifold(VertexArrayObject):
         self.domainMaxBoundary=domainMaxBoundary
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
         self.create_plane_mesh()
-        colormapMat=Material("colormapMat","colormapMat")
+        colormapMat=Material("planarManifoldMaterial","colormapMat",texture0="builtIn")
         self.setMaterial(colormapMat)
-        self.create_variable("colorMap",self.engine.getTextureNames())
+        self.create_variable("colorMap",self.engine.getBuiltInTextureNames())
         self.create_variable("attributeBounds",(0.0,1.0))
 
     

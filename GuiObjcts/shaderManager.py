@@ -87,16 +87,26 @@ def init_color_maps_texture_array() -> tuple[int, list[str]]:
 class TextureManager:
     def __init__(self,name):
         self.name=name
+    
+        #initBuiltInTextures()
+        self.BuiltItextureIDarray, self.BuiltInTextuireimageNames= init_color_maps_texture_array()
+        #additional textures
         self.texturesOpenGLID= {}
-        # self.file_manager = FileMonitor()
         
+
+
     def add_imageTexture(self, key, image_data):
         self.texturesOpenGLID[key] = create_texture(image_data)
-        
-    def get_texture(self, key):
+    def get_texture(self, key:str=None):
         return self.texturesOpenGLID[key]
     
 
+
+    def getBuiltInTextureNames(self):
+        return self.BuiltInTextuireimageNames  
+    
+    def getBuiltInTextureIdArray(self):
+        return self.BuiltItextureIDarray
 
 
 def getTextureManager() -> TextureManager:
@@ -308,9 +318,9 @@ class ShaderProgram:
 
 
         
-class Material:
-    def __init__(self,name:str, shader_program_name:str=None ,texture0:str=None,texture1:str=None):
-        """material is collection of shdader,texture,uniforms for rendering an object
+class Material(Object):
+    def __init__(self,material_name:str, shader_program_name:str=None ,texture0:str=None,texture1:str=None):
+        """material is collection of shdader,texture for rendering an object
 
         Args:
             shader_program_name(string): the name of shader program from the shader manager
@@ -318,30 +328,28 @@ class Material:
             texture1 (string): texture name to retrieve the shader program from the shader manager;
             (maximum 2 texture)
         """
-        self.name=name
+        super().__init__(material_name)
         self.shader_name=shader_program_name
         sm=getShaderManager()
         if self.shader_name is not None and self.shader_name in sm.shaders:
             shader_program = sm.get_program(self.shader_name)
             self.shader_program=shader_program
+
         tm=getTextureManager()
+        if texture0 is not None:
+            if  texture0=="builtIn":
+                self.create_variable("colorMaps1Darray",getTextureManager().getBuiltInTextureIdArray())
+            else:
+                self.texture0 = texture0
+                self.texture0_id = tm.get_texture(self.texture0) if self.texture0 in sm.shaders else None
 
-        self.texture0 = texture0
-        if self.shader_name is not None :
-            self.texture0_id = tm.get_texture(self.texture0) if self.texture0 in sm.shaders else None
 
-        self.texture1 = texture1
-        if self.shader_name is not None :
-            self.texture1_id = tm.get_texture(self.texture1)  if self.texture1 in sm.shaders else None
-        self.uniforms = {}
-    
-    def append_uniform(self, name, value):
-        self.uniforms[name] = value
-
-    def apply(self):
+    def apply(self,UniformObjectScope):
         """apply the material (shader program+texture +uniforms) to the current rendering context
             However, currently only the shader program is useful.
         """
+        UniformObjectScope.append(self)
+        self.shader_program.setUniformScope(UniformObjectScope)
         self.shader_program.Use()
         # if self.texture0_id is not None and self.texture0 >0:
         #     gl.glActiveTexture(gl.GL_TEXTURE0)
@@ -357,6 +365,11 @@ class ShaderManager(Object):
     def __init__(self,name):
         super().__init__(name)
         self.shaders = {}  # Stores all shader programs
+        #compile built-in shader programs
+        self.add_shader_program("monoColor","assets/shaders/simple_vertex.glsl","assets/shaders/simple_fragment.glsl")
+        self.add_shader_program("colormapMat","assets/shaders/simple_vertex.glsl","assets/shaders/colorMap_fragment.glsl")
+        # self.add_shader_program("flowlineMat","assets/shaders/flowline_vertex.glsl","assets/shaders/flowline_fragment.glsl")
+
    
     # Adds a shader program with a given key
     def add_shader_program(self, key, vertex_shader_path, fragment_shader_path):
@@ -375,25 +388,19 @@ class ShaderManager(Object):
         else:
             logger.error(f'Shader program {key} not found.')
     def getDefautlMaterial(self):
-        return Material("defaultMaterial","simpleColor")
+        return Material("defaultMaterial","monoColor")
 
 def getShaderManager() -> ShaderManager:
     return ShaderManager("ShaderManager")
 
 
-def setup_opengl():
+    
+def test_shader_manager():
+    """Test the ShaderManager class."""
     pygame.init()
     size = (800, 600)
     pygame.display.set_mode(size,  pygame.DOUBLEBUF | pygame.OPENGL| pygame.RESIZABLE)
     print("OpenGL initialized: Version", glGetString(GL_VERSION).decode())
-    # Now it's safe to call OpenGL functions; create shaders, buffers, etc.
-    #program_id = glCreateProgram()
-    
-    
-    
-def test_shader_manager():
-    """Test the ShaderManager class."""
-    setup_opengl()
     shader_manager = ShaderManager("test_sm")
     # Add a basic shader program
     shader_manager.add_shader_program('basic', 'shaders/simple_vertex.glsl', 'shaders/simple_fragment.glsl')
