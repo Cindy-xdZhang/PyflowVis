@@ -29,7 +29,7 @@ class VisualizationEngine:
         gl.glEnable(gl.GL_TEXTURE_2D)  # Enable texture mapping
         gl.glClearColor(0.1, 0.1, 0.1, 1)
         gl.glViewport(0, 0, size[0], size[1])
-        self.scene=Scene("DefaultScene")
+        self.scene=getScene()
         # Setup ImGui context and the pygame renderer for ImGui
         imgui.create_context()
         imgui.get_io().display_size = size

@@ -1,6 +1,6 @@
 
 from OpenGL import GL as gl
-from .Object import Object,Scene
+from .Object import *
 import numpy as np    
 from GuiObjcts.shaderManager import getShaderManager,ShaderProgram,Material
 from functools import wraps
@@ -359,7 +359,8 @@ class VertexArrayObject(Object):
     
 class CoordinateSystem(Object):
                        
-    def __init__(self, sceneArg:Scene):
+    def __init__(self):
+        sceneArg:Scene=getScene()
         assert isinstance(sceneArg, Scene._original_class)
         super().__init__("CoordinateSystem")
         self.setGuiVisibility(False)
@@ -396,13 +397,14 @@ class CoordinateSystem(Object):
 
 
 
-def createPlane(gridSize, domainSize) -> [list, list, list]:
+def createPlane(gridSize, domainBoundaryMin,domainBoundaryMax) -> [list, list, list]:
     """
     Generate a grid of vertices, indices, and texture coordinates for a plane.
 
     Args:
         gridSize (list): A list of integers [Xdim, Ydim] representing the number of grid cells in the x and y directions.
-        domainSize (list): A list of floats [Xmin, Ymin, Xmax, Ymax] representing the domain size.
+        domainBoundaryMin (list): A list of floats [Xmin, Ymin] representing the domain size.
+        domainBoundaryMax (list): A list of floats [Xmax, Ymax] representing the domain size.
 
     Returns:
         list: A list of vertex data in the format [x, y, z, u, v] where (x, y, z) are the vertex coordinates and (u, v) are the texture coordinates.
@@ -410,7 +412,8 @@ def createPlane(gridSize, domainSize) -> [list, list, list]:
         list: A list of texture coordinates in the format [u, v] for each vertex.
     """
     Xdim, Ydim = gridSize
-    Xmin, Ymin, Xmax, Ymax = domainSize
+    Xmin,  Ymin = domainBoundaryMin
+    Xmax, Ymax =domainBoundaryMax
 
     vertices = []
     indices = []

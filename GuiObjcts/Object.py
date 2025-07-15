@@ -300,16 +300,17 @@ class Object:
                     if changed:
                         self.updateOptionValue(key, new_value)
             else:
-                cust=self.getGuiCustomization(key,typeName)
-                callableF= get_imgui_widget_for_type(typeName,cust)
-                changed, new_value = callableF(key,value)
-                if changed:
-                    if parentNamelist==None:
-                        self.updateValue(key, new_value)
-                    else:
-                        #parentName is a list of keys to reach the parent dictionary                           
-                        valueDictToOperate=self.getValue(parentNamelist[0]) 
-                        operate_on_dict(valueDictToOperate,parentNamelist[1:]+[key],new_value,0)
+                Customization=self.getGuiCustomization(key,typeName)#some type has multiple way to render in gui, customization is used to select the way
+                callableF= get_imgui_widget_for_type(typeName,Customization)
+                if callableF is not None:
+                    changed, new_value = callableF(key,value)
+                    if changed:
+                        if parentNamelist==None:
+                            self.updateValue(key, new_value)
+                        else:
+                            #parentName is a list of keys to reach the parent dictionary                           
+                            valueDictToOperate=self.getValue(parentNamelist[0]) 
+                            operate_on_dict(valueDictToOperate,parentNamelist[1:]+[key],new_value,0)
          
     def DrawActionButtons(self) -> None:
         """        
@@ -377,6 +378,13 @@ class Scene(Object):
         super().__init__(name,autoSaveFolderPath)
         self.objects = {}
         self.create_variable("light",np.array([1.0,1.0,1.0],dtype=np.float32))
+
+    def getTime(self):
+        if self.hasObject("ActiveField"):
+            return self.getObject("ActiveField").getValue("time")
+        else:
+            logging.getLogger().warning("No ActiveField object found in scene, return 0.0")
+            return 0.0
 
 
     def add_object(self, obj):
@@ -448,9 +456,8 @@ class Scene(Object):
         for obj in self.objects.values():
             obj.drawGui()
             
-        
-
-    
+def getScene():
+    return Scene("DefaultScene")
     
 class TestObject(unittest.TestCase):
     def setUp(self):

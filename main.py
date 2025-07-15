@@ -10,11 +10,7 @@ from  GuiObjcts.PlanarManifold import *
 from misc.fileMonitor import *
 from GuiObjcts.netCDFObject import *
 from GuiObjcts.FlowLineRenderObject import *
-
-def screen_to_world(x, y, width, height, modelview, projection, viewport):    
-    y = height - y  # OpenGL's y axis  is reversed of pygame's y axis
-    z = gl.glReadPixels(x, y, 1, 1, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT)
-    return gluUnProject(x, y, z, modelview, projection, viewport)
+from GuiObjcts.Indicator import *
 
 class GuiTest(Object):
     def __init__(self):
@@ -116,8 +112,6 @@ def main():
     # glocal_pfs.register("assets", "C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets")
     size=config['rendering']["window_size"]
 
-    
-    # Assuming you have your LIC texture data ready
     lic_texture_data = np.random.rand(100, 100, 3)*128   # Use random data as an example
     lic_texture_data = lic_texture_data.astype('uint8')
     renderable_object = Renderable(lic_texture_data,5,2,-5)
@@ -126,16 +120,20 @@ def main():
     defaultMat=shaderManager.getDefautlMaterial()
    
     camera = Camera(60.0, (0, 0, 5), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
-    coord=CoordinateSystem(engine.scene)
+    indicator=Indicator("indicator",camera)
+    coord=CoordinateSystem()
     planarManifold=PlanarManifold(32,32)
     actFieldWidget=ActiveField()
     VectorGlyph=VertexArrayVectorGlyph()
     VectorGlyph.setMaterial(defaultMat)
     commandBar=MainUICommand("mainCommandUI")
-    test=GuiTest()
     netCDF=NetCDFLoaderOBJ()
     flowline=FlowLineObject()   
-    engine.addObjects2Scene([coord,planarManifold, actFieldWidget,commandBar,camera,VectorGlyph,netCDF,flowline]   )
+
+    engine.addObjects2Scene([coord,planarManifold, actFieldWidget,indicator,flowline,commandBar,camera,VectorGlyph,netCDF]   )
+
+
+    engine.eventRegister.register(lambda event: indicator.eventCallBacks(event))
     engine.eventRegister.register(lambda event: camera.eventCallBacks(event))
     engine.eventRegister.register(lambda event: actFieldWidget.eventCallBacks(event))
     engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)

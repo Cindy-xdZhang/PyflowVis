@@ -128,7 +128,68 @@ def draw_str_input( label, value):
     changed, new_value = imgui.input_text(label, value, 256)
     return changed, new_value
 
+def draw_list_input(label, value):
+    """
+    Draws a list of values (int, float, or str) in ImGui, allowing editing and resizing.
+    Returns (changed, new_value)
+    """
+    changed = False
+    new_value = list(value)  # Make a copy to edit
 
+    imgui.text(label + ":")
+    imgui.same_line()
+    if imgui.button(f"Add##{label}"):
+        # Guess type from first element, or default to int
+        if len(new_value) > 0:
+            if isinstance(new_value[0], float):
+                new_value.append(0.0)
+            elif isinstance(new_value[0], str):
+                new_value.append("")
+            elif isinstance(new_value[0], tuple) and len(new_value[0]) == 2 and isinstance(new_value[0][0], np.ndarray) and isinstance(new_value[0][1], float):
+            # Handle point type (pos3D, time)
+                new_value.append((np.array([0.0, 0.0, 0.0]), 0.0))
+            else:
+                new_value.append(0)
+        else:
+            new_value.append(0)
+        changed = True
+
+    remove_indices = []
+    for i, v in enumerate(new_value):
+        imgui.push_id(f"{label}_{i}")
+        if isinstance(v, float):
+            c, nv = imgui.input_float(f"[{i}]", v)
+        elif isinstance(v, int):
+            c, nv = imgui.input_int(f"[{i}]", v)
+        elif isinstance(v, str):
+            c, nv = imgui.input_text(f"[{i}]", v, 128)
+        elif isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], np.ndarray) and isinstance(v[1], float):
+            # Handle point type (pos3D, time)
+            pos3D, time = v
+            pos_changed, new_pos = imgui.input_float3(f"[{i}]", pos3D[0], pos3D[1], pos3D[2])
+            imgui.same_line()
+            time_changed, new_time = imgui.input_float(f",[{i}]", time)
+            if pos_changed or time_changed:
+                c = True
+                nv = (np.array(new_pos, dtype=np.float32), new_time)
+            else:
+                c, nv = False, v
+        else:
+            imgui.text(f"[{i}] (unsupported type)")
+            c, nv = False, v
+        if c:
+            new_value[i] = nv
+            changed = True
+        imgui.same_line()
+        if imgui.button("Remove"):
+            remove_indices.append(i)
+            changed = True
+        imgui.pop_id()
+    # Remove after loop to avoid index issues
+    for idx in reversed(remove_indices):
+        new_value.pop(idx)
+
+    return changed, new_value
 def draw_options_combo( label, value_list, current_selection):
     def draw_combo_options(label:str, x_list:list,current_selection_i:str):
         # Draw a combo box with the provided options and return the selected index
@@ -312,7 +373,7 @@ class ValueGuiCustomization:
             return False
 
 
-
+#some type has multiple way to render in gui, customization is used to select the way
 def get_imgui_widget_for_type(variable_type:str, customization:ValueGuiCustomization=None):
     """
     Selects and returns the appropriate ImGui widget based on customization type and entry.
@@ -364,6 +425,10 @@ def get_imgui_widget_for_type(variable_type:str, customization:ValueGuiCustomiza
          'np.mat4': {
              'input': lambda  label, value: draw_editable_mat4( label, value),
         },
+         'bvecn': {  
+            'input': lambda  label, value: draw_vecn_input( label, value) , 
+            'plot_lines': lambda label, value: draw_vecn_plot_lines(label,value) , 
+        },
          'vecn': {  
             'input': lambda  label, value: draw_vecn_input( label, value) , 
             'plot_lines': lambda label, value: draw_vecn_plot_lines(label,value) , 
@@ -374,6 +439,9 @@ def get_imgui_widget_for_type(variable_type:str, customization:ValueGuiCustomiza
         'str': {
             'input': lambda  label, value: draw_str_input( label, value),
             'file_dialog': lambda label, value: draw_file_dialog(label, value),
+        },
+        'list': {
+            'input': lambda  label, value: draw_list_input( label, value),
         },
         'options': {
             'combo': lambda  label,value_list,current_selection:draw_options_combo(label, value_list, current_selection)

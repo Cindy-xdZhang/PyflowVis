@@ -2,11 +2,29 @@ import pygame
 from OpenGL.GL import glViewport
 
 class EventRegistrar:
+    """
+    EventRegistrar is a class that registers pygame events and handles them.
+    Once an event happen, EventRegistrar.handle_register_event(event) will be called, map an event to the actions registered in EventRegistrar.register(action)
+    """
     def __init__(self,imgui_impl):
         self.event_actions = []
         self.imgui_impl=imgui_impl
         self.running=True
+
+        #objects can notify one event happening,like "seeding changed", this is a channel event, only listener will react to it
+        self.channel_event_listeners={}#key is event name, value is a list of listeners e.g{"seeding_changed": [listener1, listener2]}
       
+    def registerChannelEvent(self,event,listener=None):
+        if event not in self.channel_event_listeners:
+            self.channel_event_listeners[event]=[]
+        if listener is not None:
+            self.channel_event_listeners[event].append(listener)#listener is a list of listeners
+
+    def notifyEvent(self,event):
+        if event in self.channel_event_listeners:
+            for listener in self.channel_event_listeners[event]:
+                listener()
+
 
     def register(self,  action):
         """   register a callback anction
@@ -33,6 +51,7 @@ class EventRegistrar:
             self.handle_register_event(event)
             # Pass the pygame events to the ImGui Pygame renderer if we need imgui react(map pygame key to ImGui key etc.)
             self.imgui_impl.process_event(event) 
+    
       
     def running(self)->bool:
         return self.running

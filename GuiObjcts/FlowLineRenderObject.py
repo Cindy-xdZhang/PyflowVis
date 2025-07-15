@@ -5,7 +5,6 @@ from FLowUtils.VectorField2d import *
 from FLowUtils.VectorField3d import *
 from OpenGL import GL as gl 
 import ctypes
-from OpenGL.arrays import GLintArray, GLsizeiArray
 
 def pathline_integration_one_direction(
     vectorField: UnsteadyVectorField2D|UnsteadyVectorField3D,
@@ -190,16 +189,12 @@ class FlowLineObject(Object):
     def __init__(self):
         super().__init__("flowline")
         self.engine = getEngine()
+        self.parentScene=getScene()
+        assert self.parentScene is not None,  "scene is not set"
 
-   
         self.pathline_dirty = True
         self.streamline_dirty = True
 
-        self.active_seeding_group = 0
-        self.SeedingGroup0=[]# a list of (pos3D,time), for 2D, pos.Z is 0 used for pathlines
-        self.SeedingGroup1=[]# a list of (pos3D,time), for 2D, pos.Z is 0 used for streamlines
-
- 
         
         self.__initDynamicTypeGLContext__()
         #  material
@@ -216,6 +211,9 @@ class FlowLineObject(Object):
         self.create_variable("integrator", "RK4",True)#euler,rk4
         self.create_variable("stepSize", 0.01  ,True)
         # self.create_variable("flowlineGroupID", self.flowlineGroupID)
+        getEngine().eventRegister.registerChannelEvent("seeding_changed", lambda: setattr(self, "pathline_dirty", True))
+
+
 
     def setMaterial(self,material) -> None:
         self.material=material
@@ -286,6 +284,9 @@ class FlowLineObject(Object):
 
         if not hasattr(self, 'pathline_dirty') or not self.pathline_dirty:
             return
+        self.indicatorObject=self.parentScene.getObject("indicator") if self.parentScene.hasObject("indicator") else None
+        if self.indicatorObject is None:
+            return
         actFieldWidget = self.parentScene.getObject("ActiveField")
         time=actFieldWidget.time()
         vector_field:UnsteadyVectorField2D = actFieldWidget.getActiveField()  
@@ -293,11 +294,9 @@ class FlowLineObject(Object):
             return
 
         
-        self.SeedingGroup0=[(np.array([0.0,0.1,0.0]),time), (np.array([0.0,0.9,0.0]),time)]
-        seeds = self.SeedingGroup0  # [(pos3D, time), ...]
+        seeds=self.indicatorObject.getValue("SeedingGroup0") # [(pos3D, time), ...]
         number_of_pathlines = len(seeds)
 
-        start_time =time
         min_time = vector_field.getMinTime()
         max_time = vector_field.getMaxTime()
         #get integration and rendering paramter from gui

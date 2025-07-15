@@ -34,8 +34,7 @@ class Camera(Object):
         self.init_targetDirection =  np.array(center,dtype=np.float32)-  self.init_position
         self.init_up = glm.vec3(up)
         
-
-        self.create_variable("position", np.array(position,dtype=np.float32),False)
+        self.create_variable_callback("position", np.array(position,dtype=np.float32),lambda x:self.updateMVPVariables(),True)
         self.fov = fov
         self.targetDirection   =self.init_targetDirection
         self.up = glm.vec3(up)
@@ -50,6 +49,8 @@ class Camera(Object):
         self.addAction("z positive", lambda object: object.look_at_z_positive() )
         self.addAction("z negative", lambda object: object.look_at_z_negative() )
         self.addAction("reset position", lambda object: object.resetCamera() )
+        self.MVPVariables=  {"viewMat":None,"projMat":None}
+        self.updateMVPVariables()
 
     def resetCamera(self):
         self.fov = self.init_fov
@@ -57,15 +58,15 @@ class Camera(Object):
         self.up = self.init_up
         self.setValue("position", self.init_position)
         self.rotation_matrix = np.eye(4, dtype=np.float32)
+        self.updateMVPVariables()
         
+    def updateMVPVariables(self):
+        self.MVPVariables["viewMat"]=self.get_view_matrix()
+        self.MVPVariables["projMat"]=self.get_projection_matrix()
+
     def getScope(self ):
         """overide the getScope method to return view and projection matrix"""
-        AllVariables=  {}
-        viewMat= self.get_view_matrix()
-        projMat=self.get_projection_matrix()
-        AllVariables["viewMat"]=viewMat 
-        AllVariables["projMat"]=projMat
-        return AllVariables
+        return   self.MVPVariables
 
     def get_view_matrix(self):
         """Get the view matrix."""
@@ -87,17 +88,19 @@ class Camera(Object):
         self.width = width
         self.height = height
         self.aspect_ratio = width / height
-        # self.projection_matrix = self.get_projection_matrix()
+        self.updateMVPVariables()
 
     def look_at_z_positive(self):
         """Adjust the camera to look at the Z positive direction."""
         # pos= self.getValue("position")
         self.targetDirection = np.array([0, 0, 1])
+        self.updateMVPVariables()
 
     def look_at_z_negative(self):
         """Adjust the camera to look at the Z negative direction."""
         # pos= self.getValue("position")
         self.targetDirection  =  np.array([0, 0, -1])
+        self.updateMVPVariables()
 
     def resetCamera(self):
         """Reset the camera to the initial state."""
@@ -105,6 +108,7 @@ class Camera(Object):
         self.updateValue("position", self.init_position)
         self.targetDirection = self.init_targetDirection
         self.rotation_matrix = np.eye(4, dtype=np.float32)
+        self.updateMVPVariables()
 
     def handle_mouse_move(self, x, y,up=False):
         """Handle the mouse movement to rotate the camera around the target."""
@@ -140,7 +144,7 @@ class Camera(Object):
 
         # Apply the rotations
         self.rotation_matrix = np.dot(rotation_y, np.dot(rotation_x, self.rotation_matrix))
-      
+        self.updateMVPVariables()
   
     
     def pan(self, dx:float, dy:float,dz:float):
@@ -167,7 +171,7 @@ class Camera(Object):
         
         # Update the position and target direction based on the movements
         self.updateValue("position", self.getValue("position") + right_movement + up_movement_np+z_movement)
-
+        self.updateMVPVariables()
 
 
     def zoom(self, direction):
@@ -177,9 +181,7 @@ class Camera(Object):
             self.fov -= 1.0
         elif direction == 'out' and self.fov < 120:
             self.fov += 1.0
-        # self.projection_matrix = self.get_projection_matrix()
-        # logger.debug(f"Zoom in: FOV changed from {old_fov} to {self.fov}")
-
+        self.updateMVPVariables()
 
     def eventCallBacks(self,event):
         if event.type == pygame.MOUSEBUTTONDOWN:
