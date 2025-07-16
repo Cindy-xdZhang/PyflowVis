@@ -4,6 +4,53 @@ import numpy as np
 # abstract base class work
 from abc import ABC, abstractmethod
 from .interpolation import bilinear_interpolate
+from numba import njit 
+
+@njit(cache=True)
+def bilinear_interpolate_numpy(field_slice, x, y):
+    # field_slice 应该是 numpy 数组
+    # Get grid coordinates
+    x0 = int(np.floor(x))
+    x1 = int(np.ceil(x))
+    y0 = int(np.floor(y))
+    y1 = int(np.ceil(y))
+
+    # Clamp to grid boundaries (assuming field_slice dimensions are known or passed)
+    # This requires passing field_slice.shape or similar
+    Ydim, Xdim, _ = field_slice.shape # Assuming shape (Y, X, 2)
+
+    x0 = max(0, min(x0, Xdim - 1))
+    x1 = max(0, min(x1, Xdim - 1))
+    y0 = max(0, min(y0, Ydim - 1))
+    y1 = max(0, min(y1, Ydim - 1))
+
+    # Get interpolation weights
+    wx = x - x0
+    wy = y - y0
+
+    # Get vectors at grid points
+    v00 = field_slice[y0, x0]
+    v10 = field_slice[y0, x1]
+    v01 = field_slice[y1, x0]
+    v11 = field_slice[y1, x1]
+
+    # Bilinear interpolation
+    v0 = v00 * (1.0 - wx) + v10 * wx
+    v1 = v01 * (1.0 - wx) + v11 * wx
+    return v0 * (1.0 - wy) + v1 * wy
+
+# 可以为 get_vector_at_grid 也创建一个 njit 函数
+@njit(cache=True)
+def _get_vector_unsteady_numba(field_data, x, y, time):
+    return field_data[time, y, x] # field_data 应该是一个 numpy 数组
+
+
+
+
+
+
+
+
 
 class VectorFieldLinearOperation():
     """ the VectorFieldLinearOperation class implements linear operations on vector fields.
@@ -207,6 +254,18 @@ class UnsteadyVectorField2D(IDiscreteField2D):
         vec =bilinear_interpolate(self.field[time],  posX,posY)
         return vec
     
+
+    def get_vector(self, posX: float, posY: float, time: float) -> np.ndarray:
+        return _get_vector_unsteady_numba(
+            self.field.numpy() if isinstance(self.field, torch.Tensor) else self.field, 
+            posX, posY, time,
+            self.domainMinBoundary[0], self.domainMinBoundary[1],
+            self.gridInterval[0], self.gridInterval[1],
+            self.tmin, self.timeInterval,
+            self.Xdim, self.Ydim, self.time_steps
+        )
+
+
     def get_vector(self, posX: float, posY: float, time: float) -> np.ndarray:
         """Get interpolated vector at arbitrary position using trilinear interpolation.
         

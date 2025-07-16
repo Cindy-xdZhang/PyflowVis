@@ -6,6 +6,7 @@ from FLowUtils.VectorField3d import *
 from OpenGL import GL as gl 
 import ctypes
 
+
 def pathline_integration_one_direction(
     vectorField: UnsteadyVectorField2D|UnsteadyVectorField3D,
     start_pos:np.ndarray[np.float32,3],
@@ -183,7 +184,13 @@ def streamline_integration_double_direction(
     full_path = backward_path[::-1] + forward_path[1:]
     return full_path
     
-
+def compute_pathline(args):
+        vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method = args
+        forward = pathline_integration_one_direction(vector_field, pos3d, t0, max_time, step_size, max_iteration, method)
+        backward = pathline_integration_one_direction(vector_field, pos3d, t0, min_time, step_size, max_iteration, method)
+        backward = backward[::-1]
+        full_path = backward + forward[1:]
+        return full_path
 
 class FlowLineObject(Object):
     def __init__(self):
@@ -206,7 +213,7 @@ class FlowLineObject(Object):
         self.create_variable("pathline_active",True)
         self.create_variable("lineWeight", 0.1,True)
         self.create_variable("zOffset", 0.0,True)
-        self.create_variable("colorMap",self.engine.getBuiltInTextureNames())
+        self.create_variable("colorMap",self.engine.getBuiltInTextureNames(),True)
         self.create_variable("maxIteration", 5000,True)
         self.create_variable("integrator", "RK4",True)#euler,rk4
         self.create_variable("stepSize", 0.01  ,True)
@@ -219,12 +226,19 @@ class FlowLineObject(Object):
         self.material=material
 
     def erase(self) -> None:
-        self.vertex_geometry  = []
-        self.vertex_tex_coords  = []
-        self.indices = []
-        self.vetex_count=0
-        self._buffer_dirty = True
-        self.commit()
+        self.vertex_count = 0
+        self.mOffsetIndices = []
+        self.mDrawSizes = []
+        # Bind VAO and VBO
+        gl.glBindVertexArray(self.vao_id)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_id)
+        # Upload empty data to clear buffer
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, 0, None, gl.GL_DYNAMIC_DRAW)
+        # Unbind
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        gl.glBindVertexArray(0)
+
+        
     def __initDynamicTypeGLContext__(self):
         self.vertex_count = 0
         self.mOffsetIndices = []
@@ -300,24 +314,16 @@ class FlowLineObject(Object):
         min_time = vector_field.getMinTime()
         max_time = vector_field.getMaxTime()
         #get integration and rendering paramter from gui
-        colorMapID=self.getValue("colorMap")
-        lineWeight=self.getValue("lineWeight")
-        zOffset=self.getValue("zOffset")
         step_size=self.getValue("stepSize")
         max_iteration = self.getValue("maxIteration")
         method= self.getValue("integrator")
 
-        self.pathline_cache = []
-        for pos3d, t0 in seeds:
-            forward = pathline_integration_one_direction(vector_field,
-                pos3d, t0, max_time, step_size, max_iteration, method
-            )
-            backward =pathline_integration_one_direction( vector_field,
-                pos3d, t0, min_time, step_size, max_iteration, method
-            )
-            backward = backward[::-1]
-            full_path = backward + forward[1:]
-            self.pathline_cache.append(full_path)
+        args_list = [
+                (vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method)
+                for pos3d, t0 in seeds
+            ]
+
+        self.pathline_cache = list(map(compute_pathline, args_list))
 
         self.MappingFlowlineAsRenderingVAO(self.pathline_cache)
         self.pathline_dirty = False

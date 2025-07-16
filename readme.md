@@ -8,7 +8,7 @@ A simplified Python fluid visualization renderer and GUI based on imgui, possibl
 
 ### Install dependency for PyFlowVis
 ``` 
-pip install -r requirements gui.txt
+pip install -r requirements_gui.txt
 ```
 ### Start the visualization Engine
 ```

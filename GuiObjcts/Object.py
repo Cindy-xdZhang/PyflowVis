@@ -76,7 +76,7 @@ class Object:
         self.parentScene=None
         self.cameraObject=None
         hasRenderFunc=hasattr(self,"render")
-        self.create_variable("draw",hasRenderFunc,True)
+        self.create_variable("draw",hasRenderFunc,hasRenderFunc)
 
    
 
@@ -121,7 +121,9 @@ class Object:
 
     @typechecked
     def setRenderingVisibility(self,renderVisible:bool):
+        renderVisible= hasattr(self,"render") and renderVisible
         self.updateValue("draw",renderVisible)
+
 
         
     @typechecked
@@ -175,11 +177,23 @@ class Object:
             with open(f'{self.autoSaveFolderPath}/{self.name}.json', 'r') as file:
                 cachedPerperties= jsonpickle.decode(file.read())
                 for propName in self.persistentProperties.keys() :
-                    if propName in cachedPerperties and  type(self.persistentProperties[propName])==type(cachedPerperties[propName]):
-                        self.persistentProperties[propName] = cachedPerperties[propName]                                    
+                    current_value = self.persistentProperties[propName]
+                    cached_value = cachedPerperties.get(propName, None)
+                    # Special handling for option type (list[str])
+                    if getTypeName(current_value) == "options" and isinstance(current_value, list):
+                        # Expect cached_value to be a dict: {"options": [...], "selected_index": int}
+                        if isinstance(cached_value, dict) and "options" in cached_value and "selected_item" in cached_value:
+                            selected_item = cached_value["selected_item"]
+                            if len(cached_value["options"]) == len(current_value) and selected_item in current_value:
+                                # Restore the selected index
+                                self.updateOptionValue(propName,selected_item)
+                        # else: fallback to default (do nothing)
+                    else:
+                        if cached_value is not None and type(current_value) == type(cached_value):
+                            self.persistentProperties[propName] = cached_value
             self.OnRestoreState()
         else:
-            print(f"No saved state file \'{self.autoSaveFolderPath}/{self.name}.json\', for {self.name},  restoring default state.")
+            print(f"No saved state file '{self.autoSaveFolderPath}/{self.name}.json', for {self.name},  restoring default state.")
 
     def OnRestoreState(self):
         """
@@ -194,13 +208,21 @@ class Object:
         if self.persistentProperties.keys().__len__()>0:
             # Define the full path for the save file
             file_path = f'{self.autoSaveFolderPath}/{self.name}.json'
-            
             # Check if the directory exists, if not, create it
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            
+            # Prepare properties for saving
+            save_dict = {}
+            for propName, value in self.persistentProperties.items():
+                # Special handling for option type (list[str])
+                if getTypeName(value) == "options" and isinstance(value, list):
+                    # Save both the options and the current selected index
+                    selected_item = self.optionValues.get(propName)
+                    save_dict[propName] = {"options": value, "selected_item": selected_item}
+                else:
+                    save_dict[propName] = value
             # Save persistent properties to a file
             with open(file_path, 'w') as file:
-                file.write(jsonpickle.encode(self.persistentProperties))
+                file.write(jsonpickle.encode(save_dict))
             
                 
    
@@ -368,7 +390,6 @@ class LoggingWidget(Object):
         self.updateOptionValue("logger", "logging")
         self.updateOptionValue("loggingLevel", "DEBUG")
         logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d- %(message)s')      
-
   
    
         # Configure logging to display all messages
@@ -460,7 +481,7 @@ class Scene(Object):
                 for obj_name in self.objects:
                     # This variable tracks the visibility; you might need to store visibility state elsewhere
                     # For demonstration, using a local variable. Consider adapting it to your object's properties
-                    obj=self.getObject(obj_name)
+                    obj:Object=self.getObject(obj_name)
                     if isinstance(obj,Object) is False:
                         continue
                     visible = obj.getValue("draw")

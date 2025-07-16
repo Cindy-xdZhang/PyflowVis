@@ -166,8 +166,10 @@ def draw_list_input(label, value):
         elif isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], np.ndarray) and isinstance(v[1], float):
             # Handle point type (pos3D, time)
             pos3D, time = v
+            imgui.set_next_item_width(150)
             pos_changed, new_pos = imgui.input_float3(f"[{i}]", pos3D[0], pos3D[1], pos3D[2])
             imgui.same_line()
+            imgui.set_next_item_width(50)
             time_changed, new_time = imgui.input_float(f",[{i}]", time)
             if pos_changed or time_changed:
                 c = True

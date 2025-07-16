@@ -36,17 +36,21 @@ class Indicator(Object):
     def __init__(self, name,camera):
         super().__init__(name)
         self.camera=camera
+
+        def notifySeedingChanged(obj):
+            getEngine().eventRegister.notifyEvent("seeding_changed")
+
         self.addAction("clear seeding", lambda x: self.clearSeeding())
         self.addAction("dense reseeding", lambda x: self.denseReseeding())
 
         # Seeding groups: each is a list of (pos, time)
         self.create_variable("keepSeeding", False, True)
         self.create_variable("activeSeedingGroup", 0, True)
-        self.create_variable("SeedingGroup0", list([]), False)
-        self.create_variable("SeedingGroup1", list([]), False)
+        self.create_variable_callback("SeedingGroup0", list([]), notifySeedingChanged,False)
+        self.create_variable_callback("SeedingGroup1", list([]), notifySeedingChanged,False)
         self.last_indicator_pos = None
         self.last_indicator_time = None
-        getEngine().eventRegister.registerChannelEvent("seeding_changed")
+
         
 
   
@@ -129,7 +133,7 @@ class Indicator(Object):
         self.setValue("SeedingGroup1", [])
         self.last_indicator_pos = None
         self.last_indicator_time = None
-        print("[Indicator] Cleared all seedings.")
+        getEngine().eventRegister.notifyEvent("seeding_changed")
 
     def denseReseeding(self):
         pass

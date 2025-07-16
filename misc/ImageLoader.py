@@ -1,3 +1,5 @@
+import logging
+logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
 from PIL import Image
 
 class ImageLoader:

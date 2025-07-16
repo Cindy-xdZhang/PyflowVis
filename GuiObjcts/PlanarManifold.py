@@ -17,7 +17,7 @@ class PlanarManifold(VertexArrayObject):
         self.create_plane_mesh()
         colormapMat=Material("planarManifoldMaterial","colormapMat",texture0="builtIn")
         self.setMaterial(colormapMat)
-        self.create_variable("colorMap",self.engine.getBuiltInTextureNames())
+        self.create_variable("colorMap",self.engine.getBuiltInTextureNames(),True)
         self.create_variable("attributeBounds",(0.0,1.0))
         self.z=0.0
 
