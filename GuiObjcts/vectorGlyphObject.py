@@ -8,11 +8,11 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         def udpateRenderVisibilityCallBack(obj) -> None:
             obj.renderVisible=obj.getValue("draw")
         self.create_variable_callback("draw",True,udpateRenderVisibilityCallBack,False)
-        self.create_variable_callback("scale",1.0,dirtyCallBack,False,1.0)
-        self.create_variable_callback("segments",10,dirtyCallBack,False,10)
-        self.create_variable_callback("radius",0.01,dirtyCallBack,False,0.01)
-        self.create_variable_callback("height",0.1,dirtyCallBack,False,0.1)
-        self.create_variable_callback_with_gui_customization("sampling",0.5,dirtyCallBack,False,0.5, {'widget': 'slider_float', 'min': 0.0, 'max': 1.0})
+        self.create_variable_callback("scale",1.0,dirtyCallBack,False)
+        self.create_variable_callback("segments",10,dirtyCallBack,False)
+        self.create_variable_callback("radius",0.01,dirtyCallBack,False)
+        self.create_variable_callback("height",0.1,dirtyCallBack,False)
+        self.create_variable_callback_with_gui_customization("sampling",0.5,dirtyCallBack,False, {'widget': 'slider_float', 'min': 0.0, 'max': 1.0})
         self.create_variable_gui("color",(0.2,-.2,0.2),False,{'widget': 'color_picker'})
 
         

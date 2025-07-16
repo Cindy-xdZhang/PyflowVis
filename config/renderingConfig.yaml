@@ -2,5 +2,5 @@
 
 
 rendering:
-  restore: False
+  restore: True
   window_size: [1600, 1200]
