@@ -73,10 +73,10 @@ class Object:
         self.optionValues = {}
         self.GuiVisible=True
         
-        #self.renderVisible control whethor to call render() function
-        self.renderVisible=False
         self.parentScene=None
         self.cameraObject=None
+        hasRenderFunc=hasattr(self,"render")
+        self.create_variable("draw",hasRenderFunc,True)
 
    
 
@@ -118,9 +118,11 @@ class Object:
     @typechecked
     def setGuiVisibility(self,drawGui:bool):
         self.GuiVisible=drawGui
+
     @typechecked
     def setRenderingVisibility(self,renderVisible:bool):
-        self.renderVisible=renderVisible
+        self.updateValue("draw",renderVisible)
+
         
     @typechecked
     def appendGuiCustomization(self, customization: ValueGuiCustomization):
@@ -138,9 +140,9 @@ class Object:
  
     #An object draw including two parts:
     #1. drawGui() is called by the scene to draw the object's properties in the gui, controled by  GuiVisible,called by the scene.drawALlGUi
-    #2. render() is to draw the object's geometry, controled by  renderVisible
+    #2. render() is to draw the object's geometry, controled by  renderVisible(obj.getValue("draw"))
     def draw(self):
-        if self.renderVisible:
+        if self.getValue("draw")==True:
             self.render()        
             
                
@@ -461,7 +463,7 @@ class Scene(Object):
                     obj=self.getObject(obj_name)
                     if isinstance(obj,Object) is False:
                         continue
-                    visible = obj.GuiVisible
+                    visible = obj.getValue("draw")
                     imgui.text(obj_name)
                     imgui.same_line()
                     changed, new_visible = imgui.checkbox(f"##{obj_name}", visible)

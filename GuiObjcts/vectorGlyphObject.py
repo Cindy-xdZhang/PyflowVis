@@ -3,11 +3,12 @@ from .VertexArrayObject import *
 class VertexArrayVectorGlyph(VertexArrayObject):
     def __init__(self, name="vectorGlyph"):
         super().__init__(name)
+        # Performance optimization flags
+        self.dirty = True    
+
         def dirtyCallBack(obj) -> None:
             obj.dirty=True
-        def udpateRenderVisibilityCallBack(obj) -> None:
-            obj.renderVisible=obj.getValue("draw")
-        self.create_variable_callback("draw",True,udpateRenderVisibilityCallBack,False)
+        self.create_variable_callback("draw",True,dirtyCallBack,True)
         self.create_variable_callback("scale",1.0,dirtyCallBack,False)
         self.create_variable_callback("segments",10,dirtyCallBack,False)
         self.create_variable_callback("radius",0.01,dirtyCallBack,False)
@@ -16,9 +17,7 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         self.create_variable_gui("color",(0.2,-.2,0.2),False,{'widget': 'color_picker'})
 
         
-        # Performance optimization flags
-        self.dirty = True    
-        self.renderVisible = True
+        
     
     def _vectorized_interpolation_2DVectorField(self, vector_field, time, sampling_distance):
         """Fully vectorized field interpolation for all sample points with 3-channel output"""
