@@ -6,18 +6,9 @@ from typing import Dict, Any
 from typeguard import typechecked
 import logging
 from .ObjectGUIReflection import *
-# from functools import lru_cache
 import hashlib
+from FLowUtils.decoration import singleton
 
-def singleton(cls):
-    _instance = {}
-
-    def inner(*args, **kwargs):
-        if cls not in _instance:
-            _instance[cls] = cls(*args, **kwargs)
-        return _instance[cls]
-    inner._original_class = cls  # Expose the original class
-    return inner
 
 
 def operate_on_dict(dict_to_operate, key_list, new_value, index=0):
@@ -83,11 +74,14 @@ class Object:
     def getParentScene(self):
         return self.parentScene
     
-    def setCamera(self,camera):
-        self.cameraObject=camera 
 
-    def setUpScene(self,SceneInscane):
-        self.parentScene=SceneInscane if isinstance(SceneInscane, Scene._original_class) else None
+    def postInit(self):
+        self.cameraObject=self.parentScene.getObject("Camera")
+        if self.cameraObject is None:
+            logging.getLogger().critical("No camera object found in scene")
+            raise ValueError("No camera object found in scene")        
+        
+
 
     def _get_hash_key(self):
         """this function hash the object properties;
@@ -265,8 +259,28 @@ class Object:
 
 
 
-    def setValue(self, name:str, value):
-        self.updateValue(name, value)
+    def setValue(self, name:str, value,callback:bool=True):
+        """
+        updatevalue will always try to trigger callback.
+        setValue can change value and  disable callback by setting callback to False, only update the value, not trigger callback
+        """
+        if callback:
+            self.updateValue(name, value)
+        else:
+            if isinstance(value, tuple):
+                value = list(value)
+            value=self.__floatConvert__(value)
+            # Override to catch properties being set directly
+            if name in self.persistentProperties:
+                assert(type(value)==type(self.persistentProperties[name]))
+                self.persistentProperties[name] = value            
+            elif name in self.nonPersistentProperties:            
+                assert(type(value)==type(self.nonPersistentProperties[name]))
+                self.nonPersistentProperties[name] = value 
+            else:
+                # If the attribute is not found, raise AttributeError
+                raise AttributeError(f"'{self.name}' object has no attribute '{name}'")
+
 
     @typechecked        
     def getOptionValue(self, name:str)->str|None:
@@ -290,6 +304,8 @@ class Object:
             return value
 
     def updateValue(self, name:str, value:Any)->None:
+        if isinstance(value, tuple):
+            value = list(value)
         value=self.__floatConvert__(value)
         # Override to catch properties being set directly
         if name in self.persistentProperties:
@@ -428,18 +444,19 @@ class Scene(Object):
 
 
     def add_object(self, obj):
-        """connect an object with current scene
+        """connect an object with current scene, and set the parentScene of the object.
+        After this function, then we can call postInit() to set the cameraObject of the object, and etc.
         """
         assert isinstance(obj,Object)
         if self.hasObject(obj.name):
             logging.getLogger().warning(f" Object '{obj.name}' already exists in scene '{self.name}'.")
             return  
         self.objects[obj.name]= obj
-        obj.setUpScene(self)
-
-    def setUpCamera(self, camera):
+        obj.parentScene=self
+       
+    def postInit(self):
         for obj in self.objects.values():
-                obj.setCamera(camera)
+            obj.postInit()
     
     def hasObject(self, name):
         return name in self.objects.keys()

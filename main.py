@@ -12,6 +12,29 @@ from GuiObjcts.netCDFObject import *
 from GuiObjcts.FlowLineRenderObject import *
 from GuiObjcts.Indicator import *
 
+def test_opengl_state():
+    program = gl.glGetIntegerv(gl.GL_CURRENT_PROGRAM)
+    depth_test = gl.glIsEnabled(gl.GL_DEPTH_TEST)
+    cull_face = gl.glIsEnabled(gl.GL_CULL_FACE)
+    blend = gl.glIsEnabled(gl.GL_BLEND)
+    framebuffer = gl.glGetIntegerv(gl.GL_FRAMEBUFFER_BINDING)
+    viewport = gl.glGetIntegerv(gl.GL_VIEWPORT)
+    polygon_mode = gl.glGetIntegerv(gl.GL_POLYGON_MODE)
+    offset_factor = gl.glGetIntegerv(gl.GL_POLYGON_OFFSET_FACTOR)
+    offset_units = gl.glGetIntegerv(gl.GL_POLYGON_OFFSET_UNITS)
+    offset_factor2 = gl.glGetIntegerv(gl.GL_POLYGON_OFFSET_FACTOR)
+    print(f"Current OpenGL state:")
+    print(f"Program: {program}")
+    print(f"Depth test enabled: {depth_test}")
+    print(f"Face culling enabled: {cull_face}")
+    print(f"Blending enabled: {blend}")
+    print(f"Framebuffer binding: {framebuffer}")
+    print(f"Viewport: {viewport}")
+    print(f"Polygon mode: {polygon_mode}")
+    print(f"Polygon offset factor: {offset_factor}")
+    print(f"Polygon offset units: {offset_units}")
+    print(f"Polygon offset factor (2): {offset_factor2}")
+
 class GuiTest(Object):
     def __init__(self):
         super().__init__("GuiTest")

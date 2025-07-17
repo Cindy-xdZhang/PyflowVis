@@ -81,7 +81,7 @@ class Camera(Object):
         rotation_matrix = self.getValue("rotation_matrix")
         targetDirectionNew = np.dot(rotation_matrix.transpose(), np.array(targetDirection))[:3]
         targetNew = pos + targetDirectionNew
-        targetNew = glm.vec3(targetNew)
+        targetNew = np.array(targetNew, dtype=np.float32)
         up = self.getValue("up")
         return glm.lookAt(pos, targetNew, up)
 
@@ -170,7 +170,8 @@ class Camera(Object):
         up_movement_np = np.array([up_movement.x, up_movement.y, up_movement.z], dtype=np.float32)
 
         # Update the position based on the movements
-        self.updateValue("position", self.getValue("position") + right_movement + up_movement_np + z_movement)
+        new_position = np.array(self.getValue("position")+ right_movement + up_movement_np + z_movement, dtype=np.float32) 
+        self.updateValue("position", new_position )
         self.updateMVPVariables()
 
     def zoom(self, direction):

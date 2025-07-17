@@ -348,7 +348,8 @@ class ShaderManager(Object):
         self.add_shader_program("monoColor","assets/shaders/simple_vertex.glsl","assets/shaders/simple_fragment.glsl")
         self.add_shader_program("colormapMat","assets/shaders/simple_vertex.glsl","assets/shaders/colorMap_fragment.glsl")
         self.add_shader_program("flowlineMat","assets/shaders/flowline_vertex.glsl","assets/shaders/flowline_fragment.glsl","assets/shaders/flowline_geometry.glsl")
-
+        self.add_shader_program("planarManifoldMat","assets/shaders/planarManifold_vertex.glsl","assets/shaders/planarManifold_fragment.glsl")
+        
    
     # Adds a shader program with a given key
     def add_shader_program(self, key, vertex_shader_path, fragment_shader_path,geometry_shader_path=None):
@@ -424,7 +425,7 @@ class Material(Object):
         """
         UniformObjectScope.append(self)
         self.shader_program.setUniformScope(UniformObjectScope)
-        self.shader_program.Use()
+        # self.shader_program.Use()
         # if self.texture0_id is not None and self.texture0 >0:
         #     gl.glActiveTexture(gl.GL_TEXTURE0)
         #     gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture0_id)

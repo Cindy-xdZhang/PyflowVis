@@ -58,6 +58,7 @@ class VisualizationEngine:
     def getScene(self) -> Scene:
         return self.scene
     
+
     def finalizeSettleUp(self):
         """
         Call this function after all the objects are added to the scene and before engine main loop.
@@ -65,19 +66,11 @@ class VisualizationEngine:
         """
         if self.config['restore']:
             self.scene.restore_state_all()
-        #find camera object
-        for name,obj in self.scene.objects.items():
-            if isinstance(obj,Camera):
-                self.camera=obj
-                break
-        if self.camera is None:
-            logging.getLogger().critical("No camera object found in the scene")
-            raise ValueError("No camera object found in the scene")
-        else:
-            self.scene.setUpCamera(self.camera)
-        
-    
+        self.scene.postInit()
+        self.camera=self.scene.getObject("Camera")
 
+    
+    
 
 
     def MainLoop(self):
@@ -86,7 +79,9 @@ class VisualizationEngine:
         while self.eventRegister.running:
             self.eventRegister.handle_events()
             # Rendering
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+            gl.glClearColor(0.1, 0.1, 0.1, 1)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT|  gl.GL_STENCIL_BUFFER_BIT)
+            glEnable(GL_DEPTH_TEST);
         
             self.scene.render_all()
 

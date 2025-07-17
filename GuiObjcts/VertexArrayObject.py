@@ -380,12 +380,15 @@ class CoordinateSystem(Object):
             axis.setMaterial(defaultMat)
             axis.commit()
        
-   
+    def postInit(self):
+        super().postInit()
+        for axis in self.Vaos:
+            axis.cameraObject=self.cameraObject
+
     def drawGui(self):
         pass
     def render(self):
        for axis in self.Vaos:
-            axis.cameraObject=self.cameraObject
             axis.render()
    
         
@@ -420,21 +423,21 @@ def createPlane(gridSize, domainBoundaryMin,domainBoundaryMax) -> [list, list, l
     textures = []
 
     dx = float(Xmax - Xmin) / float(Xdim-1)  # Horizontal spacing between vertices
-    dy = float(Ymax - Ymin) / float(Xdim-1)  # Vertical spacing between vertices
+    dy = float(Ymax - Ymin) / float(Ydim-1)  # Vertical spacing between vertices
 
     # Generate vertices and texture coordinates
     for y in range(Ydim ):
         for x in range(Xdim ):
             vx = Xmin + x * dx  # Vertex coordinate
             vy = Ymin + y * dy
-            tx = x / Xdim  # Texture coordinate
-            ty = y / Ydim
+            tx = float(x) / float(Xdim - 1.0) 
+            ty = float(y) / float(Ydim - 1.0) 
             vertices.extend([vx, vy, 0])  # Assuming z = 0 for a flat plane
             textures.extend([tx, ty])
 
     # Generate indices
-    for y in range(Ydim):
-        for x in range(Xdim):
+    for y in range(Ydim-1):
+        for x in range(Xdim-1):
             indexLL=y * (Xdim ) + x
             indexUL=(y+1) * (Xdim ) + x
             indexUR=(y+1)* (Xdim ) + x+1

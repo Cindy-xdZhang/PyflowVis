@@ -1,20 +1,31 @@
-# PyFlowVis:
+# PyFlowVis
 
 <img src="assets/readmePics/framework.png" alt="alt text" width="720"/>
 
 This repository is a hybrid C++ Python framework for flow visualization, containing:
 A simplified Python fluid visualization renderer and GUI based on imgui, possibly with several projects related to flow visualization.
+## Basic Features of PyFlowVis
 
 
-### Install dependency for PyFlowVis
+### 2D Vector Field Visualization
+- **Vector Glyph**: Visualizes the direction and magnitude of the vector field at sampled grid points using arrows or glyphs.
+- **Indicator (Seeding of Flowline)**: Allows interactive placement of seed points for flowline/pathline integration and visualization.
+- **Flowline/Pathline**: Integrates and visualizes flowlines (streamlines at a fixed time) and pathlines (trajectories over time) from user-defined seeds.
+- **Scalar Field**: Supports visualization of scalar fields (e.g., magnitude, vorticity) as color maps or overlays.
+
+### 3D Vector Field Visualization
+- **(wip)**: 3D features are under development. Planned features include 3D vector glyphs, 3D pathlines, and observer-relative isosurface/pathline filtering.
+
+
+## Install dependency for PyFlowVis
 ``` 
 pip install -r requirements_gui.txt
 ```
-### Start the visualization Engine
+## Start the visualization Engine
 ```
 python main.py
 ```
-### Instruction of developer
+## Instruction for developer
 0. PyflowVis is using an Engine-Plugin system, you can define your own object(with variables and custom UI interfaces), and pluguin to the system, then it will become a imgui pannel, you can get thoes variables Example code:
 ```
 class GuiTest(Object):
@@ -43,21 +54,17 @@ class GuiTest(Object):
         self.create_variable("testDictionary",testDictionary,False)
 ```
 
-2. VisualizationEngine.py is the main logic of this Engine-Plugin system.
-3. For performance-senstive operation, you can write C++ functions in the 'Cppmodules ' folder and build with CMake to export C++ functions to Python (using pybind), e.g,. CppProjects\PybindCppModules\LicRendering.cpp. A pythond interface to use pybind c++ LicRendering is given in: FLowUtils\LicRenderer.py
+1. [`VisualizationEngine.py`](./GuiObjcts/VisualizationEngine.py) is the main logic of this Engine-Plugin system. Check  [`PlanarManifold.py`](./GuiObjcts/PlanarManifold.py) as an example how to use objects, and then you can write your own object and plugin to the system.
    
-4. For pure cpp program , write it in  'CppProjects' folder and build with CMake, e.g. Vastitas data generator.
+2. For performance-senstive operation, you can write C++ functions in the 'Cppmodules ' folder and build with CMake to export C++ functions to Python (using pybind), e.g,. CppProjects\PybindCppModules\LicRendering.cpp. A pythond interface to use pybind c++ LicRendering is given in: FLowUtils\LicRenderer.py
+   
+3. For pure cpp program , write it in  'CppProjects' folder and build with CMake, e.g. Vastitas data generator.
 
 # TODO list General
-0. optc optimize di term +ci term(most important thing!)
-1. add Lic and texture manager for the plane.
-2. add mouse click intersection with pickable object
-3. reference frame transformation
-
-## possible optimize 
-1. multiple thread rendering using glMultiDrawArrays
-2. vertex array object operate geometry,indices,texture as list, could using numpy.array for fast operation.
-
+1. add Lic for the plane.
+2. reference frame transformation
+3. 3d field
+4. optc optimize di term +ci term
 
 
 
@@ -69,7 +76,7 @@ The implementation of the "VortexTransformer: End‐to‐End Objective Vortex De
 
 > + A.  Vastitas training data generation implemented in C++: CppProjects/src/flowGenerator.cpp and main.cpp.
 > + B.  licrender implemented with pybind/C++ for fast Line Integral Convolution (LIC) rendering from Python: CppProjects/PybindCppModules
-> + C.  VortexTransformer model components: [`DeepUtils\models\segmentation\pathline_transformer.py`](./DeepUtils\models\segmentation\pathline_transformer.py)
+> + C.  VortexTransformer model components: [`DeepUtils\models\segmentation\pathline_transformer.py`](./DeepUtils/models/segmentation/pathline_transformer.py)
 
 ### Install dependency for project 1
 ``` 

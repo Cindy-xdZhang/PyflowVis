@@ -17,26 +17,9 @@ class MainUICommand(Object):
         self.posX,self.posY=None,None
         self.loggingWidget=getLoggingWidget()
 
-            
+      
+
         
-        # self.pick=None      
-          
-    # def build_pick_gui(self):
-    #     global rightWindowsWidth, lastWindowHeightUser  # Assuming these are managed globally
-    #     if self.pick is not None:#pick a structure in the scene
-    #         imgui.set_next_window_position(view.windowWidth - (rightWindowsWidth + imguiStackMargin),
-    #                                     2 * imguiStackMargin + lastWindowHeightUser)
-    #         imgui.set_next_window_size(rightWindowsWidth, 0.)
-
-    #         imgui.begin("Selection", None)
-    #         selection = pick.get_selection()
-
-    #         imgui.text_unformatted(f"{selection.first.type_name()}: {selection.first.name}")
-    #         imgui.separator()
-    #         selection.first.build_pick_ui(selection.second)
-
-    #         rightWindowsWidth = imgui.get_window_width()
-    #         imgui.end()
             
 
     def drawGui(self):

@@ -1,6 +1,8 @@
 from   .Object import *
 from  FLowUtils.VectorField2d import *
 import pygame
+from typeguard import typechecked
+from FLowUtils.ScalarField2d import *
 
 class LICRender(Object):
     def __init__(self,name):
@@ -25,10 +27,6 @@ class ActiveField(Object):
     def __init__(self):
         super().__init__("ActiveField")
         self.pause=True
-        self.create_variable_gui("time",0.0,False, {'widget': 'input'})
-        self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
-        #list of str is treated specially  as option in my gui implementation, don't need to specify customization, it always render as combo box
-        self.create_variable_gui("active field",[],False)
 
         def dirtyCallBack(obj:ActiveField) -> None:
             vectorGlyph=obj.parentScene.getObject("vectorGlyph")
@@ -40,20 +38,40 @@ class ActiveField(Object):
             if flowlineOBj is not None and flowlineOBj.getValue("streamline_active"):
                 flowlineOBj.streamline_dirty=True
 
-
-        self.addCallback("time",dirtyCallBack)
-
-        self.create_variable_gui("active scalar field",[""],False)
-
         def updateActivefieldcb(obj:ActiveField) -> None:
             dirtyCallBack(obj)
             activeField=obj.getActiveField()
             if activeField is not None:
                 animationSpeed=0.5*activeField.timeInterval
                 obj.updateValue("animationSpeed",animationSpeed)
-        self.addCallback("active field",updateActivefieldcb)
+        
+        def updateActiveScalarfieldcb(obj:ActiveField) -> None:
+           planarObj=obj.parentScene.getObject("plane")
+           planarObj.setScalarField(obj.getActiveScalarField())
+
+
+        self.create_variable_callback_with_gui_customization("time",0.0,dirtyCallBack,False, {'widget': 'input'})
+        self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
+        #list of str is treated specially  as option in my gui implementation, don't need to specify customization, it always render as combo box
+        self.create_variable_callback_with_gui_customization("active field",[],updateActivefieldcb,False)
+
+        self.scalarFieldManager=ScalarFieldManager()
+        self.create_variable_callback_with_gui_customization("active scalar field",[],updateActiveScalarfieldcb,False)
+        self.create_variable_gui("scalarFieldOperation", ["MAGNITUDE","CURL","Q_CRITERION","LAMBDA2","IVD"], False)
+        self.addAction("compute scalar field",lambda obj:obj.requestScalarField())
+
 
         self.activeField= {}
+
+    def requestScalarField(self):
+        operation=self.getOptionValue("scalarFieldOperation")
+        targetFieldName=self.getActiveFieldName()
+        targetField=self.getField(targetFieldName)
+        if targetField is None:
+            logging.getLogger().warning(f"Field {targetFieldName} not found")
+            return
+        scalarField,resultName=self.scalarFieldManager.request_scalar_field(targetFieldName,targetField,operation)
+        self.insertScalarField(resultName,scalarField)
 
 
     def time(self)->float:
@@ -74,14 +92,15 @@ class ActiveField(Object):
             time=0.0 if time>= 2*np.pi and self.pause==False else time
             self.setValue("time",time)
 
-    def insertField(self,fieldName:str,field):
+    @typechecked
+    def insertField(self,fieldName:str,field:UnsteadyVectorField2D):
         if field is None or fieldName is None:
             return
         self.activeField[fieldName]=field
         fieldNameList=self.getValue("active field")
         if fieldName not in fieldNameList:
             fieldNameList.append(fieldName)
-            self.setValue("active field",fieldNameList)
+            self.setValue("active field",fieldNameList,False)
         # if  only one field exist,  make it active
         if len(fieldNameList)==1:
             self.updateOptionValue("active field",fieldNameList[0])
@@ -96,3 +115,25 @@ class ActiveField(Object):
     
     def getField(self,fieldName:str):
         return self.activeField[fieldName]
+    
+    def getActiveScalarFieldName(self):
+        return self.getOptionValue("active scalar field")
+    
+    def getActiveScalarField(self):
+        if self.getActiveScalarFieldName() in self.activeField:
+            return self.activeField[self.getActiveScalarFieldName()]
+        else:
+            return None
+
+    @typechecked
+    def insertScalarField(self,fieldName:str,scalarField:ScalarField2D):
+        if scalarField is None or fieldName is None:
+            return
+        self.activeField[fieldName]=scalarField
+        fieldNameList=self.getValue("active scalar field")
+        if fieldName not in fieldNameList:
+            fieldNameList.append(fieldName)
+            self.setValue("active scalar field",fieldNameList,False)
+        # if  only one field exist,  make it active 
+        if len(fieldNameList)==1:
+            self.updateOptionValue("active scalar field",fieldNameList[0])
