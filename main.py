@@ -11,6 +11,7 @@ from misc.fileMonitor import *
 from GuiObjcts.netCDFObject import *
 from GuiObjcts.FlowLineRenderObject import *
 from GuiObjcts.Indicator import *
+from GuiObjcts.geometryRender import *
 
 def test_opengl_state():
     program = gl.glGetIntegerv(gl.GL_CURRENT_PROGRAM)
@@ -139,8 +140,7 @@ def main():
     lic_texture_data = lic_texture_data.astype('uint8')
     renderable_object = Renderable(lic_texture_data,5,2,-5)
     shaderManager=getShaderManager()
-    
-    defaultMat=shaderManager.getDefautlMaterial()
+    defaultMat=shaderManager.getMaterial()
    
     camera = Camera(60.0, (0, 0, 5), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
     indicator=Indicator("indicator",camera)
@@ -152,8 +152,9 @@ def main():
     commandBar=MainUICommand("mainCommandUI")
     netCDF=NetCDFLoaderOBJ()
     flowline=FlowLineObject()   
+    geometryRender=GeometryRenderObject()
+    engine.addObjects2Scene([coord,planarManifold, actFieldWidget,indicator,flowline,commandBar,camera,VectorGlyph,netCDF,geometryRender]   )
 
-    engine.addObjects2Scene([coord,planarManifold, actFieldWidget,indicator,flowline,commandBar,camera,VectorGlyph,netCDF]   )
 
 
     engine.eventRegister.register(lambda event: indicator.eventCallBacks(event))

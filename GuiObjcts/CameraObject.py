@@ -87,7 +87,7 @@ class Camera(Object):
 
     def get_projection_matrix(self):
         fov = self.getValue("fov")
-        return glm.perspective(glm.radians(fov), self.aspect_ratio, 0.1, 100.0)
+        return glm.perspective(glm.radians(fov), self.aspect_ratio, 0.1, 200.0)
 
     def update_window_size(self, width, height):
         """Update the window size and recalculate the projection matrix."""
@@ -179,7 +179,7 @@ class Camera(Object):
         fov = self.getValue("fov")
         if direction == 'in' and fov > 10:
             self.updateValue("fov", fov - 1.0)
-        elif direction == 'out' and fov < 120:
+        elif direction == 'out' and fov < 90:
             self.updateValue("fov", fov + 1.0)
         self.updateMVPVariables()
 

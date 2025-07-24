@@ -24,6 +24,7 @@ class VisualizationEngine:
          # Set up OpenGL context
         version = gl.glGetString(gl.GL_VERSION)
         print("OpenGL version:", version.decode())
+        print("GLU version:",gluGetString(GLU_VERSION))
 
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glEnable(gl.GL_TEXTURE_2D)  # Enable texture mapping
@@ -84,6 +85,11 @@ class VisualizationEngine:
             glEnable(GL_DEPTH_TEST);
         
             self.scene.render_all()
+            gl.glUseProgram(0)
+            gl.glBindVertexArray(0)
+            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+            gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
+    
 
             imgui.new_frame()
             self.scene.drawGui()

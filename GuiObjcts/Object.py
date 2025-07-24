@@ -103,7 +103,7 @@ class Object:
         for optionName,optionValueStr in self.optionValues.items():
             OptionList=self.getValue(optionName)
             #count the index of optionValueStr in OptionList
-            if OptionList is not None:
+            if OptionList is not None and optionValueStr is not None:
                 index=OptionList.index(optionValueStr)
                 AllVAriables[optionName]=int(index)
         
@@ -228,7 +228,7 @@ class Object:
         if isinstance(value, tuple):
             value = list(value)
         elif getTypeName(value)=="options":
-            self.optionValues[name]=value[0]
+            self.optionValues[name]=value[0] if len(value)>0 else None
         # Create a new variable, persistent or non-persistent        
         if persistent:            
             self.persistentProperties[name] = value            

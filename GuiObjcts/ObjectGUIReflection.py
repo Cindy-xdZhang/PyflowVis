@@ -197,7 +197,7 @@ def draw_options_combo( label, value_list, current_selection):
         # Draw a combo box with the provided options and return the selected index
         current_selection = current_selection_i
         clicked=False
-        if current_selection is not None and imgui.begin_combo(label, current_selection):
+        if  current_selection is not None and imgui.begin_combo(label, current_selection):
             for x in x_list:
                 clicked_this, _ = imgui.selectable(x, x == current_selection)
                 if clicked_this:
@@ -206,6 +206,7 @@ def draw_options_combo( label, value_list, current_selection):
             imgui.end_combo()
         
         return clicked, current_selection
+
 
     changed, newSlection = draw_combo_options(label, value_list, current_selection)
     return changed, newSlection
@@ -313,7 +314,7 @@ valid_customizations = {
 def getTypeName(value) -> Any | str:
     if isinstance(value, bool) :
         return "bool"
-    elif isinstance(value, (list, tuple)) and all(isinstance(x, bool) for x in value):
+    elif isinstance(value, (list, tuple)) and all(isinstance(x, bool) for x in value) and len(value)>0:
         return "bvecn"
     elif isinstance(value, (list, tuple)) and len(value) == 3 and all(isinstance(x, float) for x in value):
         return "vec3"
@@ -329,11 +330,13 @@ def getTypeName(value) -> Any | str:
         return "np.mat4"
     elif isinstance(value, (list, tuple)) and len(value) == 4 and all(isinstance(x, int) for x in value):
         return "ivec4"
-    elif isinstance(value, (list, tuple)) and all(isinstance(x, int) for x in value):
+    elif isinstance(value, (list, tuple)) and all(isinstance(x, int) for x in value) and len(value)>0:
         return "ivecn"
-    elif isinstance(value, (list, tuple)) and all(isinstance(x, float) for x in value):
+    elif isinstance(value, (list, tuple)) and all(isinstance(x, float) for x in value) and len(value)>0:
         return "vecn"
-    elif isinstance(value, list)  and all(isinstance(x, str) for x in value):
+    elif isinstance(value, list)  and all(isinstance(x, str) for x in value) :
+        return "options"
+    elif isinstance(value, list)  and len(value)==0 :
         return "options"
     else:
         return type(value).__name__

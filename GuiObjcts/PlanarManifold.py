@@ -16,8 +16,10 @@ class PlanarManifold(VertexArrayObject):
         self.domainMaxBoundary=domainMaxBoundary
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
         self.create_plane_mesh()
-        colormapMat=Material("planarManifoldMaterial","planarManifoldMat",texture0="builtIn")
-        self.setMaterial(colormapMat)
+        self.colormapMat0=Material("planarManifoldMaterial","planarManifoldMat",texture0="builtIn")
+        self.colormapMat1=getShaderManager().getMaterial("colormapMat")
+        self.setMaterial(self.colormapMat1)# when there is no scalar field, use the colormapMat0 WILL CAUSE WIRED IMGUI BUGS
+        
         self.create_variable("colorMap",self.engine.getBuiltInTextureNames(),True)
         self.create_variable("attributeBounds",[-1.0,1.0])
         self.create_variable("scalarFieldMinTime", 0.0,False,False)
@@ -77,7 +79,8 @@ class PlanarManifold(VertexArrayObject):
         self.updateValue("attributeBounds", (minAttrib, maxAttrib))
         self.updateValue("scalarFieldMinTime", float(Scalarfield.getMinTime()))
         self.updateValue("scalarFieldMaxTime", float(Scalarfield.getMaxTime()))
-       
+        self.setMaterial(self.colormapMat0)
+
 
     def render(self):
         self.material.apply([self.parentScene, self.cameraObject,self.actFieldObject,self])

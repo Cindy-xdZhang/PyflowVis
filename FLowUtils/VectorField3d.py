@@ -4,6 +4,7 @@ import numpy as np
 # abstract base class work
 from abc import ABC, abstractmethod
 from .interpolation import bilinear_interpolate
+
 class IVectorField3D:
     def __init__(self, Xdim: int, Ydim: int, Zdim: int, domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0], time_steps: int = 1, tmin: float = 0.0, tmax: float = 2 * np.pi):
         self.Xdim = Xdim

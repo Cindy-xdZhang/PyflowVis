@@ -371,7 +371,7 @@ class CoordinateSystem(Object):
         Yaxis.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([0,1,0],dtype=np.float32),0.025,2.0, 0.2, 0.05, 16)
         Zaxis.appendArrowWithoutCommit(np.array([0,0,0],dtype=np.float32),np.array([0,0,1],dtype=np.float32),0.025,2.0, 0.2, 0.05, 16)
         self.Vaos=[Xaxis,Yaxis,Zaxis] 
-        defaultMat =getShaderManager().getDefautlMaterial()
+        defaultMat =getShaderManager().getMaterial()
         self.parentScene=sceneArg
         self.color=[ [1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]]
         for  i,axis in enumerate(self.Vaos):

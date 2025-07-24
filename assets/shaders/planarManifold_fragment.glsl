@@ -37,5 +37,5 @@ void main()
     vec2 final_texArrayCoords = vec2(normalized_scalarValue, colorMap);
     vec4 textureColor = texture(colorMaps1Darray, final_texArrayCoords);
     FragColor = textureColor;
-    
+    // FragColor = vec4(1,scalarValue,0,1);
 }

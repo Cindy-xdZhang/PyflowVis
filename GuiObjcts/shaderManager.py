@@ -349,7 +349,7 @@ class ShaderManager(Object):
         self.add_shader_program("colormapMat","assets/shaders/simple_vertex.glsl","assets/shaders/colorMap_fragment.glsl")
         self.add_shader_program("flowlineMat","assets/shaders/flowline_vertex.glsl","assets/shaders/flowline_fragment.glsl","assets/shaders/flowline_geometry.glsl")
         self.add_shader_program("planarManifoldMat","assets/shaders/planarManifold_vertex.glsl","assets/shaders/planarManifold_fragment.glsl")
-        
+
    
     # Adds a shader program with a given key
     def add_shader_program(self, key, vertex_shader_path, fragment_shader_path,geometry_shader_path=None):
@@ -367,8 +367,15 @@ class ShaderManager(Object):
             return self.shaders[key]
         else:
             logger.error(f'Shader program {key} not found.')
-    def getDefautlMaterial(self):
-        return Material("defaultMaterial","monoColor")
+
+    def getMaterial(self,material_name:str=None):
+        if material_name is None or material_name=="defaultMaterial":
+            return Material("defaultMaterial","monoColor")
+        elif material_name=="colormapMat":
+            return Material("coloprMapMaterial","colormapMat",texture0="builtIn")
+        else:
+            return Material(material_name)
+        
 
 def getShaderManager() -> ShaderManager:
     return ShaderManager("ShaderManager")
@@ -417,6 +424,8 @@ class Material(Object):
             else:
                 self.texture0 = texture0
                 self.texture0_id = tm.get_texture(self.texture0) if self.texture0 in sm.shaders else None
+
+
 
 
     def apply(self,UniformObjectScope):
