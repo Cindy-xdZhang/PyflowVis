@@ -32,9 +32,11 @@ def draw_uint_input(label, value, min_value=0, max_value=4294967295):
     return changed, value
 
 def draw_float_input(label, value):
+    # imgui.input_float 默认只显示3位小数，可以通过 format 参数自定义显示精度
     changed, new_value = imgui.input_float(
         label, 
         value,
+        format="%.5f",  # 显示6位小数
         flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE
     )
     return changed, new_value

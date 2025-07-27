@@ -3,6 +3,7 @@ from numba import njit, prange
 from typeguard import typechecked
 from FLowUtils.VectorField2d import *
 from FLowUtils.decoration import singleton
+from .VectorField2d import IDiscreteField2D
 
 @typechecked
 def compute_velocity_magnitude_2D(vector_field, **kwargs):
@@ -78,92 +79,118 @@ def compute_ivd_2D(vector_field, **kwargs):
 
 
 
-class ScalarField2D:
-    def __init__(self, Xdim, Ydim, time_steps, domainMinBoundary, domainMaxBoundary, tmin, tmax, dtype=np.float32):
-        self.Xdim = Xdim
-        self.Ydim = Ydim
-        self.time_steps = time_steps
-        self.domainMinBoundary = domainMinBoundary
-        self.domainMaxBoundary = domainMaxBoundary
-        self.tmin = tmin
-        self.tmax = tmax
+class ScalarField2D(IDiscreteField2D):
+    def __init__(self, Xdim, Ydim, time_steps, domainMinBoundary=[-2.0,-2.0,0.0], domainMaxBoundary=[2.0,2.0,2.0], dtype=np.float32):
+        """
+        Initialize a 2D scalar field.
+        
+        :param Xdim: X dimension of the scalar field
+        :param Ydim: Y dimension of the scalar field  
+        :param time_steps: Number of time steps
+        :param domainMinBoundary: Minimum boundaries for (x,y,t)
+        :param domainMaxBoundary: Maximum boundaries for (x,y,t)
+        :param dtype: Data type for the field
+        """
+        super(ScalarField2D, self).__init__(Xdim, Ydim, domainMinBoundary, domainMaxBoundary, time_steps)
         self.dtype = dtype
-        self.gridInterval = [
-            (domainMaxBoundary[0] - domainMinBoundary[0]) / (Xdim - 1),
-            (domainMaxBoundary[1] - domainMinBoundary[1]) / (Ydim - 1)
-        ]
-        self.timeInterval = (tmax - tmin) / (time_steps - 1) if time_steps > 1 else 0
-        self.field = None  # 离散数据
-        self.analytical_func = None  # 分析表达式
-    def getMinTime(self):
-        return self.tmin
-    def getMaxTime(self):
-        return self.tmax
-  
+        self.field = None  # Discrete data
+        self.analytical_func = None  # Analytical expression
+
     def set_discrete_data(self, data):
-        assert data.shape == (self.time_steps, self.Ydim, self.Xdim)
+        """Set discrete data for the scalar field."""
+        assert data.shape == (self.time_steps, self.Ydim, self.Xdim), f"Expected shape {(self.time_steps, self.Ydim, self.Xdim)}, got {data.shape}"
         self.field = data.astype(self.dtype)
 
     def set_analytical_func(self, func):
+        """Set analytical function for the scalar field."""
         self.analytical_func = func
 
     def has_discrete_data(self):
+        """Check if discrete data is available."""
         return self.field is not None
 
     def has_analytical_func(self):
+        """Check if analytical function is available."""
         return self.analytical_func is not None
 
+    def getSlice(self, timeSlice):
+        """Get a slice of the scalar field at a specific time step."""
+        if self.has_discrete_data():
+            return self.field[timeSlice]
+        elif self.has_analytical_func():
+            # Create discrete data for the time slice
+            slice_data = np.zeros((self.Ydim, self.Xdim), dtype=self.dtype)
+            time = self.getPhysicalTime(timeSlice)
+            for y in range(self.Ydim):
+                for x in range(self.Xdim):
+                    pos_x, pos_y = self.convert_grid_pos_2_physical_pos(x, y)
+                    slice_data[y, x] = self.analytical_func(pos_x, pos_y, time)
+            return slice_data
+        else:
+            raise RuntimeError("No data available")
+
     def get_value_at_grid(self, x, y, t):
-        """x, y, t为整数网格索引"""
+        """
+        Get value at grid point.
+        
+        :param x: Grid X index
+        :param y: Grid Y index  
+        :param t: Time step index
+        :return: Scalar value at grid point
+        """
         if self.has_discrete_data():
             return self.field[t, y, x]
         elif self.has_analytical_func():
-            pos = self.convert_grid_index_to_physical(x, y)
-            time = self.convert_time_index_to_physical(t)
-            return self.analytical_func(pos[0], pos[1], time)
+            pos_x, pos_y = self.convert_grid_pos_2_physical_pos(x, y)
+            time = self.getPhysicalTime(t)
+            return self.analytical_func(pos_x, pos_y, time)
         else:
             raise RuntimeError("No data available")
 
     def get_value_at_physical_pos(self, xpos, ypos, time):
-        """xpos, ypos, time为物理坐标，自动三线性插值"""
+        """
+        Get interpolated value at arbitrary physical position.
+        
+        :param xpos: Physical X coordinate
+        :param ypos: Physical Y coordinate
+        :param time: Physical time
+        :return: Interpolated scalar value
+        """
         if self.has_discrete_data():
-            gx, gy = self.convert_physical_to_grid(xpos, ypos)
-            gt = self.convert_physical_time_to_grid(time)
+            gx, gy = self.convert_physical_pos_2_grid_pos(xpos, ypos)
+            gt = self.getFloatGridTime(time)
             return self.trilinear_interpolate(gx, gy, gt)
         elif self.has_analytical_func():
             return self.analytical_func(xpos, ypos, time)
         else:
             raise RuntimeError("No data available")
 
-    def convert_grid_index_to_physical(self, x, y):
-        px = self.domainMinBoundary[0] + x * self.gridInterval[0]
-        py = self.domainMinBoundary[1] + y * self.gridInterval[1]
-        return px, py
-
-    def convert_time_index_to_physical(self, t):
-        return self.tmin + t * self.timeInterval
-
-    def convert_physical_to_grid(self, xpos, ypos):
-        gx = (xpos - self.domainMinBoundary[0]) / self.gridInterval[0]
-        gy = (ypos - self.domainMinBoundary[1]) / self.gridInterval[1]
-        return gx, gy
-
-    def convert_physical_time_to_grid(self, time):
-        return (time - self.tmin) / self.timeInterval
-
     def trilinear_interpolate(self, gx, gy, gt):
-        # 取最近的8个点做三线性插值
+        """
+        Perform trilinear interpolation.
+        
+        :param gx: Grid X coordinate (float)
+        :param gy: Grid Y coordinate (float) 
+        :param gt: Grid time coordinate (float)
+        :return: Interpolated value
+        """
+        # Get surrounding grid indices
         x0, x1 = int(np.floor(gx)), int(np.ceil(gx))
         y0, y1 = int(np.floor(gy)), int(np.ceil(gy))
         t0, t1 = int(np.floor(gt)), int(np.ceil(gt))
+        
+        # Clamp to grid boundaries
         x0 = np.clip(x0, 0, self.Xdim - 1)
         x1 = np.clip(x1, 0, self.Xdim - 1)
         y0 = np.clip(y0, 0, self.Ydim - 1)
         y1 = np.clip(y1, 0, self.Ydim - 1)
         t0 = np.clip(t0, 0, self.time_steps - 1)
         t1 = np.clip(t1, 0, self.time_steps - 1)
+        
+        # Get interpolation weights
         xd, yd, td = gx - x0, gy - y0, gt - t0
 
+        # Get values at surrounding grid points
         c000 = self.field[t0, y0, x0]
         c100 = self.field[t0, y0, x1]
         c010 = self.field[t0, y1, x0]
@@ -173,6 +200,7 @@ class ScalarField2D:
         c011 = self.field[t1, y1, x0]
         c111 = self.field[t1, y1, x1]
 
+        # Trilinear interpolation
         c00 = c000 * (1 - xd) + c100 * xd
         c01 = c001 * (1 - xd) + c101 * xd
         c10 = c010 * (1 - xd) + c110 * xd
@@ -185,18 +213,47 @@ class ScalarField2D:
         return c
 
     def compute_min_max(self):
+        """
+        Compute minimum and maximum values of the scalar field.
+        
+        :return: Tuple of (min_value, max_value)
+        """
         if self.has_discrete_data():
             return float(np.min(self.field)), float(np.max(self.field))
         elif self.has_analytical_func():
-            # 采样一遍
+            # Sample the analytical function
             samples = []
-            for t in np.linspace(self.tmin, self.tmax, self.time_steps):
-                for y in np.linspace(self.domainMinBoundary[1], self.domainMaxBoundary[1], self.Ydim):
-                    for x in np.linspace(self.domainMinBoundary[0], self.domainMaxBoundary[0], self.Xdim):
-                        samples.append(self.analytical_func(x, y, t))
+            for t in range(self.time_steps):
+                time = self.getPhysicalTime(t)
+                for y in range(self.Ydim):
+                    for x in range(self.Xdim):
+                        pos_x, pos_y = self.convert_grid_pos_2_physical_pos(x, y)
+                        samples.append(self.analytical_func(pos_x, pos_y, time))
             return float(np.min(samples)), float(np.max(samples))
         else:
             raise RuntimeError("No data available")
+
+    def getDataAsNumpy(self):
+        """Get field data as numpy array."""
+        if self.has_discrete_data():
+            return self.field
+        else:
+            raise RuntimeError("No discrete data available")
+
+    def numpy2torch(self):
+        """Convert field data from numpy array to torch tensor."""
+        if self.has_discrete_data():
+            import torch
+            self.field = torch.tensor(self.field)
+        else:
+            raise RuntimeError("No discrete data available")
+
+    def torch2numpy(self):
+        """Convert field data from torch tensor to numpy array."""
+        if self.has_discrete_data() and hasattr(self.field, 'detach'):
+            self.field = self.field.detach().cpu().numpy()
+        else:
+            raise RuntimeError("No discrete data available or not a torch tensor")
 
 
     
@@ -218,7 +275,7 @@ class ScalarFieldManager:
     def request_scalar_field(self, field_name,targetField, operation, compute_func=None):
         key = self._make_key(field_name, operation)
         if key in self.scalar_fields:
-            return self.scalar_fields[key]
+            return self.scalar_fields[key],key
         if compute_func is None:
             compute_func = self.builtin_ops[operation]
         if not callable(compute_func):
@@ -226,8 +283,7 @@ class ScalarFieldManager:
         
         scalar_field_data = compute_func(targetField)
         scalar_field = ScalarField2D(targetField.Xdim, targetField.Ydim,targetField.time_steps, targetField.domainMinBoundary, 
-                                     targetField.domainMaxBoundary,
-                                         targetField.tmin, targetField.tmax, scalar_field_data.dtype)        
+                                     targetField.domainMaxBoundary, scalar_field_data.dtype)        
         scalar_field.set_discrete_data(scalar_field_data)
         self.scalar_fields[key] = scalar_field
         return scalar_field,key

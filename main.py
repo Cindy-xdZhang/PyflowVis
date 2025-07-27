@@ -136,9 +136,7 @@ def main():
     # glocal_pfs.register("assets", "C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets")
     size=config['rendering']["window_size"]
 
-    lic_texture_data = np.random.rand(100, 100, 3)*128   # Use random data as an example
-    lic_texture_data = lic_texture_data.astype('uint8')
-    renderable_object = Renderable(lic_texture_data,5,2,-5)
+
     shaderManager=getShaderManager()
     defaultMat=shaderManager.getMaterial()
    
@@ -163,7 +161,7 @@ def main():
     engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
 
-    vectorField2d= rotation_four_center((32,32),32)
+    vectorField2d= rotation_four_center((128,128),64)
     actFieldWidget.insertField("rfc",vectorField2d)
 
 

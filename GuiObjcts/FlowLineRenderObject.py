@@ -211,8 +211,9 @@ class FlowLineObject(Object):
 
         self.create_variable("streamline_active",False)
         self.create_variable("pathline_active",True)
-        self.create_variable("lineWeight", 0.1,True)
+        self.create_variable_gui("lineWeight",0.1,True, {'widget': 'slider_float', 'min': 0.0, 'max': 5.0})
         self.create_variable("zOffset", 0.0,True)
+        self.create_variable_gui("uplifting",0.1,True, {'widget': 'slider_float', 'min': 0.0, 'max': 5.0})
         self.create_variable("colorMap",self.engine.getBuiltInTextureNames(),True)
         self.create_variable("maxIteration", 5000,True)
         self.create_variable("integrator", "RK4",True)#euler,rk4

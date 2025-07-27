@@ -349,7 +349,7 @@ class ShaderManager(Object):
         self.add_shader_program("colormapMat","assets/shaders/simple_vertex.glsl","assets/shaders/colorMap_fragment.glsl")
         self.add_shader_program("flowlineMat","assets/shaders/flowline_vertex.glsl","assets/shaders/flowline_fragment.glsl","assets/shaders/flowline_geometry.glsl")
         self.add_shader_program("planarManifoldMat","assets/shaders/planarManifold_vertex.glsl","assets/shaders/planarManifold_fragment.glsl")
-
+        self.add_shader_program("corelineMat","assets/shaders/coreline_vertex.glsl","assets/shaders/coreline_fragment.glsl")
    
     # Adds a shader program with a given key
     def add_shader_program(self, key, vertex_shader_path, fragment_shader_path,geometry_shader_path=None):

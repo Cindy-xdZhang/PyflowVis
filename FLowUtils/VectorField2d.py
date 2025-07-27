@@ -62,16 +62,18 @@ class IDiscreteField2D(ABC):
         domainMinBoundary (list, optional): [xmin, ymin]. Defaults to [-2.0,-2.0,].
         domainMaxBoundary (list, optional): [xmax, ymax]. Defaults to [2.0,2.0].
     """        
-    def __init__(self,Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0],timsteps:int=1,tmin=0.0,tmax=0.0):
+    def __init__(self,Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2.0],timsteps:int=1):
         self.Xdim= Xdim
         self.Ydim = Ydim
         self.time_steps = timsteps
         self.domainMinBoundary=domainMinBoundary
         self.domainMaxBoundary=domainMaxBoundary
+        assert len(domainMinBoundary) == 3, "domainMinBoundary must be a list of length 3"
+        assert len(domainMaxBoundary) == 3, "domainMaxBoundary must be a list of length 3"
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
-        self.tmin=tmin
-        self.tmax=tmax
-        self.timeInterval = (tmax-tmin)/(timsteps-1)
+        self.tmin=domainMinBoundary[2]
+        self.tmax=domainMaxBoundary[2]
+        self.timeInterval = (self.tmax-self.tmin)/(timsteps-1)
         self.valid=(self.domainMinBoundary[0]  <= self.domainMaxBoundary[0] and self.domainMinBoundary[1]  <= self.domainMaxBoundary[1])and (1 <= Xdim  and 1 <= Ydim)  and (timsteps>=1) and (self.timeInterval>=0)
         assert self.valid
         self.__name = f"Unnamed_Field_{Xdim}x{Ydim}_{timsteps}t_ID{np.random.randint(0, 10000)}"
@@ -108,8 +110,8 @@ class IDiscreteField2D(ABC):
     
 
 class SteadyVectorField2D(IDiscreteField2D):
-    def __init__(self, Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0]):
-        super(SteadyVectorField2D, self).__init__(Xdim, Ydim,domainMinBoundary,domainMaxBoundary)
+    def __init__(self, Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,0.0]):
+        super(SteadyVectorField2D, self).__init__(Xdim, Ydim,domainMinBoundary,domainMaxBoundary,1)
         self.field = np.zeros( (Ydim,Xdim,2),np.float32)
     def getSlice(self, timeSlice):
         return  self.field
@@ -166,8 +168,8 @@ class SteadyVectorField2D(IDiscreteField2D):
     
 
 class UnsteadyVectorField2D(IDiscreteField2D):
-    def __init__(self, Xdim:int, Ydim:int,time_steps:int,domainMinBoundary:list=[-2.0,-2.0],domainMaxBoundary:list=[2.0,2.0], tmin=0.0,tmax=2*np.pi):
-        super(UnsteadyVectorField2D, self).__init__(Xdim, Ydim,domainMinBoundary,domainMaxBoundary,time_steps,tmin,tmax)
+    def __init__(self, Xdim:int, Ydim:int,time_steps:int,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2.0]):
+        super(UnsteadyVectorField2D, self).__init__(Xdim, Ydim,domainMinBoundary,domainMaxBoundary,time_steps)
         # Initialize the vector field parameters with random values, considering the time dimension
         self.field = torch.randn(time_steps, Ydim,Xdim, 2)
         

@@ -121,7 +121,7 @@ class Camera(Object):
         self.last_mouse_pos = (x, y)
 
         # Convert mouse movement to rotation angle
-        sensitivity = 0.0025  # Adjust this value based on your preference
+        sensitivity = 0.00025  # Adjust this value based on your preference
         angle_x = dy * sensitivity
         angle_y = dx * sensitivity
 

@@ -7,6 +7,9 @@ uniform mat4 modelMat;
 uniform mat4 viewMat;
 uniform mat4 projMat;
 
+uniform float uplifting;
+uniform float zOffset;
+
 out VS_OUT {
     vec3 position;
     float attrib;
@@ -19,7 +22,13 @@ void main() {
      //observer transforamtion+uplifting
     //vec3 resultpos = vec3(transformedInSpace, 0) + n;
 
-    vec3 resultpos =in_position;
+    //uplifting
+    vec3 n = vec3(0, 0, 1) * (in_attribs.x * uplifting);
+    n += vec3(0, 0, 1) * zOffset;
+    vec3 resultpos =in_position + n;
+
+
+    
     gl_Position = viewMat * modelMat * vec4(resultpos, 1);
     vs_out.position = resultpos;
 
