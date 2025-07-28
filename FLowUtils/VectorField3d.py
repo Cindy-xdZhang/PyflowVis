@@ -3,63 +3,211 @@ import torch.nn as nn
 import numpy as np
 # abstract base class work
 from abc import ABC, abstractmethod
-from .interpolation import bilinear_interpolate
 
-class IVectorField3D:
-    def __init__(self, Xdim: int, Ydim: int, Zdim: int, domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0], time_steps: int = 1, tmin: float = 0.0, tmax: float = 2 * np.pi):
+class IVectorField3D(ABC):
+    """IVectorField3D is an abstract base class for 3D vector fields with grid discretization.
+    It provides necessary API and grid information.
+
+    Args:
+        Xdim (int): x dimension of the vector field
+        Ydim (int): y dimension of the vector field
+        Zdim (int): z dimension of the vector field
+        domainMinBoundary (list, optional): [xmin, ymin, zmin, tmin]. Defaults to [-2.0, -2.0, -2.0, 0.0].
+        domainMaxBoundary (list, optional): [xmax, ymax, zmax, tmax]. Defaults to [2.0, 2.0, 2.0, 0.0].
+        timesteps (int): Number of time steps. Defaults to 1.
+    """
+    def __init__(self, Xdim: int, Ydim: int, Zdim: int, timesteps: int = 1,domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0], tmin:float=0.0,tmax:float=0.0):
         self.Xdim = Xdim
         self.Ydim = Ydim
         self.Zdim = Zdim
+        self.time_steps = timesteps
         self.domainMinBoundary = domainMinBoundary
         self.domainMaxBoundary = domainMaxBoundary
-        self.time_steps = time_steps
+        
+        assert len(domainMinBoundary) == 3, "domainMinBoundary must be a list of length 3"
+        assert len(domainMaxBoundary) == 3, "domainMaxBoundary must be a list of length 3"
+
+        self.gridInterval = [
+            (self.domainMaxBoundary[0] - self.domainMinBoundary[0]) / (Xdim - 1) if Xdim > 1 else 0,
+            (self.domainMaxBoundary[1] - self.domainMinBoundary[1]) / (Ydim - 1) if Ydim > 1 else 0,
+            (self.domainMaxBoundary[2] - self.domainMinBoundary[2]) / (Zdim - 1) if Zdim > 1 else 0
+        ]
+        
         self.tmin = tmin
         self.tmax = tmax
+        
+        if timesteps > 1:
+            self.timeInterval = (self.tmax - self.tmin) / (timesteps - 1)
+        else:
+            self.timeInterval = 0
 
+        self.valid = (self.domainMinBoundary[0] <= self.domainMaxBoundary[0] and
+                      self.domainMinBoundary[1] <= self.domainMaxBoundary[1] and
+                      self.domainMinBoundary[2] <= self.domainMaxBoundary[2]) and \
+                     (1 <= Xdim and 1 <= Ydim and 1 <= Zdim) and (timesteps >= 1)
+        assert self.valid
+        
+    def getDim(self):
+        return 3
+    def IsInside(self,pos_3d):
+        if pos_3d[0] < self.domainMinBoundary[0] or pos_3d[0] > self.domainMaxBoundary[0] or \
+            pos_3d[1] < self.domainMinBoundary[1] or pos_3d[1] > self.domainMaxBoundary[1] or pos_3d[2] < self.domainMinBoundary[2] or pos_3d[2] > self.domainMaxBoundary[2]:
+            return False
+        return True
+    
+    # def getName(self):
+    #     return self.__name
+
+    # def setName(self, name):
+    #     self.__name = name
+
+    @abstractmethod
+    def getSlice(self, timeSlice):
+        pass
+
+    def getMinTime(self):
+        return self.tmin
+
+    def getMaxTime(self):
+        return self.tmax
+
+    def getPhysicalTime(self, idt: int) -> float:
+        return self.timeInterval * idt + self.tmin
+
+    def getFloatGridTime(self, time: float) -> float:
+        if self.timeInterval == 0:
+            return 0.0
+        return float((time - self.tmin) / self.timeInterval)
+
+    def getIntGridTime(self, time: float) -> int:
+        if self.timeInterval == 0:
+            return 0
+        return int((time - self.tmin) / self.timeInterval)
+
+    def convert_physical_pos_2_grid_pos(self, posX: float, posY: float, posZ: float):
+        # Convert physical coordinates to grid indices
+        float_grid_x = (posX - self.domainMinBoundary[0]) / self.gridInterval[0] if self.gridInterval[0] != 0 else 0
+        float_grid_y = (posY - self.domainMinBoundary[1]) / self.gridInterval[1] if self.gridInterval[1] != 0 else 0
+        float_grid_z = (posZ - self.domainMinBoundary[2]) / self.gridInterval[2] if self.gridInterval[2] != 0 else 0
+        return float_grid_x, float_grid_y, float_grid_z
+
+    def convert_grid_pos_2_physical_pos(self, grid_x: float, grid_y: float, grid_z: float):
+        physical_x = grid_x * self.gridInterval[0] + self.domainMinBoundary[0]
+        physical_y = grid_y * self.gridInterval[1] + self.domainMinBoundary[1]
+        physical_z = grid_z * self.gridInterval[2] + self.domainMinBoundary[2]
+        return physical_x, physical_y, physical_z
+    
 class SteadyVectorField3D(IVectorField3D):
-    def __init__(self, Xdim: int, Ydim: int, Zdim: int, domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0]):
-        super(SteadyVectorField3D, self).__init__(Xdim, Ydim, Zdim, domainMinBoundary, domainMaxBoundary)
+    def __init__(self, Xdim: int, Ydim: int, Zdim: int, domainMinBoundary: list = [-2.0, -2.0, -2.0, 0.0], domainMaxBoundary: list = [2.0, 2.0, 2.0, 0.0]):
+        super(SteadyVectorField3D, self).__init__(Xdim, Ydim, Zdim, domainMinBoundary, domainMaxBoundary, timesteps=1)
         self.field = np.zeros((Zdim, Ydim, Xdim, 3), np.float32)
 
     def getSlice(self, timeSlice):
         return self.field
 
 class UnsteadyVectorField3D(IVectorField3D):
-    def __init__(self, Xdim: int, Ydim: int, Zdim: int, time_steps: int, domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0], tmin: float = 0.0, tmax: float = 2 * np.pi):
-        super(UnsteadyVectorField3D, self).__init__(Xdim, Ydim, Zdim, domainMinBoundary, domainMaxBoundary, time_steps, tmin, tmax)
+    def __init__(self, Xdim: int, Ydim: int, Zdim: int, time_steps: int, 
+                 domainMinBoundary: list = [-2.0, -2.0, -2.0], domainMaxBoundary: list = [2.0, 2.0, 2.0],tmin:float=0.0,tmax:float=0.0):
+        super(UnsteadyVectorField3D, self).__init__(Xdim, Ydim, Zdim, time_steps,domainMinBoundary, domainMaxBoundary,tmin,tmax)
         self.field = None
         # self.field = torch.zeros(time_steps, Zdim, Ydim, Xdim, 3)
-        self.gridInterval = [
-            (domainMaxBoundary[0] - domainMinBoundary[0]) / (Xdim - 1),
-            (domainMaxBoundary[1] - domainMinBoundary[1]) / (Ydim - 1),
-            (domainMaxBoundary[2] - domainMinBoundary[2]) / (Zdim - 1)
-        ]
         assert(time_steps > 1)
-        self.timeInterval = (tmax - tmin) / (time_steps - 1)
 
     def getSlice(self, timeSlice) -> SteadyVectorField3D:
-        steadyVectorField3D = SteadyVectorField3D(self.Xdim, self.Ydim, self.Zdim, self.domainMinBoundary, self.domainMaxBoundary)
-        steadyVectorField3D.field = self.field[timeSlice, :, :, :, :]
+        steady_min_b = self.domainMinBoundary[:3] + [self.getPhysicalTime(timeSlice)]
+        steady_max_b = self.domainMaxBoundary[:3] + [self.getPhysicalTime(timeSlice)]
+        steadyVectorField3D = SteadyVectorField3D(self.Xdim, self.Ydim, self.Zdim, steady_min_b, steady_max_b)
+        
+        if self.field is not None:
+            if isinstance(self.field, torch.Tensor):
+                steadyVectorField3D.field = self.field[timeSlice, :, :, :, :].detach().cpu().numpy()
+            else:
+                steadyVectorField3D.field = self.field[timeSlice, :, :, :, :]
         return steadyVectorField3D
 
     def get_vector(self, posX: float, posY: float, posZ: float, time: float) -> np.ndarray:
-        """Get interpolated vector at arbitrary position.
+        """Get interpolated vector at arbitrary position using quadrilinear interpolation.
         
         Args:
             posX (float): X coordinate
             posY (float): Y coordinate 
             posZ (float): Z coordinate
-            time (float): Time step
+            time (float): physical Time 
             
         Returns:
             np.ndarray: 3D vector at specified position
         """
-        # TODO: Implement trilinear interpolation
-        # For now just return nearest grid point
-        grid_x = int(round(posX))
-        grid_y = int(round(posY)) 
-        grid_z = int(round(posZ))
-        return self.get_vector_at_grid(grid_x, grid_y, grid_z, time)
+        # Convert physical coordinates to grid coordinates
+        float_grid_x, float_grid_y, float_grid_z = self.convert_physical_pos_2_grid_pos(posX, posY, posZ)
+        float_grid_time = self.getFloatGridTime(time)
+
+        # Get surrounding time indices
+        t0 = int(np.floor(float_grid_time))
+        t1 = int(np.ceil(float_grid_time))
+        t0 = max(0, min(t0, self.time_steps - 1))
+        t1 = max(0, min(t1, self.time_steps - 1))
+
+        # Get vectors at surrounding grid points
+        x0 = int(np.floor(float_grid_x))
+        x1 = int(np.ceil(float_grid_x))
+        y0 = int(np.floor(float_grid_y))
+        y1 = int(np.ceil(float_grid_y))
+        z0 = int(np.floor(float_grid_z))
+        z1 = int(np.ceil(float_grid_z))
+
+        # Clamp to grid boundaries
+        x0 = max(0, min(x0, self.Xdim - 1))
+        x1 = max(0, min(x1, self.Xdim - 1))
+        y0 = max(0, min(y0, self.Ydim - 1))
+        y1 = max(0, min(y1, self.Ydim - 1))
+        z0 = max(0, min(z0, self.Zdim - 1))
+        z1 = max(0, min(z1, self.Zdim - 1))
+
+        # Get interpolation weights
+        wx = float_grid_x - x0
+        wy = float_grid_y - y0
+        wz = float_grid_z - z0
+        wt = float_grid_time - t0
+        
+        # Get vectors at grid points for both time steps
+        v0000 = self.get_vector_at_grid(x0, y0, z0, t0)
+        v1000 = self.get_vector_at_grid(x1, y0, z0, t0)
+        v0100 = self.get_vector_at_grid(x0, y1, z0, t0)
+        v1100 = self.get_vector_at_grid(x1, y1, z0, t0)
+        v0010 = self.get_vector_at_grid(x0, y0, z1, t0)
+        v1010 = self.get_vector_at_grid(x1, y0, z1, t0)
+        v0110 = self.get_vector_at_grid(x0, y1, z1, t0)
+        v1110 = self.get_vector_at_grid(x1, y1, z1, t0)
+
+        v0001 = self.get_vector_at_grid(x0, y0, z0, t1)
+        v1001 = self.get_vector_at_grid(x1, y0, z0, t1)
+        v0101 = self.get_vector_at_grid(x0, y1, z0, t1)
+        v1101 = self.get_vector_at_grid(x1, y1, z0, t1)
+        v0011 = self.get_vector_at_grid(x0, y0, z1, t1)
+        v1011 = self.get_vector_at_grid(x1, y0, z1, t1)
+        v0111 = self.get_vector_at_grid(x0, y1, z1, t1)
+        v1111 = self.get_vector_at_grid(x1, y1, z1, t1)
+
+        # Trilinear interpolation for t0
+        v00_t0 = v0000 * (1 - wx) + v1000 * wx
+        v10_t0 = v0100 * (1 - wx) + v1100 * wx
+        v01_t0 = v0010 * (1 - wx) + v1010 * wx
+        v11_t0 = v0110 * (1 - wx) + v1110 * wx
+        v0_t0 = v00_t0 * (1 - wy) + v10_t0 * wy
+        v1_t0 = v01_t0 * (1 - wy) + v11_t0 * wy
+        v_t0 = v0_t0 * (1 - wz) + v1_t0 * wz
+
+        # Trilinear interpolation for t1
+        v00_t1 = v0001 * (1 - wx) + v1001 * wx
+        v10_t1 = v0101 * (1 - wx) + v1101 * wx
+        v01_t1 = v0011 * (1 - wx) + v1011 * wx
+        v11_t1 = v0111 * (1 - wx) + v1111 * wx
+        v0_t1 = v00_t1 * (1 - wy) + v10_t1 * wy
+        v1_t1 = v01_t1 * (1 - wy) + v11_t1 * wy
+        v_t1 = v0_t1 * (1 - wz) + v1_t1 * wz
+        
+        # Linear interpolation in time
+        return v_t0 * (1 - wt) + v_t1 * wt
     
     def get_vector_at_grid(self, x: int, y: int, z: int, time: int) -> np.ndarray:
         """Get vector at grid point.
@@ -73,22 +221,12 @@ class UnsteadyVectorField3D(IVectorField3D):
         Returns:
             np.ndarray: 3D vector at grid point
         """
+        if self.field is None:
+            return np.zeros(3, dtype=np.float32)
+
+        # Clamping
+        x = max(0, min(x, self.Xdim-1))
+        y = max(0, min(y, self.Ydim-1))
+        z = max(0, min(z, self.Zdim-1))
+        time = max(0, min(time, self.time_steps-1))
         return self.field[time, z, y, x, :]
-
-
-
-
-
-
-
-    # def getDataAsNumpy(self):
-    #     if isinstance(self.field, torch.Tensor):
-    #         return self.field.detach().cpu().numpy()
-    #     elif isinstance(self.field, np.ndarray):
-    #         return self.field
-
-    # def getDataAsTensor(self):
-    #     if isinstance(self.field, torch.Tensor):
-    #         return self.field.detach().cpu()
-    #     elif isinstance(self.field, np.ndarray):
-    #         return torch.tensor(self.field)

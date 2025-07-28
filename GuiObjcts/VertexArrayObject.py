@@ -400,7 +400,7 @@ class CoordinateSystem(Object):
 
 
 
-def createPlane(gridSize, domainBoundaryMin,domainBoundaryMax) -> [list, list, list]:
+def createPlaneSimple(gridSize, domainBoundaryMin,domainBoundaryMax) -> [list, list, list]:
     """
     Generate a grid of vertices, indices, and texture coordinates for a plane.
 
@@ -415,8 +415,8 @@ def createPlane(gridSize, domainBoundaryMin,domainBoundaryMax) -> [list, list, l
         list: A list of texture coordinates in the format [u, v] for each vertex.
     """
     Xdim, Ydim = gridSize
-    Xmin,  Ymin = domainBoundaryMin
-    Xmax, Ymax =domainBoundaryMax
+    Xmin,  Ymin,_ = domainBoundaryMin
+    Xmax, Ymax,_ =domainBoundaryMax
 
     vertices = []
     indices = []
@@ -450,6 +450,126 @@ def createPlane(gridSize, domainBoundaryMin,domainBoundaryMax) -> [list, list, l
             ])
 
     return vertices, indices, textures
+
+
+
+def createPlane(grid_size, point_on_plane, normal, domain_min, domain_max) -> [list, list, list]:
+    """
+    Generates a plane by intersecting a plane (defined by a point and normal)
+    with a bounding box.
+    """
+    Xdim, Ydim = grid_size
+    normal = np.asarray(normal, dtype=np.float32)
+    norm_val = np.linalg.norm(normal)
+    if not np.isclose(norm_val, 1.0):
+        normal /= norm_val
+
+    # Define the 12 edges of the bounding box
+    box_min = np.asarray(domain_min, dtype=np.float32)
+    box_max = np.asarray(domain_max, dtype=np.float32)
+
+    p000 = box_min
+    p100 = np.array([box_max[0], box_min[1], box_min[2]])
+    p010 = np.array([box_min[0], box_max[1], box_min[2]])
+    p001 = np.array([box_min[0], box_min[1], box_max[2]])
+    p110 = np.array([box_max[0], box_max[1], box_min[2]])
+    p101 = np.array([box_max[0], box_min[1], box_max[2]])
+    p011 = np.array([box_min[0], box_max[1], box_max[2]])
+    p111 = box_max
+
+    edges = [
+        (p000, p100), (p100, p110), (p110, p010), (p010, p000),
+        (p001, p101), (p101, p111), (p111, p011), (p011, p001),
+        (p000, p001), (p100, p101), (p110, p111), (p010, p011)
+    ]
+
+    # Find intersection points
+    intersection_points = []
+    for p1, p2 in edges:
+        line_dir = p2 - p1
+        
+        # Check if the line is parallel to the plane
+        dot_prod = np.dot(normal, line_dir)
+        if np.isclose(dot_prod, 0):
+            continue
+
+        # Calculate intersection parameter t
+        t = np.dot(normal, point_on_plane - p1) / dot_prod
+
+        if 0 <= t <= 1:
+            intersect_pt = p1 + t * line_dir
+            # Avoid adding duplicate points
+            is_duplicate = False
+            for pt in intersection_points:
+                if np.allclose(pt, intersect_pt):
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                intersection_points.append(intersect_pt)
+
+    if len(intersection_points) < 3:
+        # Not enough points to form a plane, return empty geometry
+        return [], [], []
+
+    # Create a local coordinate system for the plane
+    if np.allclose(np.abs(normal), [0, 0, 1]):
+        u_axis = np.cross(normal, [0, 1, 0])
+    else:
+        u_axis = np.cross(normal, [0, 0, 1])
+    u_axis /= np.linalg.norm(u_axis)
+    v_axis = np.cross(normal, u_axis)
+    v_axis /= np.linalg.norm(v_axis)
+    
+    # Project intersection points onto the plane's 2D coordinate system
+    min_u, max_u = float('inf'), float('-inf')
+    min_v, max_v = float('inf'), float('-inf')
+
+    for pt in intersection_points:
+        vec = pt - point_on_plane
+        u = np.dot(vec, u_axis)
+        v = np.dot(vec, v_axis)
+        min_u, max_u = min(min_u, u), max(max_u, u)
+        min_v, max_v = min(min_v, v), max(max_v, v)
+        
+    # Generate grid
+    vertices = []
+    textures = []
+    for y_idx in range(Ydim):
+        for x_idx in range(Xdim):
+            # Interpolate in the plane's local coordinate system
+            u = min_u + (float(x_idx) / (Xdim - 1)) * (max_u - min_u)
+            v = min_v + (float(y_idx) / (Ydim - 1)) * (max_v - min_v)
+
+            # Convert back to 3D world coordinates
+            vertex = point_on_plane + u * u_axis + v * v_axis
+            vertices.extend(vertex)
+            
+            # Texture coordinates
+            tx = float(x_idx) / (Xdim - 1)
+            ty = float(y_idx) / (Ydim - 1)
+            textures.extend([tx, ty])
+            
+    # Generate indices
+    indices = []
+    for y in range(Ydim - 1):
+        for x in range(Xdim - 1):
+            indexLL = y * Xdim + x
+            indexUL = (y + 1) * Xdim + x
+            indexUR = (y + 1) * Xdim + x + 1
+            indexLR = y * Xdim + x + 1
+
+            indices.extend([indexLL, indexUL, indexUR, indexUR, indexLR, indexLL])
+
+    
+    return vertices, indices, textures
+
+
+
+
+
+
+
+
 
 
 def create_cube():

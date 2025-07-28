@@ -78,15 +78,23 @@ class IDiscreteField2D(ABC):
         assert self.valid
         self.__name = f"Unnamed_Field_{Xdim}x{Ydim}_{timsteps}t_ID{np.random.randint(0, 10000)}"
 
-    def getName(self):
-        return self.__name
-    def setName(self, name):
-        self.__name=name
+    # def getName(self):
+    #     return self.__name
+    # def setName(self, name):
+    #     self.__name=name
 
     @abstractmethod
     def getSlice(self, timeSlice):
         pass
-     
+
+    def getDim(self):
+        return 2
+    
+    def IsInside(self,pos_3d):
+        if pos_3d[0] < self.domainMinBoundary[0] or pos_3d[0] > self.domainMaxBoundary[0] or pos_3d[1] < self.domainMinBoundary[1] or pos_3d[1] > self.domainMaxBoundary[1]:
+            return False
+        return True
+    
     def getMinTime(self):
         return self.tmin
     def getMaxTime(self):

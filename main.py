@@ -12,6 +12,7 @@ from GuiObjcts.netCDFObject import *
 from GuiObjcts.FlowLineRenderObject import *
 from GuiObjcts.Indicator import *
 from GuiObjcts.geometryRender import *
+from GuiObjcts.ActiveFieldObject import *
 
 def test_opengl_state():
     program = gl.glGetIntegerv(gl.GL_CURRENT_PROGRAM)
@@ -143,16 +144,16 @@ def main():
     camera = Camera(60.0, (0, 0, 5), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
     indicator=Indicator("indicator",camera)
     coord=CoordinateSystem()
-    planarManifold=PlanarManifold(32,32)
+    planarManifold=PlanarManifold()
     actFieldWidget=ActiveField()
     VectorGlyph=VertexArrayVectorGlyph()
     VectorGlyph.setMaterial(defaultMat)
-    commandBar=MainUICommand("mainCommandUI")
+    # commandBar=MainUICommand("mainCommandUI")
     netCDF=NetCDFLoaderOBJ()
     flowline=FlowLineObject()   
     geometryRender=GeometryRenderObject()
-    engine.addObjects2Scene([coord,planarManifold, actFieldWidget,indicator,flowline,commandBar,camera,VectorGlyph,netCDF,geometryRender]   )
-
+    engine.addObjects2Scene([coord,planarManifold, actFieldWidget,indicator,flowline,camera,VectorGlyph,netCDF,geometryRender]   )
+    engine.finalizeSettleUp()
 
 
     engine.eventRegister.register(lambda event: indicator.eventCallBacks(event))
@@ -161,8 +162,13 @@ def main():
     engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
 
-    vectorField2d= rotation_four_center((128,128),64)
-    actFieldWidget.insertField("rfc",vectorField2d)
+    # vectorField2d= rotation_four_center((256,256),128)
+    # actFieldWidget.insertField("rfc",vectorField2d)
+
+    flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
+    cylider_netCDF=os.path.join(flow_asset_folder,"halfcylinderRe160Resampled.nc")
+    vectorField3d= NetCDFLoader.load_vector_field3d(cylider_netCDF,64);
+    actFieldWidget.insertField("tornado3d",vectorField3d)
 
 
     # args=config['training']

@@ -1,8 +1,10 @@
 from   .Object import *
 from  FLowUtils.VectorField2d import *
+from FLowUtils.VectorField3d import *
 import pygame
 from typeguard import typechecked
 from FLowUtils.ScalarField2d import *
+from .VisualizationEngine import getEngine
 
 class LICRender(Object):
     def __init__(self,name):
@@ -44,6 +46,7 @@ class ActiveField(Object):
             if activeField is not None:
                 animationSpeed=0.5*activeField.timeInterval
                 obj.updateValue("animationSpeed",animationSpeed)
+                getEngine().eventRegister.notifyEvent("activefield_changed")
         
         def updateActiveScalarfieldcb(obj:ActiveField) -> None:
            planarObj=obj.parentScene.getObject("plane")
@@ -93,7 +96,7 @@ class ActiveField(Object):
             self.setValue("time",time)
 
     @typechecked
-    def insertField(self,fieldName:str,field:UnsteadyVectorField2D):
+    def insertField(self,fieldName:str,field:UnsteadyVectorField2D|UnsteadyVectorField3D):
         if field is None or fieldName is None:
             return
         self.activeField[fieldName]=field

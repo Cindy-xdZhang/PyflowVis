@@ -24,13 +24,13 @@ class NetCDFLoader:
             
         with nc.Dataset(file_path, 'r') as dataset:
             # Check dimensions
-            dimensions = list(dataset.dimensions.keys())
+            dimensions = list(dataset.variables.keys())
             time_axis_name=None
             for dim in dimensions:
                 if str(dim).lower()  in ["time", "tdim"]:
                     time_axis_name=dim
 
-            spatial_dims = [dim for dim in dimensions if str(dim).lower() not in ['time',"const","tdim"]]
+            spatial_dims = [dim for dim in dimensions if str(dim).lower()  in ["z","y","x",'xdim',"ydim","zdim"]]
             if len(spatial_dims) != 2:
                 raise ValueError(f"Expected 2 spatial dimensions, found {len(spatial_dims)}")
             xdim_axis=None
@@ -69,11 +69,11 @@ class NetCDFLoader:
             # Extract domain boundaries
             x = dataset.variables[xdim_axis][:]
             y = dataset.variables[ydim_axis][:]
-            domainMinBoundary = [x.min(), y.min()]
-            domainMaxBoundary = [x.max(), y.max()]
+            domainMinBoundary = [x.min(), y.min(),tmin]
+            domainMaxBoundary = [x.max(), y.max(),tmax]
 
             # Create UnsteadyVectorField2D instance
-            vector_field = UnsteadyVectorField2D(Xdim, Ydim, time_steps, domainMinBoundary, domainMaxBoundary, tmin, tmax)
+            vector_field = UnsteadyVectorField2D(Xdim, Ydim, time_steps, domainMinBoundary, domainMaxBoundary)
 
             # Try different naming conventions for vector components
             component_names = [
@@ -111,67 +111,88 @@ class NetCDFLoader:
         """
         with nc.Dataset(file_path, 'r') as dataset:
              # Check dimensions
-            dimensions = list(dataset.dimensions.keys())
+            dimensions_variables = list(dataset.variables.keys())
+            dimensions_names = list(dataset.dimensions.keys())
             time_axis_name=None
-            for dim in dimensions:
-                if str(dim).lower()  in ["time", "tdim"]:
+            for dim in dimensions_names:
+                if str(dim).lower()  in ["time", "tdim","t"]:
                     time_axis_name=dim
+            time_variable_name=None
+            for dim in dimensions_variables:
+                if str(dim).lower()  in ["time", "tdim","t"]:
+                    time_variable_name=dim
 
-            spatial_dims = [dim for dim in dimensions if dim not in ['time','const',"tdim"]]
+            spatial_dims_variable_names = [dim for dim in dimensions_variables if str(dim).lower()  in ["z","y","x",'xdim',"ydim","zdim"]]
+            spatial_dims_axis_names = [dim for dim in dimensions_names if str(dim).lower()  in ["z","y","x",'xdim',"ydim","zdim"]]
 
-            if len(spatial_dims) != 3:
-                raise ValueError(f"Expected 3 spatial dimensions, found {len(spatial_dims)}")
+            if len(spatial_dims_variable_names) != 3 and len(spatial_dims_axis_names) != 3:
+                raise ValueError(f"Expected 3 spatial dimensions, found {len(spatial_dims_variable_names)} or {len(spatial_dims_axis_names)}")
 
             xdim_axis=None
-            for dim in spatial_dims:
-                if str(dim).lower()  in ["xdim", "X"]:
+            for dim in spatial_dims_axis_names:
+                if str(dim).lower()  in ["xdim", "x"]:
                     xdim_axis=dim
             ydim_axis=None
-            for dim in spatial_dims:
-                if str(dim).lower()  in ["ydim", "Y"]:
+            for dim in spatial_dims_axis_names:
+                if str(dim).lower()  in ["ydim", "y"]:
                     ydim_axis=dim
             zdim_axis=None
-            for dim in spatial_dims:
-                if str(dim).lower()  in ["zdim", "Z"]:
+            for dim in spatial_dims_axis_names:
+                if str(dim).lower()  in ["zdim", "z"]:
                     zdim_axis=dim
+            xdim_variable_name=None
+            for dim in spatial_dims_variable_names:
+                if str(dim).lower()  in ["xdim", "x"]:
+                    xdim_variable_name=dim
+            ydim_variable_name=None
+            for dim in spatial_dims_variable_names:
+                if str(dim).lower()  in ["ydim", "y"]:
+                    ydim_variable_name=dim
+            zdim_variable_name=None
+            for dim in spatial_dims_variable_names:
+                if str(dim).lower()  in ["zdim", "z"]:
+                    zdim_variable_name=dim
                     
+
+
             Xdim ,  Ydim, Zdim = len(dataset.dimensions[xdim_axis]) ,len(dataset.dimensions[ydim_axis]) ,len(dataset.dimensions[zdim_axis]) 
             
             # Adjust time steps based on input parameters
-            if time_axis_name is not None:
+            if time_axis_name is not None and time_variable_name is not None:
                 total_timesteps =len(dataset.dimensions[time_axis_name]) if time_axis_name is not None else 1
-                if timestep_begin >= timestep_end:
-                    raise ValueError(f"Invalid time range: begin={timestep_begin}, end={timestep_end}")
                 # Handle negative indices and validate range
                 if timestep_begin < 0:
                     timestep_begin = 0
                 if timestep_end < 0:
-                    timestep_end = total_timesteps
+                    timestep_end = total_timesteps-1
+
                 if timestep_begin >= total_timesteps:
-                   timestep_begin = 0
-                if timestep_end > total_timesteps:
-                    timestep_end = total_timesteps
+                    timestep_begin = total_timesteps-1
+                if timestep_end >= total_timesteps:
+                    timestep_end = total_timesteps-1
+                if timestep_begin > timestep_end:
+                    raise ValueError(f"Invalid time range: begin={timestep_begin}, end={timestep_end}")
                 time_steps = timestep_end - timestep_begin
-                time = dataset.variables[time_axis_name][timestep_begin:timestep_end]
+                time = dataset.variables[time_variable_name][timestep_begin:timestep_end]
                 tmin, tmax = time.min(), time.max()
             else:
                  raise ValueError("Could not find time_axis_name in the NetCDF file")
 
 
             # Extract domain boundaries
-            x = dataset.variables[xdim_axis][:]
-            y = dataset.variables[ydim_axis][:]
-            z = dataset.variables[zdim_axis][:]
+            x = dataset.variables[xdim_variable_name][:]
+            y = dataset.variables[ydim_variable_name][:]
+            z = dataset.variables[zdim_variable_name][:]
             domainMinBoundary = [x.min(), y.min(), z.min()]
             domainMaxBoundary = [x.max(), y.max(), z.max()]
 
 
             vector_field = None
   
-            time = dataset.variables[time_axis_name][:]
+            time = dataset.variables[time_variable_name][:]
             tmin, tmax = time.min(), time.max()
             # Create UnsteadyVectorField3D instance
-            vector_field = UnsteadyVectorField3D(Xdim, Ydim, Zdim, time_steps, domainMinBoundary, domainMaxBoundary, tmin, tmax)
+            vector_field = UnsteadyVectorField3D(Xdim, Ydim, Zdim, time_steps, domainMinBoundary, domainMaxBoundary,tmin,tmax)
     
             # Try different naming conventions for vector components
             component_names = [

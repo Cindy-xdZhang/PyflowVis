@@ -8,8 +8,9 @@ import numpy as np
 import logging
 from GuiObjcts  import *
 from GuiObjcts.EventRegistrar import EventRegistrar
-from GuiObjcts.Object import Scene, singleton
+from GuiObjcts.Object import Scene, singleton,getScene
 from GuiObjcts.shaderManager import *
+from GuiObjcts.CameraObject import *
 from DeepUtils.MiscFunctions import initLogging
 def getEngine():
     return VisualizationEngine({})
@@ -65,17 +66,17 @@ class VisualizationEngine:
         Call this function after all the objects are added to the scene and before engine main loop.
         This function will restore objects, fixed down camera, and assign the camera to the objects.
         """
-        if self.config['restore']:
-            self.scene.restore_state_all()
+        
         self.scene.postInit()
         self.camera=self.scene.getObject("Camera")
+        if self.config['restore']:
+            self.scene.restore_state_all()
 
     
     
 
 
     def MainLoop(self):
-        self.finalizeSettleUp()
         # clock = pygame.time.Clock()
         while self.eventRegister.running:
             self.eventRegister.handle_events()

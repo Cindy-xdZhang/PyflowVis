@@ -16,7 +16,10 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         self.create_variable_callback_with_gui_customization("sampling",0.5,dirtyCallBack,False, {'widget': 'slider_float', 'min': 0.0, 'max': 1.0})
         self.create_variable_gui("color",(0.2,-.2,0.2),False,{'widget': 'color_picker'})
 
-        
+    def postInit(self):
+        super().postInit()
+        self.actFieldObject=self.parentScene.getObject("ActiveField") if self.parentScene.hasObject("ActiveField") else None
+    
         
     
     def _vectorized_interpolation_2DVectorField(self, vector_field, time, sampling_distance):
@@ -109,6 +112,109 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         
         return positions, vectors
     
+    def _vectorized_interpolation_3DVectorField(self, vector_field, time, sampling_distance):
+        """Fully vectorized field interpolation for all sample points in 3D."""
+        # Calculate time interpolation
+        if vector_field.timeInterval > 0:
+            time_idx = (time - vector_field.tmin) / vector_field.timeInterval
+        else:
+            time_idx = 0.0
+        lower_idx = int(np.floor(time_idx))
+        upper_idx = int(np.ceil(time_idx))
+        alpha = time_idx - lower_idx
+        
+        lower_idx = max(0, min(vector_field.time_steps - 1, lower_idx))
+        upper_idx = max(0, min(vector_field.time_steps - 1, upper_idx))
+        
+        # Calculate sample grid
+        num_samples_x = int((vector_field.domainMaxBoundary[0] - vector_field.domainMinBoundary[0]) / sampling_distance) if vector_field.domainMaxBoundary[0] > vector_field.domainMinBoundary[0] else 1
+        num_samples_y = int((vector_field.domainMaxBoundary[1] - vector_field.domainMinBoundary[1]) / sampling_distance) if vector_field.domainMaxBoundary[1] > vector_field.domainMinBoundary[1] else 1
+        num_samples_z = int((vector_field.domainMaxBoundary[2] - vector_field.domainMinBoundary[2]) / sampling_distance) if vector_field.domainMaxBoundary[2] > vector_field.domainMinBoundary[2] else 1
+
+        if num_samples_x <= 0 or num_samples_y <= 0 or num_samples_z <=0:
+            return np.empty((0,3)), np.empty((0,3))
+
+        # Create position grid
+        x_positions = np.linspace(vector_field.domainMinBoundary[0], vector_field.domainMaxBoundary[0], num_samples_x)
+        y_positions = np.linspace(vector_field.domainMinBoundary[1], vector_field.domainMaxBoundary[1], num_samples_y)
+        z_positions = np.linspace(vector_field.domainMinBoundary[2], vector_field.domainMaxBoundary[2], num_samples_z)
+
+        pos_x, pos_y, pos_z = np.meshgrid(x_positions, y_positions, z_positions, indexing='ij')
+
+        # Convert to grid coordinates
+        grid_x = (pos_x - vector_field.domainMinBoundary[0]) / vector_field.gridInterval[0] if vector_field.gridInterval[0] != 0 else 0
+        grid_y = (pos_y - vector_field.domainMinBoundary[1]) / vector_field.gridInterval[1] if vector_field.gridInterval[1] != 0 else 0
+        grid_z = (pos_z - vector_field.domainMinBoundary[2]) / vector_field.gridInterval[2] if vector_field.gridInterval[2] != 0 else 0
+
+        # Get integer indices
+        x_idx = np.floor(grid_x).astype(int)
+        y_idx = np.floor(grid_y).astype(int)
+        z_idx = np.floor(grid_z).astype(int)
+
+        # Calculate interpolation weights
+        fx = grid_x - x_idx
+        fy = grid_y - y_idx
+        fz = grid_z - z_idx
+
+        # Clip indices to valid range
+        x_idx = np.clip(x_idx, 0, vector_field.Xdim - 2)
+        y_idx = np.clip(y_idx, 0, vector_field.Ydim - 2)
+        z_idx = np.clip(z_idx, 0, vector_field.Zdim - 2)
+        
+        # Get field data for both time steps
+        field_lower = vector_field.field[lower_idx]
+        field_upper = vector_field.field[upper_idx]
+        
+        # Quadrilinear interpolation
+        v0000 = field_lower[z_idx, y_idx, x_idx]
+        v1000 = field_lower[z_idx, y_idx, x_idx + 1]
+        v0100 = field_lower[z_idx, y_idx + 1, x_idx]
+        v1100 = field_lower[z_idx, y_idx + 1, x_idx + 1]
+        v0010 = field_lower[z_idx + 1, y_idx, x_idx]
+        v1010 = field_lower[z_idx + 1, y_idx, x_idx + 1]
+        v0110 = field_lower[z_idx + 1, y_idx + 1, x_idx]
+        v1110 = field_lower[z_idx + 1, y_idx + 1, x_idx + 1]
+
+        v0001 = field_upper[z_idx, y_idx, x_idx]
+        v1001 = field_upper[z_idx, y_idx, x_idx + 1]
+        v0101 = field_upper[z_idx, y_idx + 1, x_idx]
+        v1101 = field_upper[z_idx, y_idx + 1, x_idx + 1]
+        v0011 = field_upper[z_idx + 1, y_idx, x_idx]
+        v1011 = field_upper[z_idx + 1, y_idx, x_idx + 1]
+        v0111 = field_upper[z_idx + 1, y_idx + 1, x_idx]
+        v1111 = field_upper[z_idx + 1, y_idx + 1, x_idx + 1]
+
+        fx_r = fx[..., np.newaxis]
+        fy_r = fy[..., np.newaxis]
+        fz_r = fz[..., np.newaxis]
+
+        # Interpolate along x for both time steps
+        c000 = v0000 * (1 - fx_r) + v1000 * fx_r
+        c010 = v0100 * (1 - fx_r) + v1100 * fx_r
+        c100 = v0010 * (1 - fx_r) + v1010 * fx_r
+        c110 = v0110 * (1 - fx_r) + v1110 * fx_r
+        
+        c001 = v0001 * (1 - fx_r) + v1001 * fx_r
+        c011 = v0101 * (1 - fx_r) + v1101 * fx_r
+        c101 = v0011 * (1 - fx_r) + v1011 * fx_r
+        c111 = v0111 * (1 - fx_r) + v1111 * fx_r
+
+        # Interpolate along y
+        c00 = c000 * (1 - fy_r) + c010 * fy_r
+        c10 = c100 * (1 - fy_r) + c110 * fy_r
+        c01 = c001 * (1 - fy_r) + c011 * fy_r
+        c11 = c101 * (1 - fy_r) + c111 * fy_r
+        
+        # Interpolate along z
+        c0 = c00 * (1 - fz_r) + c10 * fz_r
+        c1 = c01 * (1 - fz_r) + c11 * fz_r
+        
+        vectors = c0 * (1 - alpha) + c1 * alpha
+        
+        positions = np.stack([pos_x, pos_y, pos_z], axis=-1)
+        
+        return positions, vectors
+
     def _batch_generate_glyphs(self, positions, vectors, scale, radius, height, segments):
         """Batch generate glyph geometry using direct arrow generation"""
         # Filter out zero vectors
@@ -217,7 +323,7 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         return all_vertices, all_indices, all_tex_coords
     
 
-    def updateVectorGlyphOptimized(self, vector_field, time: float = 0.0):
+    def updateVectorGlyphOptimized_2D(self, vector_field, time: float = 0.0):
         """Optimized version using vectorized operations and geometry instancing"""
         if vector_field is None or self.dirty == False:
             return
@@ -247,11 +353,49 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         self.commit()
         self.dirty = False
     
+    def updateVectorGlyphOptimized_3D(self, vector_field, time: float = 0.0):
+        """Optimized version for 3D vector fields."""
+        if vector_field is None or self.dirty == False:
+            return
+            
+        # Get parameters
+        radius = self.getValue("radius")
+        height = self.getValue("height")
+        segments = self.getValue("segments")
+        scale = self.getValue("scale")
+        sampling_distance = max(self.getValue("sampling"), 0.0001)
+        
+        # Vectorized interpolation for 3D field
+        positions, vectors = self._vectorized_interpolation_3DVectorField(vector_field, time, sampling_distance)
+        
+        if positions.size == 0:
+            self.erase()
+            self.dirty = False
+            return
+            
+        # Batch generate glyphs
+        result = self._batch_generate_glyphs(positions, vectors, scale, radius, height, segments)
+        
+        if result is None:
+            self.erase()
+            self.dirty = False
+            return
+            
+        all_vertices, all_indices, all_tex_coords = result
+        
+        # Update geometry
+        self.erase()
+        self.appendVertexGeometryNoCommit(all_vertices, all_indices, all_tex_coords)
+        self.commit()
+        self.dirty = False
+
     def render(self):
         if self.dirty == True:
-            actFieldWidget = self.parentScene.getObject("ActiveField")
-            # Use optimized version
-            self.updateVectorGlyphOptimized(actFieldWidget.getActiveField(), actFieldWidget.time())
+            targetField=self.actFieldObject.getActiveField()
+            if targetField.getDim()==2:
+                self.updateVectorGlyphOptimized_2D(targetField, self.actFieldObject.time())
+            elif targetField.getDim()==3:
+                self.updateVectorGlyphOptimized_3D(targetField, self.actFieldObject.time())
         super().render()
         return 
 

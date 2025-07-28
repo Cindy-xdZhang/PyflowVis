@@ -128,7 +128,22 @@ def _detect_critical_points(u, v, method, threshold):
         mask = (np.abs(u) < threshold) & (np.abs(v) < threshold)
         y_idx, x_idx = np.where(mask)
         return list(zip(x_idx, y_idx)) # Return as (x, y) index tuples
+    elif method == 'ivd':
+        du_dx, du_dy = _compute_gradient_2d(u)
+        dv_dx, dv_dy = _compute_gradient_2d(v)
 
+        # Compute vorticity (ivd here)
+        curl_norm =  np.sqrt((dv_dx - du_dy)**2)
+
+        # Subtract average vorticity
+        avg_curl_norm = np.mean(curl_norm)
+        ivd = curl_norm - avg_curl_norm
+
+        # Generate mask where ivd > threshold
+        vel_mag = np.sqrt(u**2 + v**2)
+        mask = (ivd > 0.1*threshold) & (vel_mag < threshold)
+        y_idx, x_idx = np.where(mask)
+        return list(zip(x_idx, y_idx)) # Return as (x, y) index tuples
     elif method == 'jacobian':
         # Jacobian-based detection
         du_dx, du_dy = _compute_gradient_2d(u)
@@ -184,6 +199,9 @@ def _euclidean_distance_2d(point1, point2):
 def _track_critical_points_across_time(points_per_time, max_distance, min_line_length):
     """
     Track critical points across time steps to form continuous corelines.
+    This implementation tracks both forward and backward from each seed point
+    to build complete, non-fragmented corelines.
+
     points_per_time: List[List[Tuple[x, y, t]]] - Physical coordinates
     """
     if not points_per_time:
@@ -192,61 +210,66 @@ def _track_critical_points_across_time(points_per_time, max_distance, min_line_l
     all_lines = []
     T = len(points_per_time)
 
-    # Create a mutable copy of points_per_time to track available points.
-    # This prevents points from being used in more than one coreline.
+    # A mutable copy of points to track availability.
     available_points = [list(points) for points in points_per_time]
 
-    for start_t in range(T-1):
-        # Iterate over a copy of the points for the current time step,
-        # as available_points[start_t] may be modified during the loop.
-        start_points_at_t = list(available_points[start_t])
-        
-        for start_point in start_points_at_t:
-            # If start_point has been consumed by a previous line tracking, skip it.
-            if start_point not in available_points[start_t]:
+    def _find_closest_point(point, candidates):
+        """Helper to find the closest point in a list of candidates."""
+        min_dist = float('inf')
+        closest_point = None
+        current_pos = point[:2]
+        for candidate in candidates:
+            try:
+                dist = _euclidean_distance_2d(current_pos, candidate[:2])
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_point = candidate
+            except (ValueError, IndexError):
                 continue
+        return closest_point, min_dist
 
-            # This point is available, so start a new line and remove it from the pool.
-            available_points[start_t].remove(start_point)
-            current_line = [start_point]
-            current_t = start_t
+    for t in range(T):
+        # Iterate over a copy, as we modify the original list.
+        for seed_point in list(available_points[t]):
+            if seed_point not in available_points[t]:
+                continue  # Already used in another line
 
-            # Track forward in time
-            while current_t + 1 < T:
-                next_points = available_points[current_t + 1]
-                if not next_points:
-                    break
+            # --- Start a new line from this seed point ---
+            available_points[t].remove(seed_point)
 
-                # Find the closest point in the next time step
-                current_pos = current_line[-1][:2]  # (x, y)
-                min_dist = float('inf')
-                closest_point = None
-
-                for next_point in next_points:
-                    try:
-                        dist = _euclidean_distance_2d(current_pos, next_point[:2])
-                        if dist < min_dist:
-                            min_dist = dist
-                            closest_point = next_point
-                    except (ValueError, IndexError):
-                        # Skip invalid points
-                        continue
-
-                # If a close enough point is found, extend the line
-                if closest_point is not None and min_dist <= max_distance:
-                    current_line.append(closest_point)
-                    # Remove the used point from the available list.
-                    available_points[current_t + 1].remove(closest_point)
-                    current_t += 1
+            # --- Track Forward ---
+            forward_path = []
+            current_point = seed_point
+            for fwd_t in range(t, T - 1):
+                closest, dist = _find_closest_point(current_point, available_points[fwd_t + 1])
+                if closest and dist <= max_distance:
+                    forward_path.append(closest)
+                    available_points[fwd_t + 1].remove(closest)
+                    current_point = closest
                 else:
-                    # Stop tracking if no suitable point is found
-                    break
+                    break  # End of forward path
 
-            # Only keep lines that meet the minimum length requirement
-            if len(current_line) >= min_line_length:
-                all_lines.append(current_line)
+            # --- Track Backward ---
+            backward_path = []
+            current_point = seed_point
+            for bwd_t in range(t, 0, -1):
+                closest, dist = _find_closest_point(current_point, available_points[bwd_t - 1])
+                if closest and dist <= max_distance:
+                    backward_path.append(closest)
+                    available_points[bwd_t - 1].remove(closest)
+                    current_point = closest
+                else:
+                    break  # End of backward path
+
+            # --- Combine and Store Line ---
+            # backward_path is [t-1, t-2, ...], so reverse it.
+            full_line = list(reversed(backward_path)) + [seed_point] + forward_path
+            if len(full_line) >= min_line_length:
+                all_lines.append(full_line)
 
     return all_lines
+
+
 
 def extract_vortex_corelines_2d_unsteady(vector_field, method='jacobian', threshold=1e-1,
                                        max_distance=None, min_line_length=4):
@@ -288,9 +311,10 @@ def extract_vortex_corelines_2d_unsteady(vector_field, method='jacobian', thresh
 
     # Set default max_distance if not provided
     if max_distance is None:
-        dx = (vector_field.domainMaxBoundary[0] - vector_field.domainMinBoundary[0]) / max(X - 1, 1) # Avoid div by zero
-        dy = (vector_field.domainMaxBoundary[1] - vector_field.domainMinBoundary[1]) / max(Y - 1, 1)
-        max_distance = 4 * max(dx, dy)
+        rangeX =(vector_field.domainMaxBoundary[0] - vector_field.domainMinBoundary[0]) 
+        rangeY = (vector_field.domainMaxBoundary[1] - vector_field.domainMinBoundary[1]) 
+        max_distance =  0.1*max(rangeX, rangeY)
+        min_distance =  0.01*min(rangeX, rangeY)
 
     # Collect critical points for each time step
     all_core_points_per_time = []
@@ -313,20 +337,38 @@ def extract_vortex_corelines_2d_unsteady(vector_field, method='jacobian', thresh
         for x_idx, y_idx in critical_points_grid:
             # Convert grid indices to physical x, y
             x_phys, y_phys = vector_field.convert_grid_pos_2_physical_pos(float(x_idx), float(y_idx))
-            # Calculate physical time for this slice
-            t_phys = vector_field.getPhysicalTime(t)
-            normalized_t_phys = (t_phys - vector_field.tmin) / (vector_field.tmax - vector_field.tmin)
-            physical_coords.append((x_phys, y_phys, normalized_t_phys))
+            has_added_before=False
+
+            #remove the points that are too close to each other,pick the one with the lowest velocity
+            for i in range(len(physical_coords)):
+                if _euclidean_distance_2d(physical_coords[i], (x_phys, y_phys)) <= min_distance :
+                    has_added_before=True
+                    #if the new point has lower velocity, replace the old point
+                    if  np.linalg.norm(vector_field.get_vector_at_grid(x_idx,y_idx,t)) < np.linalg.norm(vector_field.get_vector(physical_coords[i][0],physical_coords[i][1],t_phys)):
+                        t_phys = vector_field.getPhysicalTime(t)
+                        normalized_t_phys = (t_phys - vector_field.tmin) / (vector_field.tmax - vector_field.tmin)
+                        physical_coords[i]=(x_phys, y_phys, normalized_t_phys)
+                    break
+                    
+
+            if not has_added_before:
+                t_phys = vector_field.getPhysicalTime(t)
+                normalized_t_phys = (t_phys - vector_field.tmin) / (vector_field.tmax - vector_field.tmin)
+                physical_coords.append((x_phys, y_phys, normalized_t_phys))
+
+
 
         if len(physical_coords) == 0:
             print(f"Warning: No critical points found at time step {t} even after threshold adjustment")
-            
         all_core_points_per_time.append(physical_coords)
 
     # Check if any critical points were found
     total_points = sum(len(points) for points in all_core_points_per_time)
     if total_points < T-1:
         print("Warning: Very few critical points detected across all time steps")
+
+
+ 
 
     # Track critical points across time to form corelines
     tracked_lines = _track_critical_points_across_time(

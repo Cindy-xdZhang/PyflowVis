@@ -2,7 +2,8 @@ import numpy as np
 from OpenGL import GL as gl
 from GuiObjcts.VertexArrayObject import VertexArrayObject
 from GuiObjcts.shaderManager import Material
-from .VisualizationEngine import getEngine, getScene
+from .VisualizationEngine import getEngine
+from .Object import getScene
 from FLowUtils.vtk_coreline import *
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 
@@ -47,7 +48,7 @@ class GeometryRenderObject(VertexArrayObject):
         self.create_variable("linewidth",0.05,True)
         self.create_variable("segments", 8, True,True)
         self.create_variable("visible", True, True,True)
-        self.create_variable("coreline_method", ["jacobian","q_criterion","simple"], True)
+        self.create_variable("coreline_method", ["ivd","jacobian","q_criterion","simple"], True)
         self.create_variable("coreline_threshold", 0.1, True)
 
         self.addAction("add curve",lambda obj:obj.add_curve("test",np.array([[-1,0,0], 
@@ -128,7 +129,7 @@ class GeometryRenderObject(VertexArrayObject):
             counter += 1
 
         vao = VertexArrayObject(result_name)
-        vao.create_variable("color", self.default_curve_color, False, False)
+        vao.create_variable("color", self.getValue("color"), False, False)
         radius=self.getValue("linewidth")
         for curve_idx, curve_points in enumerate(points):
             curve_points = np.array(curve_points, dtype=np.float32)

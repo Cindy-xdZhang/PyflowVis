@@ -7,8 +7,9 @@ from OpenGL import GL as gl
 import ctypes
 
 
-def pathline_integration_one_direction(
-    vectorField: UnsteadyVectorField2D|UnsteadyVectorField3D,
+
+def pathline_integration_one_direction_2D(
+    vectorField: UnsteadyVectorField2D,
     start_pos:np.ndarray[np.float32,3],
     timeStart:float,
     timeEnd:float,
@@ -19,7 +20,7 @@ def pathline_integration_one_direction(
     """
     Integrate a pathline in one direction through an unsteady vector field.
     Args:
-        vectorField: UnsteadyVectorField2D or UnsteadyVectorField3Dinstance
+        vectorField: UnsteadyVectorField2D 
         start_pos: [x, y,z=0] initial position
         timeStart: float, start time
         timeEnd: float, end time
@@ -35,7 +36,7 @@ def pathline_integration_one_direction(
     direction = 1 if timeEnd > timeStart else -1
     stepSize = abs(stepSize) * direction
     for i in range(maxIterations):
-        if (direction > 0 and t >= timeEnd) or (direction < 0 and t <= timeEnd):
+        if (direction > 0 and t >= timeEnd) or (direction < 0 and t <= timeEnd) or not vectorField.IsInside(pos_3d):
             break
         if NumericalMethod == "RK4":
             v1 = vectorField.get_vector(pos_3d[0], pos_3d[1], t)
@@ -48,57 +49,62 @@ def pathline_integration_one_direction(
             delta = stepSize * v
         else:
             raise ValueError(f"Unknown NumericalMethod: {NumericalMethod}")
-        #make sure the delta_pos_3d is a 3D vector
-        if isinstance(vectorField, UnsteadyVectorField3D):
-            delta_pos_3d = np.array([delta[0], delta[1], delta[2]], dtype=np.float32)
-        else   :
-            delta_pos_3d = np.array([delta[0], delta[1], 0.0], dtype=np.float32)
-
+    
+        delta_pos_3d = np.array([delta[0], delta[1], 0.0], dtype=np.float32)
         pos_3d = pos_3d + delta_pos_3d
         t = t + stepSize
         path.append((pos_3d.copy(), t))
     return path
     
-
-def pathline_integration_double_direction(
-    vectorField: UnsteadyVectorField2D,
-    start_pos,
-    timeStart,
-    timeEnd,
-    stepSize=0.01,
-    maxIterations=5000,
-    NumericalMethod="RK4"
-):
+def pathline_integration_one_direction_3D(
+    vectorField: UnsteadyVectorField3D,
+    start_pos:np.ndarray[np.float32,3],
+    timeStart:float,
+    timeEnd:float,
+    stepSize:float=0.01,
+    maxIterations:int=5000,
+    NumericalMethod:str="RK4"):
     """
-    Integrate a pathline in both forward and backward directions through an unsteady vector field.
+    Integrate a pathline in one direction through an unsteady vector field.
     Args:
-        vectorField: UnsteadyVectorField2D instance
-        start_pos: [x, y] initial position
+        vectorField: UnsteadyVectorField3D 
+        start_pos: [x, y,z=0] initial position
         timeStart: float, start time
         timeEnd: float, end time
         stepSize: float, integration time step
         maxIterations: int, maximum number of steps
         NumericalMethod: str, "RK4" or "Euler"
     Returns:
-        List of (position, time) tuples, with backward points first, then forward points
+        List of (position, time) tuples
     """
-    # Integrate backward from timeStart to timeEnd
-    backward_path = Pathline_integration_one_direction(
-        vectorField, start_pos, timeEnd, timeStart, stepSize, maxIterations, NumericalMethod
-    )
+    pos_3d = np.array(start_pos, dtype=np.float32)
+    t = timeStart
+    path = [(pos_3d.copy(), t)]
+    direction = 1 if timeEnd > timeStart else -1
+    stepSize = abs(stepSize) * direction
+    for i in range(maxIterations):
+        if (direction > 0 and t >= timeEnd) or (direction < 0 and t <= timeEnd) or not vectorField.IsInside(pos_3d):
+            break
+        if NumericalMethod == "RK4":
+            v1 = vectorField.get_vector(pos_3d[0], pos_3d[1],pos_3d[2], t)
+            v2 = vectorField.get_vector(pos_3d[0] + 0.5 * stepSize * v1[0], pos_3d[1] + 0.5 * stepSize * v1[1],pos_3d[2] + 0.5 * stepSize * v1[2], t + 0.5 * stepSize)
+            v3 = vectorField.get_vector(pos_3d[0] + 0.5 * stepSize * v2[0], pos_3d[1] + 0.5 * stepSize * v2[1],pos_3d[2] + 0.5 * stepSize * v2[2], t + 0.5 * stepSize)
+            v4 = vectorField.get_vector(pos_3d[0] + stepSize * v3[0], pos_3d[1] + stepSize * v3[1],pos_3d[2] + stepSize * v3[2], t + stepSize)
+            delta = (stepSize / 6.0) * (v1 + 2 * v2 + 2 * v3 + v4)
+        elif NumericalMethod == "Euler":
+            v = vectorField.get_vector(pos_3d[0], pos_3d[1],pos_3d[2], t)
+            delta = stepSize * v
+        else:
+            raise ValueError(f"Unknown NumericalMethod: {NumericalMethod}")
     
-    # Integrate forward from timeStart to timeEnd
-    forward_path = Pathline_integration_one_direction(
-        vectorField, start_pos, timeStart, timeEnd, stepSize, maxIterations, NumericalMethod
-    )
-    
-    # Combine paths: backward (reversed) + forward
-    # Remove duplicate start point from forward path
-    full_path = backward_path[::-1] + forward_path[1:]
-    return full_path
+        delta_pos_3d = np.array([delta[0], delta[1], delta[2]], dtype=np.float32)
+        pos_3d = pos_3d + delta_pos_3d
+        t = t + stepSize
+        path.append((pos_3d.copy(), t))
+    return path
 
 
-def streamline_integration_one_direction(
+def streamline_integration_one_direction_2D(
     vectorField: UnsteadyVectorField2D,
     start_pos,
     time,
@@ -149,48 +155,25 @@ def streamline_integration_one_direction(
     return path
 
 
-def streamline_integration_double_direction(
-    vectorField: UnsteadyVectorField2D,
-    start_pos,
-    time,
-    stepSize=0.01,
-    maxIterations=5000,
-    NumericalMethod="RK4"
-):
-    """
-    Integrate a streamline in both forward and backward directions through an unsteady vector field at a fixed time.
-    Args:
-        vectorField: UnsteadyVectorField2D instance
-        start_pos: [x, y] initial position
-        time: float, fixed time for streamline
-        stepSize: float, integration step size
-        maxIterations: int, maximum number of steps
-        NumericalMethod: str, "RK4" or "Euler"
-    Returns:
-        List of (position, time) tuples, with backward points first, then forward points
-    """
-    # Integrate backward
-    backward_path = streamline_integration_one_direction(
-        vectorField, start_pos, time, stepSize, maxIterations, NumericalMethod, "backward"
-    )
-    
-    # Integrate forward
-    forward_path = streamline_integration_one_direction(
-        vectorField, start_pos, time, stepSize, maxIterations, NumericalMethod, "forward"
-    )
-    
-    # Combine paths: backward (reversed) + forward
-    # Remove duplicate start point from forward path
-    full_path = backward_path[::-1] + forward_path[1:]
-    return full_path
-    
-def compute_pathline(args):
+
+
+
+
+def compute_pathline_2D(args):
         vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method = args
-        forward = pathline_integration_one_direction(vector_field, pos3d, t0, max_time, step_size, max_iteration, method)
-        backward = pathline_integration_one_direction(vector_field, pos3d, t0, min_time, step_size, max_iteration, method)
+        forward = pathline_integration_one_direction_2D(vector_field, pos3d, t0, max_time, step_size, max_iteration, method)
+        backward = pathline_integration_one_direction_2D(vector_field, pos3d, t0, min_time, step_size, max_iteration, method)
         backward = backward[::-1]
         full_path = backward + forward[1:]
         return full_path
+
+def compute_pathline_3D(args):
+    vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method = args
+    forward = pathline_integration_one_direction_3D(vector_field, pos3d, t0, max_time, step_size, max_iteration, method)
+    backward = pathline_integration_one_direction_3D(vector_field, pos3d, t0, min_time, step_size, max_iteration, method)
+    backward = backward[::-1]
+    full_path = backward + forward[1:]
+    return full_path
 
 class FlowLineObject(Object):
     def __init__(self):
@@ -323,8 +306,10 @@ class FlowLineObject(Object):
                 (vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method)
                 for pos3d, t0 in seeds
             ]
-
-        self.pathline_cache = list(map(compute_pathline, args_list))
+        if vector_field.getDim()==2:
+            self.pathline_cache = list(map(compute_pathline_2D, args_list))
+        elif vector_field.getDim()==3:
+            self.pathline_cache = list(map(compute_pathline_3D, args_list))
 
         self.MappingFlowlineAsRenderingVAO(self.pathline_cache)
         self.pathline_dirty = False
