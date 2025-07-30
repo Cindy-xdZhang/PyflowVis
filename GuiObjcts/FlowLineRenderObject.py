@@ -155,8 +155,46 @@ def streamline_integration_one_direction_2D(
     return path
 
 
+def streamline_integration_one_direction_3D(
+    vectorField: UnsteadyVectorField3D,
+    start_pos,
+    time,
+    stepSize=0.01,
+    maxIterations=5000,
+    NumericalMethod="RK4",
+    direction="forward"
+):
+    """
+    Integrate a streamline in one direction through an unsteady 3D vector field at a fixed time.
+    """
+    pos_3d = np.array(start_pos, dtype=np.float32)
+    path = [(pos_3d.copy(), time)]
+    step_direction = 1 if direction == "forward" else -1
+    abs_step_size = abs(stepSize) * step_direction
 
+    for i in range(maxIterations):
+        if not vectorField.IsInside(pos_3d):
+            break
 
+        if NumericalMethod == "RK4":
+            v1 = vectorField.get_vector(pos_3d[0], pos_3d[1], pos_3d[2], time)
+            v2_pos = pos_3d + 0.5 * abs_step_size * v1
+            v2 = vectorField.get_vector(v2_pos[0], v2_pos[1], v2_pos[2], time)
+            v3_pos = pos_3d + 0.5 * abs_step_size * v2
+            v3 = vectorField.get_vector(v3_pos[0], v3_pos[1], v3_pos[2], time)
+            v4_pos = pos_3d + abs_step_size * v3
+            v4 = vectorField.get_vector(v4_pos[0], v4_pos[1], v4_pos[2], time)
+            delta = (abs_step_size / 6.0) * (v1 + 2 * v2 + 2 * v3 + v4)
+        elif NumericalMethod == "Euler":
+            v = vectorField.get_vector(pos_3d[0], pos_3d[1], pos_3d[2], time)
+            delta = abs_step_size * v
+        else:
+            raise ValueError(f"Unknown NumericalMethod: {NumericalMethod}")
+
+        pos_3d += delta
+        path.append((pos_3d.copy(), time))
+
+    return path
 
 
 def compute_pathline_2D(args):
@@ -175,6 +213,15 @@ def compute_pathline_3D(args):
     full_path = backward + forward[1:]
     return full_path
 
+def compute_streamline_3D(args):
+    vector_field, pos3d, time, step_size, max_iteration, method = args
+    forward = streamline_integration_one_direction_3D(vector_field, pos3d, time, step_size, max_iteration, method, "forward")
+    backward = streamline_integration_one_direction_3D(vector_field, pos3d, time, step_size, max_iteration, method, "backward")
+    backward = backward[::-1]
+    full_path = backward + forward[1:]
+    return full_path
+
+
 class FlowLineObject(Object):
     def __init__(self):
         super().__init__("flowline")
@@ -192,7 +239,7 @@ class FlowLineObject(Object):
         self.material = Material("flowlineMaterial",  "flowlineMat",texture0="builtIn")
         self.setMaterial(self.material)
 
-        self.create_variable("streamline_active",False)
+        self.create_variable("streamline_active",True)
         self.create_variable("pathline_active",True)
         self.create_variable_gui("lineWeight",0.1,True, {'widget': 'slider_float', 'min': 0.0, 'max': 5.0})
         self.create_variable("zOffset", 0.0,True)
@@ -202,7 +249,13 @@ class FlowLineObject(Object):
         self.create_variable("integrator", "RK4",True)#euler,rk4
         self.create_variable("stepSize", 0.01  ,True)
         # self.create_variable("flowlineGroupID", self.flowlineGroupID)
-        getEngine().eventRegister.registerChannelEvent("seeding_changed", lambda: setattr(self, "pathline_dirty", True))
+        def dirtyCallBack(obj):
+            if self.getValue("pathline_active"):
+                setattr(self, "pathline_dirty", True)
+            if self.getValue("streamline_active"):
+                    setattr(self, "streamline_dirty", True)
+        
+        getEngine().eventRegister.registerChannelEvent("seeding_changed", lambda : dirtyCallBack(self))
 
 
 
@@ -247,6 +300,7 @@ class FlowLineObject(Object):
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         gl.glBindVertexArray(0)
 
+
  
 
 
@@ -271,7 +325,38 @@ class FlowLineObject(Object):
         gl.glUseProgram(0)
 
     def update_streamline(self,  attribs2=None):
-        pass
+        if not hasattr(self, 'streamline_dirty') or not self.streamline_dirty:
+            return
+
+        self.indicatorObject=self.parentScene.getObject("indicator") if self.parentScene.hasObject("indicator") else None
+        if self.indicatorObject is None:
+            return
+
+        actFieldWidget = self.parentScene.getObject("ActiveField")
+        if actFieldWidget is None:
+            return
+
+        vector_field:UnsteadyVectorField3D = actFieldWidget.getActiveField()
+        if vector_field is None or not isinstance(vector_field, UnsteadyVectorField3D):
+            return
+
+        time = actFieldWidget.time()
+        seeds = self.indicatorObject.getValue("SeedingGroup1")
+        
+        step_size = self.getValue("stepSize")
+        max_iteration = self.getValue("maxIteration")
+        method = self.getValue("integrator")
+
+        args_list = [
+            (vector_field, pos3d, time, step_size, max_iteration, method)
+            for pos3d, _ in seeds
+        ]
+        
+        if vector_field.getDim() == 3:
+            self.streamline_cache = list(map(compute_streamline_3D, args_list))
+            self.MappingFlowlineAsRenderingVAO(self.streamline_cache)
+
+        self.streamline_dirty = False
 
 
     def update_pathline(self,   attribs2=None):
@@ -385,15 +470,5 @@ class FlowLineObject(Object):
 
 
 
-
-
-
-
-
-
-
-
     
         
-
-  

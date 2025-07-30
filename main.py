@@ -141,7 +141,7 @@ def main():
     shaderManager=getShaderManager()
     defaultMat=shaderManager.getMaterial()
    
-    camera = Camera(60.0, (0, 0, 5), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
+    camera = Camera(60.0, (0, 0, 10), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
     indicator=Indicator("indicator",camera)
     coord=CoordinateSystem()
     planarManifold=PlanarManifold()
@@ -166,7 +166,7 @@ def main():
     # actFieldWidget.insertField("rfc",vectorField2d)
 
     flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
-    cylider_netCDF=os.path.join(flow_asset_folder,"halfcylinderRe160Resampled.nc")
+    cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
     vectorField3d= NetCDFLoader.load_vector_field3d(cylider_netCDF,64);
     actFieldWidget.insertField("tornado3d",vectorField3d)
 

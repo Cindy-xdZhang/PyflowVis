@@ -42,6 +42,7 @@ class Camera(Object):
         self.create_variable_callback("up", np.array(up, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
         self.create_variable("rotation_matrix", np.eye(4, dtype=np.float32), True,False)
 
+ 
         self.width = width
         self.height = height
         self.aspect_ratio = width / height
@@ -84,10 +85,17 @@ class Camera(Object):
         targetNew = np.array(targetNew, dtype=np.float32)
         up = self.getValue("up")
         return glm.lookAt(pos, targetNew, up)
-
+    
     def get_projection_matrix(self):
         fov = self.getValue("fov")
-        return glm.perspective(glm.radians(fov), self.aspect_ratio, 0.1, 200.0)
+        # 根据相机位置动态调整近平面
+        pos = self.getValue("position")
+        distance_to_origin = np.linalg.norm(pos)
+        near_plane = max(0.5, distance_to_origin * 0.1)  # 动态近平面
+        far_plane = max(100.0, distance_to_origin * 10)    # 动态远平面
+        return glm.perspective(glm.radians(fov), self.aspect_ratio, near_plane, far_plane)
+    
+
 
     def update_window_size(self, width, height):
         """Update the window size and recalculate the projection matrix."""
@@ -179,7 +187,7 @@ class Camera(Object):
         fov = self.getValue("fov")
         if direction == 'in' and fov > 10:
             self.updateValue("fov", fov - 1.0)
-        elif direction == 'out' and fov < 90:
+        elif direction == 'out' and fov < 50:
             self.updateValue("fov", fov + 1.0)
         self.updateMVPVariables()
 

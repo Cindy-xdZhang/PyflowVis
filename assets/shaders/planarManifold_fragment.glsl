@@ -18,11 +18,8 @@ uniform  int colorMap;
 
 
 vec4 getScalarFieldValueOnPlane(vec2 texUV, float time) {
-    if (time > scalarFieldMaxTime)
-        return vec4(0, 0, 0, 0);
-    if (time < scalarFieldMinTime)
-        return vec4(0, 0, 0, 0);
     float normalizedTime = (time - scalarFieldMinTime) / (scalarFieldMaxTime - scalarFieldMinTime);
+    normalizedTime=clamp(normalizedTime,0.0,1.0);
     vec3 attributeTexCoords = vec3(texUV, normalizedTime);
     return texture(scalarAttributeTexture, attributeTexCoords);
 }

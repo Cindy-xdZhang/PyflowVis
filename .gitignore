@@ -19,4 +19,5 @@ CppProjects/build/
 CppProjects/data/
 FlowDataAndVisualizationScripts/data/
 FlowDataAndVisualizationScripts/.ipynb_checkpoints/
-
+*.nbc
+*.nbi

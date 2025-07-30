@@ -62,15 +62,15 @@ class Object:
         self.actions = {}
         self.callbacks={}
         self.optionValues = {}
-        self.GuiVisible=True
-        
+        self.create_variable("GuiVisible",True,True,False)
+
         self.parentScene=None
         self.cameraObject=None
+
         hasRenderFunc=hasattr(self,"render")
-        self.create_variable("draw",hasRenderFunc,hasRenderFunc)
-
+        if hasRenderFunc:
+            self.create_variable("draw",True,True)
    
-
     def getParentScene(self):
         return self.parentScene
     
@@ -111,7 +111,7 @@ class Object:
 
     @typechecked
     def setGuiVisibility(self,drawGui:bool):
-        self.GuiVisible=drawGui
+        self.updateValue("GuiVisible",drawGui)
 
     @typechecked
     def setRenderingVisibility(self,renderVisible:bool):
@@ -138,7 +138,7 @@ class Object:
     #1. drawGui() is called by the scene to draw the object's properties in the gui, controled by  GuiVisible,called by the scene.drawALlGUi
     #2. render() is to draw the object's geometry, controled by  renderVisible(obj.getValue("draw"))
     def draw(self):
-        if self.getValue("draw")==True:
+        if self.hasValue("draw") and self.getValue("draw")==True:
             self.render()        
             
                
@@ -386,13 +386,15 @@ class Object:
     def drawGui(self):
         """Overwrite this function to change the content get rendered  in the ImGui window.
         """
-        if self.GuiVisible:
-            _,self.GuiVisible=imgui.begin(self.name,self.GuiVisible)
+        if self.getValue("GuiVisible"):
+            _,newGuiVisible=imgui.begin(self.name,self.getValue("GuiVisible"))
             # Draw persistent properties with appropriate ImGui controls
             self.DrawPropertiesInGui(self.persistentProperties)
             self.DrawPropertiesInGui(self.nonPersistentProperties)
             self.DrawActionButtons()
             imgui.end()
+            self.updateValue("GuiVisible",newGuiVisible)
+
 
    
 @singleton
@@ -479,13 +481,6 @@ class Scene(Object):
         for obj in self.objects.values():
             obj.load_state()
     
-    def toggle_object_visibility(self,ObjectName:str):
-        """toggle an onbject's visibility in gui 
-        Returns:
-            None: 
-        """        
-        obj=self.getObject(ObjectName)  
-        obj.setGuiVisibility(not obj.drawGui) if obj else None     
 
     def drawGui(self):
         #draw the scene as an object(draw its properties, if any) 
@@ -501,13 +496,13 @@ class Scene(Object):
                     obj:Object=self.getObject(obj_name)
                     if isinstance(obj,Object) is False:
                         continue
-                    visible = obj.getValue("draw")
+                    visible = obj.getValue("GuiVisible")
                     imgui.text(obj_name)
                     imgui.same_line()
                     changed, new_visible = imgui.checkbox(f"##{obj_name}", visible)
                     if changed:
                         obj.setGuiVisibility(new_visible) 
-                        obj.setRenderingVisibility(new_visible) 
+                    
             imgui.end()
         #draw all the objects in the scene
         for obj in self.objects.values():

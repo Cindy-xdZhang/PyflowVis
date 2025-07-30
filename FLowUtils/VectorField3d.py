@@ -1,8 +1,100 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from numba import njit
 # abstract base class work
 from abc import ABC, abstractmethod
+
+@njit(cache=True)
+def _quadrilinear_interpolate_njit(
+    field_data: np.ndarray,
+    posX: float, posY: float, posZ: float, time: float,
+    Xdim: int, Ydim: int, Zdim: int, time_steps: int,
+    domainMinBoundary: np.ndarray, gridInterval: np.ndarray,
+    tmin: float, timeInterval: float
+) -> np.ndarray:
+    """
+    Perform quadrilinear interpolation on a 4D vector field using Numba for acceleration.
+    """
+    # 1. convert_physical_pos_2_grid_pos
+    float_grid_x = (posX - domainMinBoundary[0]) / gridInterval[0] if gridInterval[0] != 0 else 0.0
+    float_grid_y = (posY - domainMinBoundary[1]) / gridInterval[1] if gridInterval[1] != 0 else 0.0
+    float_grid_z = (posZ - domainMinBoundary[2]) / gridInterval[2] if gridInterval[2] != 0 else 0.0
+
+    # 2. getFloatGridTime
+    if timeInterval == 0:
+        float_grid_time = 0.0
+    else:
+        float_grid_time = (time - tmin) / timeInterval
+
+    # Get surrounding time indices
+    t0 = int(np.floor(float_grid_time))
+    t1 = int(np.ceil(float_grid_time))
+    t0 = max(0, min(t0, time_steps - 1))
+    t1 = max(0, min(t1, time_steps - 1))
+
+    # Get vectors at surrounding grid points
+    x0 = int(np.floor(float_grid_x))
+    x1 = int(np.ceil(float_grid_x))
+    y0 = int(np.floor(float_grid_y))
+    y1 = int(np.ceil(float_grid_y))
+    z0 = int(np.floor(float_grid_z))
+    z1 = int(np.ceil(float_grid_z))
+
+    # Clamp to grid boundaries
+    x0 = max(0, min(x0, Xdim - 1))
+    x1 = max(0, min(x1, Xdim - 1))
+    y0 = max(0, min(y0, Ydim - 1))
+    y1 = max(0, min(y1, Ydim - 1))
+    z0 = max(0, min(z0, Zdim - 1))
+    z1 = max(0, min(z1, Zdim - 1))
+
+    # Get interpolation weights
+    wx = float_grid_x - x0
+    wy = float_grid_y - y0
+    wz = float_grid_z - z0
+    wt = float_grid_time - t0
+    
+    # Get vectors at grid points for both time steps, inlined from get_vector_at_grid
+    # field access is field[t, z, y, x, :]
+    v0000 = field_data[t0, z0, y0, x0]
+    v1000 = field_data[t0, z0, y0, x1]
+    v0100 = field_data[t0, z0, y1, x0]
+    v1100 = field_data[t0, z0, y1, x1]
+    v0010 = field_data[t0, z1, y0, x0]
+    v1010 = field_data[t0, z1, y0, x1]
+    v0110 = field_data[t0, z1, y1, x0]
+    v1110 = field_data[t0, z1, y1, x1]
+
+    v0001 = field_data[t1, z0, y0, x0]
+    v1001 = field_data[t1, z0, y0, x1]
+    v0101 = field_data[t1, z0, y1, x0]
+    v1101 = field_data[t1, z0, y1, x1]
+    v0011 = field_data[t1, z1, y0, x0]
+    v1011 = field_data[t1, z1, y0, x1]
+    v0111 = field_data[t1, z1, y1, x0]
+    v1111 = field_data[t1, z1, y1, x1]
+
+    # Trilinear interpolation for t0
+    v00_t0 = v0000 * (1 - wx) + v1000 * wx
+    v10_t0 = v0100 * (1 - wx) + v1100 * wx
+    v01_t0 = v0010 * (1 - wx) + v1010 * wx
+    v11_t0 = v0110 * (1 - wx) + v1110 * wx
+    v0_t0 = v00_t0 * (1 - wy) + v10_t0 * wy
+    v1_t0 = v01_t0 * (1 - wy) + v11_t0 * wy
+    v_t0 = v0_t0 * (1 - wz) + v1_t0 * wz
+
+    # Trilinear interpolation for t1
+    v00_t1 = v0001 * (1 - wx) + v1001 * wx
+    v10_t1 = v0101 * (1 - wx) + v1101 * wx
+    v01_t1 = v0011 * (1 - wx) + v1011 * wx
+    v11_t1 = v0111 * (1 - wx) + v1111 * wx
+    v0_t1 = v00_t1 * (1 - wy) + v10_t1 * wy
+    v1_t1 = v01_t1 * (1 - wy) + v11_t1 * wy
+    v_t1 = v0_t1 * (1 - wz) + v1_t1 * wz
+    
+    # Linear interpolation in time
+    return v_t0 * (1 - wt) + v_t1 * wt
 
 class IVectorField3D(ABC):
     """IVectorField3D is an abstract base class for 3D vector fields with grid discretization.
@@ -21,17 +113,17 @@ class IVectorField3D(ABC):
         self.Ydim = Ydim
         self.Zdim = Zdim
         self.time_steps = timesteps
-        self.domainMinBoundary = domainMinBoundary
-        self.domainMaxBoundary = domainMaxBoundary
+        self.domainMinBoundary = np.array(domainMinBoundary, dtype=np.float32)
+        self.domainMaxBoundary = np.array(domainMaxBoundary, dtype=np.float32)
         
         assert len(domainMinBoundary) == 3, "domainMinBoundary must be a list of length 3"
         assert len(domainMaxBoundary) == 3, "domainMaxBoundary must be a list of length 3"
 
-        self.gridInterval = [
+        self.gridInterval = np.array([
             (self.domainMaxBoundary[0] - self.domainMinBoundary[0]) / (Xdim - 1) if Xdim > 1 else 0,
             (self.domainMaxBoundary[1] - self.domainMinBoundary[1]) / (Ydim - 1) if Ydim > 1 else 0,
             (self.domainMaxBoundary[2] - self.domainMinBoundary[2]) / (Zdim - 1) if Zdim > 1 else 0
-        ]
+        ], dtype=np.float32)
         
         self.tmin = tmin
         self.tmax = tmax
@@ -111,7 +203,7 @@ class UnsteadyVectorField3D(IVectorField3D):
         super(UnsteadyVectorField3D, self).__init__(Xdim, Ydim, Zdim, time_steps,domainMinBoundary, domainMaxBoundary,tmin,tmax)
         self.field = None
         # self.field = torch.zeros(time_steps, Zdim, Ydim, Xdim, 3)
-        assert(time_steps > 1)
+        assert(time_steps >= 1)
 
     def getSlice(self, timeSlice) -> SteadyVectorField3D:
         steady_min_b = self.domainMinBoundary[:3] + [self.getPhysicalTime(timeSlice)]
@@ -124,7 +216,7 @@ class UnsteadyVectorField3D(IVectorField3D):
             else:
                 steadyVectorField3D.field = self.field[timeSlice, :, :, :, :]
         return steadyVectorField3D
-
+    
     def get_vector(self, posX: float, posY: float, posZ: float, time: float) -> np.ndarray:
         """Get interpolated vector at arbitrary position using quadrilinear interpolation.
         
@@ -137,77 +229,16 @@ class UnsteadyVectorField3D(IVectorField3D):
         Returns:
             np.ndarray: 3D vector at specified position
         """
-        # Convert physical coordinates to grid coordinates
-        float_grid_x, float_grid_y, float_grid_z = self.convert_physical_pos_2_grid_pos(posX, posY, posZ)
-        float_grid_time = self.getFloatGridTime(time)
-
-        # Get surrounding time indices
-        t0 = int(np.floor(float_grid_time))
-        t1 = int(np.ceil(float_grid_time))
-        t0 = max(0, min(t0, self.time_steps - 1))
-        t1 = max(0, min(t1, self.time_steps - 1))
-
-        # Get vectors at surrounding grid points
-        x0 = int(np.floor(float_grid_x))
-        x1 = int(np.ceil(float_grid_x))
-        y0 = int(np.floor(float_grid_y))
-        y1 = int(np.ceil(float_grid_y))
-        z0 = int(np.floor(float_grid_z))
-        z1 = int(np.ceil(float_grid_z))
-
-        # Clamp to grid boundaries
-        x0 = max(0, min(x0, self.Xdim - 1))
-        x1 = max(0, min(x1, self.Xdim - 1))
-        y0 = max(0, min(y0, self.Ydim - 1))
-        y1 = max(0, min(y1, self.Ydim - 1))
-        z0 = max(0, min(z0, self.Zdim - 1))
-        z1 = max(0, min(z1, self.Zdim - 1))
-
-        # Get interpolation weights
-        wx = float_grid_x - x0
-        wy = float_grid_y - y0
-        wz = float_grid_z - z0
-        wt = float_grid_time - t0
-        
-        # Get vectors at grid points for both time steps
-        v0000 = self.get_vector_at_grid(x0, y0, z0, t0)
-        v1000 = self.get_vector_at_grid(x1, y0, z0, t0)
-        v0100 = self.get_vector_at_grid(x0, y1, z0, t0)
-        v1100 = self.get_vector_at_grid(x1, y1, z0, t0)
-        v0010 = self.get_vector_at_grid(x0, y0, z1, t0)
-        v1010 = self.get_vector_at_grid(x1, y0, z1, t0)
-        v0110 = self.get_vector_at_grid(x0, y1, z1, t0)
-        v1110 = self.get_vector_at_grid(x1, y1, z1, t0)
-
-        v0001 = self.get_vector_at_grid(x0, y0, z0, t1)
-        v1001 = self.get_vector_at_grid(x1, y0, z0, t1)
-        v0101 = self.get_vector_at_grid(x0, y1, z0, t1)
-        v1101 = self.get_vector_at_grid(x1, y1, z0, t1)
-        v0011 = self.get_vector_at_grid(x0, y0, z1, t1)
-        v1011 = self.get_vector_at_grid(x1, y0, z1, t1)
-        v0111 = self.get_vector_at_grid(x0, y1, z1, t1)
-        v1111 = self.get_vector_at_grid(x1, y1, z1, t1)
-
-        # Trilinear interpolation for t0
-        v00_t0 = v0000 * (1 - wx) + v1000 * wx
-        v10_t0 = v0100 * (1 - wx) + v1100 * wx
-        v01_t0 = v0010 * (1 - wx) + v1010 * wx
-        v11_t0 = v0110 * (1 - wx) + v1110 * wx
-        v0_t0 = v00_t0 * (1 - wy) + v10_t0 * wy
-        v1_t0 = v01_t0 * (1 - wy) + v11_t0 * wy
-        v_t0 = v0_t0 * (1 - wz) + v1_t0 * wz
-
-        # Trilinear interpolation for t1
-        v00_t1 = v0001 * (1 - wx) + v1001 * wx
-        v10_t1 = v0101 * (1 - wx) + v1101 * wx
-        v01_t1 = v0011 * (1 - wx) + v1011 * wx
-        v11_t1 = v0111 * (1 - wx) + v1111 * wx
-        v0_t1 = v00_t1 * (1 - wy) + v10_t1 * wy
-        v1_t1 = v01_t1 * (1 - wy) + v11_t1 * wy
-        v_t1 = v0_t1 * (1 - wz) + v1_t1 * wz
-        
-        # Linear interpolation in time
-        return v_t0 * (1 - wt) + v_t1 * wt
+        field_data = self.field
+        if isinstance(field_data, torch.Tensor):
+            field_data = field_data.detach().cpu().numpy()
+        return _quadrilinear_interpolate_njit(
+            field_data,
+            posX, posY, posZ, time,
+            self.Xdim, self.Ydim, self.Zdim, self.time_steps,
+            self.domainMinBoundary, self.gridInterval,
+            self.tmin, self.timeInterval
+        )
     
     def get_vector_at_grid(self, x: int, y: int, z: int, time: int) -> np.ndarray:
         """Get vector at grid point.
@@ -229,4 +260,7 @@ class UnsteadyVectorField3D(IVectorField3D):
         y = max(0, min(y, self.Ydim-1))
         z = max(0, min(z, self.Zdim-1))
         time = max(0, min(time, self.time_steps-1))
+        
+        if isinstance(self.field, torch.Tensor):
+            return self.field[time, z, y, x, :].detach().cpu().numpy()
         return self.field[time, z, y, x, :]

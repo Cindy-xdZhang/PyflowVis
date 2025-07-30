@@ -161,22 +161,18 @@ class NetCDFLoader:
             if time_axis_name is not None and time_variable_name is not None:
                 total_timesteps =len(dataset.dimensions[time_axis_name]) if time_axis_name is not None else 1
                 # Handle negative indices and validate range
-                if timestep_begin < 0:
-                    timestep_begin = 0
-                if timestep_end < 0:
-                    timestep_end = total_timesteps-1
-
-                if timestep_begin >= total_timesteps:
-                    timestep_begin = total_timesteps-1
-                if timestep_end >= total_timesteps:
-                    timestep_end = total_timesteps-1
+                # Clamp timestep_begin and timestep_end to valid range
+                timestep_begin = max(0, min(timestep_begin, total_timesteps - 1))
+                timestep_end = max(0, min(timestep_end, total_timesteps - 1))
                 if timestep_begin > timestep_end:
                     raise ValueError(f"Invalid time range: begin={timestep_begin}, end={timestep_end}")
                 time_steps = timestep_end - timestep_begin
                 time = dataset.variables[time_variable_name][timestep_begin:timestep_end]
                 tmin, tmax = time.min(), time.max()
             else:
-                 raise ValueError("Could not find time_axis_name in the NetCDF file")
+                #steady field
+                time_steps=1
+                tmin,tmax=0,0
 
 
             # Extract domain boundaries
@@ -186,11 +182,6 @@ class NetCDFLoader:
             domainMinBoundary = [x.min(), y.min(), z.min()]
             domainMaxBoundary = [x.max(), y.max(), z.max()]
 
-
-            vector_field = None
-  
-            time = dataset.variables[time_variable_name][:]
-            tmin, tmax = time.min(), time.max()
             # Create UnsteadyVectorField3D instance
             vector_field = UnsteadyVectorField3D(Xdim, Ydim, Zdim, time_steps, domainMinBoundary, domainMaxBoundary,tmin,tmax)
     
@@ -204,12 +195,20 @@ class NetCDFLoader:
             ]
    
             field_data = None
-            for names in component_names:
-                if all(name in dataset.variables for name in names):
-                    field_data = np.zeros((time_steps, Zdim, Ydim, Xdim, 3))
-                    for i, var_name in enumerate(names):
-                        field_data[:, :, :, :,i] =dataset.variables[var_name][timestep_begin:timestep_end]
-                    break
+            if time_steps > 1:
+                for names in component_names:
+                    if all(name in dataset.variables for name in names):
+                        field_data = np.zeros((time_steps, Zdim, Ydim, Xdim, 3))
+                        for i, var_name in enumerate(names):
+                            field_data[:, :, :, :,i] =dataset.variables[var_name][timestep_begin:timestep_end]
+                        break
+            else:
+                for names in component_names:
+                    if all(name in dataset.variables for name in names):
+                        field_data = np.zeros((1,Zdim, Ydim, Xdim, 3))
+                        for i, var_name in enumerate(names):
+                            field_data[0,  :, :, :,i] =dataset.variables[var_name][:]
+                        break
 
             if field_data is None:
                 raise ValueError("Could not find vector components in the NetCDF file")
