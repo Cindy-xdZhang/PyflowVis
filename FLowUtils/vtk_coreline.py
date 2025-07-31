@@ -10,16 +10,10 @@ from .VectorField3d import UnsteadyVectorField3D
 
 
 
-
 #implement the coreline of the vector field 2d and 3d
 
 
 
-
-
-
-# Assuming your vector field classes are available
-# from your_module import SteadyVectorField2D, UnsteadyVectorField2D, SteadyVectorField3D, UnsteadyVectorField3D
 
 def create_vtk_image_data(field_data, domain_min, domain_max):
     """
@@ -92,7 +86,6 @@ def create_vtk_image_data(field_data, domain_min, domain_max):
     image_data.GetPointData().SetVectors(vectors_vtk)
 
     return image_data
-
 
 
 
@@ -388,65 +381,6 @@ def extract_vortex_corelines_2d_unsteady(vector_field, method='jacobian', thresh
 
 
 
-
-
-
-
-def extract_corelines_3d_unsteady(vector_field, seed_points, time_slice):
-    """
-    Extracts corelines from an unsteady 3D vector field at a specific time slice.
-
-    Args:
-        vector_field (UnsteadyVectorField3D): The input unsteady 3D vector field.
-        seed_points (list of tuples): List of (x, y, z) seed point coordinates.
-        time_slice (int): The time slice to extract corelines from.
-
-    Returns:
-        vtk.vtkPolyData: The extracted streamlines at the specified time.
-    """
-    # --- 1. Prepare VTK Data ---
-    if not hasattr(vector_field, 'getDataAsNumpy'):
-        raise ValueError("Vector field must have getDataAsNumpy method")
-    
-    field_data = vector_field.getDataAsNumpy()
-    
-    if len(field_data.shape) != 5:  # (Time, Z, Y, X, 3)
-        raise ValueError("Expected 5D field data for unsteady 3D field")
-    
-    # Extract the specific time slice
-    field_data_slice = field_data[time_slice]  # Shape: (Z, Y, X, 3)
-    
-    vtk_data = create_vtk_image_data(
-        field_data_slice,
-        vector_field.domainMinBoundary,
-        vector_field.domainMaxBoundary
-    )
-
-    # --- 2. Setup VTK Streamline Pipeline ---
-    # Seed points
-    seed_points_vtk = vtk.vtkPoints()
-    for point in seed_points:
-        seed_points_vtk.InsertNextPoint(point[0], point[1], point[2])
-
-    seed_polydata = vtk.vtkPolyData()
-    seed_polydata.SetPoints(seed_points_vtk)
-
-    # Streamline tracer
-    stream_tracer = vtk.vtkStreamTracer()
-    stream_tracer.SetInputData(vtk_data)
-    stream_tracer.SetSourceData(seed_polydata)
-    stream_tracer.SetIntegrationDirectionToBoth()
-    stream_tracer.SetMaximumPropagation(200.0)
-    stream_tracer.SetInitialIntegrationStep(0.05)
-    stream_tracer.SetIntegratorTypeToRungeKutta45()
-    stream_tracer.SetIntegrationStepUnit(2)  # CELL_LENGTH_UNIT
-
-    # --- 3. Execute and Return ---
-    stream_tracer.Update()
-    streamlines = stream_tracer.GetOutput()
-
-    return streamlines
-
 def vtk_polydata_to_points(vtk_polydata):
     """
     Converts VTK polydata streamlines to a numpy array of points.
@@ -492,46 +426,138 @@ def vtk_polydata_to_separate_curves(vtk_polydata):
     # Iterate through each cell (line) in the polydata
     for i in range(vtk_polydata.GetNumberOfCells()):
         cell = vtk_polydata.GetCell(i)
-        if cell.GetCellType() == vtk.VTK_LINE:
-            # Get point IDs for this line
-            point_ids = cell.GetPointIds()
-            num_points_in_line = point_ids.GetNumberOfIds()
-            
-            # Extract points for this line
-            line_points = np.zeros((num_points_in_line, 3), dtype=np.float32)
-            for j in range(num_points_in_line):
-                point_id = point_ids.GetId(j)
-                point = points.GetPoint(point_id)
-                line_points[j] = point
-            
-            curves.append(line_points)
+        point_ids = cell.GetPointIds()
+        num_points_in_line = point_ids.GetNumberOfIds()
+        
+        # Extract points for this line
+        line_points = np.zeros((num_points_in_line, 3), dtype=np.float32)
+        for j in range(num_points_in_line):
+            point_id = point_ids.GetId(j)
+            point = points.GetPoint(point_id)
+            line_points[j] = point
+        
+        curves.append(line_points)
     
     return curves
 
 
-# --- Example Usage for Unsteady Vector Fields ---
 
-# --- 2D Unsteady Examples ---
-# my_unsteady_2d_field = UnsteadyVectorField2D(Xdim=50, Ydim=50, domainMinBoundary=[-1, -1], domainMaxBoundary=[1, 1], time_steps=100, tmin=0, tmax=2*np.pi)
-# # ... populate my_unsteady_2d_field.field with data ...
-# seeds_2d = [(0, 0), (1, 1), (-1, 0.5)] # List of (x,y) tuples
+def _merge_close_corelines(corelines, merge_threshold):
+    """
+    Merges corelines that are close to each other at their endpoints.
+    This is a Python implementation of the provided C++ code.
+    """
+    if not corelines:
+        return []
 
-# Extract streamlines at a specific time slice
-# streamlines_at_time = extract_corelines_2d_unsteady(my_unsteady_2d_field, seeds_2d, time_slice=50)
+    merged_corelines = []
+    num_corelines = len(corelines)
+    merged = [False] * num_corelines
 
-# Extract spacetime corelines (3D trajectories through space and time)
-# Option 1: With specific seed points
-# spacetime_corelines = extract_corelines_2d_unsteady_spacetime(my_unsteady_2d_field, seeds_2d)
+    for i in range(num_corelines):
+        if merged[i]:
+            continue
 
-# Option 2: Without seed points (uses uniform grid)
-# spacetime_corelines = extract_corelines_2d_unsteady_spacetime(my_unsteady_2d_field)
-# This gives you 3D curves where z-axis represents time
+        new_coreline = corelines[i].copy()
 
-# --- 3D Unsteady Examples ---
-# my_unsteady_3d_field = UnsteadyVectorField3D(Xdim=30, Ydim=30, Zdim=30, time_steps=100, tmin=0, tmax=2*np.pi, ...)
-# # ... populate my_unsteady_3d_field.field with data ...
-# seeds_3d = [(0, 0, 0), (1, 1, 1)] # List of (x,y,z) tuples
+        for j in range(num_corelines):
+            if i == j or merged[j]:
+                continue
 
-# Extract streamlines at a specific time slice
-# streamlines_at_time = extract_corelines_3d_unsteady(my_unsteady_3d_field, seeds_3d, time_slice=50)
+            start1 = new_coreline[0]
+            end1 = new_coreline[-1]
+            start2 = corelines[j][0]
+            end2 = corelines[j][-1]
+            
+            other_coreline = corelines[j]
 
+            # dist1: A_end -> B_start
+            if np.linalg.norm(end1 - start2) < merge_threshold:
+                new_coreline = np.vstack([new_coreline, other_coreline])
+                merged[j] = True
+            # dist2: A_start -> B_end
+            elif np.linalg.norm(start1 - end2) < merge_threshold:
+                new_coreline = np.vstack([other_coreline, new_coreline])
+                merged[j] = True
+            # dist3: A_start -> B_start
+            elif np.linalg.norm(start1 - start2) < merge_threshold:
+                new_coreline = np.vstack([np.flipud(new_coreline), other_coreline])
+                merged[j] = True
+            # dist4: A_end -> B_end
+            elif np.linalg.norm(end1 - end2) < merge_threshold:
+                new_coreline = np.vstack([new_coreline, np.flipud(other_coreline)])
+                merged[j] = True
+        
+        merged_corelines.append(new_coreline)
+    return merged_corelines
+
+
+def extract_vortex_corelines_3d_vtk(vector_field, time_slice:int, length_filter=10, merge_threshold=0.2):
+    """
+    Extracts vortex corelines from a 3D vector field at a specific time slice using VTK's VortexCore filter.
+    This function is a Python implementation of the provided C++ reference code.
+
+    Args:
+        vector_field (UnsteadyVectorField3D): The input unsteady 3D vector field.
+        time_slice (int): The time slice to extract corelines from.
+        length_filter (int): Minimum number of points for a coreline to be kept.
+        merge_threshold (float): The distance threshold for merging close corelines.
+
+    Returns:
+        list[np.ndarray]: A list of numpy arrays, where each array is a vortex coreline.
+    """
+    # 1. Prepare VTK Image Data from the vector field for the given time slice
+    if not hasattr(vector_field, 'getDataAsNumpy'):
+        raise ValueError("Vector field must have getDataAsNumpy method")
+    
+    field_data = vector_field.getDataAsNumpy()
+    
+    if len(field_data.shape) != 5:  # (Time, Z, Y, X, 3)
+        raise ValueError("Expected 5D field data for unsteady 3D field")
+    time_slice = max(0, min(int(time_slice), field_data.shape[0] - 1))
+    field_data_slice = field_data[time_slice]
+    
+    vtk_image_data = create_vtk_image_data(
+        field_data_slice,
+        vector_field.domainMinBoundary,
+        vector_field.domainMaxBoundary
+    )
+    vtk_image_data.GetPointData().SetActiveVectors("Vectors")
+
+    # 2. Tetrahedralize the data
+    tetrahedralizer = vtk.vtkDataSetTriangleFilter()
+    tetrahedralizer.SetInputData(vtk_image_data)
+    tetrahedralizer.Update()
+    tetrahedralized_data = tetrahedralizer.GetOutput()
+
+    # 3. Apply vtkVortexCore filter
+    vortex_core_filter = vtk.vtkVortexCore()
+    vortex_core_filter.SetInputData(tetrahedralized_data)
+    vortex_core_filter.SetInputArrayToProcess(0, 0, 0, vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, "Vectors")
+    vortex_core_filter.Update()
+
+    # 4. Use vtkStripper to convert triangle strips to polylines
+    stripper = vtk.vtkStripper()
+    stripper.SetInputConnection(vortex_core_filter.GetOutputPort())
+    stripper.Update()
+    
+    poly_data = stripper.GetOutput()
+
+    if poly_data.GetNumberOfLines() <= 0:
+        print("Warning: vtkVortexCore did not produce any lines.")
+        return []
+
+    # 5. Extract polylines from vtkPolyData
+    raw_corelines = vtk_polydata_to_separate_curves(poly_data)
+
+    # 6. Filter corelines by length
+    corelines = [line for line in raw_corelines if len(line) >= length_filter]
+
+    if not corelines:
+        print("Warning: No corelines passed the length filter.")
+        return []
+
+    # 7. Merge close corelines
+    merged_corelines = _merge_close_corelines(corelines, merge_threshold)
+
+    return merged_corelines

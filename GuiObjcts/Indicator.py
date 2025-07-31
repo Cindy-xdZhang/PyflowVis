@@ -6,21 +6,43 @@ from OpenGL.GL import *
 from OpenGL.GLU import gluUnProject
 from .VisualizationEngine import getEngine
 
-# def screen_to_world(x, y, width, height, modelview, projection, viewport):    
-#     y = height - y  # OpenGL's y axis  is reversed of pygame's y axis
-#     z = gl.glReadPixels(x, y, 1, 1, gl.GL_DEPTH_COMPONENT, gl.GL_FLOAT)
-#     return gluUnProject(x, y, z, modelview, projection, viewport)
+def manual_gluUnProject(winX, winY, winZ, modelview, projection, viewport):
+    """
+    Manual implementation of gluUnProject function to convert screen coordinates to world coordinates,
+    used to solve the inconsistency between glm matrices and OpenGL matrices
+    """
+    # Convert screen coordinates to normalized device coordinates (NDC)
+    # OpenGL's Y axis is opposite to screen coordinates, need to flip
+    x = (winX - viewport[0]) / viewport[2] * 2.0 - 1.0
+    y = (winY - viewport[1]) / viewport[3] * 2.0 - 1.0
+    z = 2.0 * winZ - 1.0
+    # Create homogeneous coordinates
+    point = glm.vec4(x, y, z, 1.0)
+    
+    # Calculate the inverse of MVP matrix
+    # Note: OpenGL uses column-major order, so matrix multiplication order is projection * modelview
+    mvp = projection * modelview
+    mvp_inv = glm.inverse(mvp)
+    
+    # Apply inverse transformation
+    world_point = mvp_inv * point
+    # Return world coordinates (first three components), perform perspective division
+    return np.array([world_point.x / world_point.w, 
+                    world_point.y / world_point.w, 
+                    world_point.z / world_point.w])
 
 def screen_to_world_ray(x, y, modelview, projection)->tuple[np.ndarray[np.float32,3],np.ndarray[np.float32,3]]:
-    # 获取OpenGL当前矩阵和视口
-    # modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
-    # projection = glGetDoublev(GL_PROJECTION_MATRIX)
-    modelview = np.array(modelview.to_list(), dtype=np.float64)
-    projection = np.array(projection.to_list(), dtype=np.float64)
+    # Use glm matrices directly, don't convert to NumPy
     viewport = glGetIntegerv(GL_VIEWPORT)
     y_opengl = viewport[3] - y - 1
-    near = gluUnProject(x, y_opengl, 0.0, modelview, projection, viewport)
-    far = gluUnProject(x, y_opengl, 1.0, modelview, projection, viewport)
+    
+    # Use manually implemented gluUnProject
+    # 0.0 = near clipping plane (in front of camera)
+    # 1.0 = far clipping plane (behind camera)
+    # These two points define the ray starting from the camera
+    near = manual_gluUnProject(x, y_opengl, 0.0, modelview, projection, viewport)
+    far = manual_gluUnProject(x, y_opengl, 1.0, modelview, projection, viewport)
+    
     ray_origin = np.array(near)
     ray_dir = np.array(far) - np.array(near)
     ray_dir = ray_dir / np.linalg.norm(ray_dir)

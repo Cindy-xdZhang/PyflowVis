@@ -7,6 +7,14 @@ from .Object import getScene
 from FLowUtils.vtk_coreline import *
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 
+#enum for instance type
+InstanceTypes=[
+     "curve_2D", #curves that will uplift by time
+     "curve_3D", #curves that will not  uplift by time
+     "surface" #surface that will not uplift by time
+ ]
+
+
 
 class GeometryRenderObject(VertexArrayObject):
     """
@@ -50,6 +58,7 @@ class GeometryRenderObject(VertexArrayObject):
         self.create_variable("visible", True, True,True)
         self.create_variable("coreline_method", ["ivd","jacobian","q_criterion","simple"], True)
         self.create_variable("coreline_threshold", 0.1, True)
+        self.create_variable("coreline_length_filter", 10, True)
 
         self.addAction("add curve",lambda obj:obj.add_curve("test",np.array([[-1,0,0], 
                                                                               [0.05,0.00,0], 
@@ -81,7 +90,45 @@ class GeometryRenderObject(VertexArrayObject):
             else:
                 print("No vortex corelines found with current parameters")
         
+        def extract_coreline3d_vtk(obj:GeometryRenderObject) -> None:
+            """extract coreline from active field"""
+            fieldname=self.actFieldObject.getActiveFieldName()
+            time=self.actFieldObject.time()
+            vector_field:UnsteadyVectorField3D = self.actFieldObject.getActiveField()  
+            if vector_field is None:
+                return
+            lengthFilter=obj.getValue("coreline_length_filter")
+            threshold=obj.getValue("coreline_threshold")
+            method='vtk'
+            resultName=f"vortex_coreline__{fieldname}_{method}"
+            if resultName in obj.cached_curves:
+                del obj.cached_curves[resultName]
+            curves = extract_vortex_corelines_3d_vtk(vector_field, time, lengthFilter, threshold)
+            if curves:
+                obj.add_curve(f"vortex_coreline3d__{fieldname}_{method}", curves,segments=self.getValue("segments"),instanceType="curve_3D")
+            else:
+                print("No vortex corelines found with current parameters")
+
+        def extract_coreline3d_variantional(obj:GeometryRenderObject) -> None:
+            """extract coreline from active field"""
+            fieldname=self.actFieldObject.getActiveFieldName()
+            time=self.actFieldObject.time()
+            vector_field:UnsteadyVectorField3D = self.actFieldObject.getActiveField()  
+            if vector_field is None:
+                return
+            lengthFilter=obj.getValue("coreline_length_filter") 
+            threshold=obj.getValue("coreline_threshold")
+            method='variantional'
+            resultName=f"vortex_coreline__{fieldname}_{method}"
+            if resultName in obj.cached_curves:
+                del obj.cached_curves[resultName]
+            curves = extract_vortex_corelines_3d_variantional(vector_field, time, lengthFilter, threshold)
+            if curves:
+                obj.add_curve(f"vortex_coreline3d__{fieldname}_{method}", curves,segments=self.getValue("segments"),instanceType="curve_3D")    
+
         self.addAction("extract coreline",lambda obj:extract_coreline2d_vtk(obj))
+        self.addAction("extract coreline3d",lambda obj:extract_coreline3d_vtk(obj))
+        self.addAction("extract coreline3d_variantional",lambda obj:extract_coreline3d_variantional(obj))
 
 
         def updateGeometrycb(obj:GeometryRenderObject) -> None:
@@ -109,7 +156,7 @@ class GeometryRenderObject(VertexArrayObject):
         self.flowlineObject=self.parentScene.getObject("flowline") if self.parentScene.hasObject("flowline") else None
 
     
-    def add_curve(self, name, points, segments=8):
+    def add_curve(self, name, points, segments=8,instanceType:str="curve_2D"):
         """
         Add one or more curves as polylines of cylinders to the cache and commit geometry to VAOs.
         Args:
@@ -130,6 +177,11 @@ class GeometryRenderObject(VertexArrayObject):
 
         vao = VertexArrayObject(result_name)
         vao.create_variable("color", self.getValue("color"), False, False)
+
+        # Convert instanceType from string to int index
+        instanceType_int = InstanceTypes.index(instanceType)
+        vao.create_variable("instanceType", instanceType_int, False, False)
+        
         radius=self.getValue("linewidth")
         for curve_idx, curve_points in enumerate(points):
             curve_points = np.array(curve_points, dtype=np.float32)

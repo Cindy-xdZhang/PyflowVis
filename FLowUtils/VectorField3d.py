@@ -217,6 +217,13 @@ class UnsteadyVectorField3D(IVectorField3D):
                 steadyVectorField3D.field = self.field[timeSlice, :, :, :, :]
         return steadyVectorField3D
     
+    def getDataAsNumpy(self):
+        if isinstance(self.field, torch.Tensor):
+            fielddata = self.field.detach().cpu().numpy()
+        else:
+            fielddata = self.field
+        return fielddata    
+    
     def get_vector(self, posX: float, posY: float, posZ: float, time: float) -> np.ndarray:
         """Get interpolated vector at arbitrary position using quadrilinear interpolation.
         
