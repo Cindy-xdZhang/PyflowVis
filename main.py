@@ -162,13 +162,13 @@ def main():
     engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
 
-    # vectorField2d= rotation_four_center((256,256),128)
-    # actFieldWidget.insertField("rfc",vectorField2d)
+    vectorField2d= rotation_four_center((256,256),128)
+    actFieldWidget.insertField("rfc",vectorField2d)
 
-    flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
-    cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
-    vectorField3d= NetCDFLoader.load_vector_field3d(cylider_netCDF,64);
-    actFieldWidget.insertField("tornado3d",vectorField3d)
+    # flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
+    # cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
+    # vectorField3d= NetCDFLoader.load_vector_field3d(cylider_netCDF,64);
+    # actFieldWidget.insertField("tornado3d",vectorField3d)
 
 
     # args=config['training']

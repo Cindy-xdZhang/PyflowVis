@@ -44,6 +44,19 @@ def pathline_integration_one_direction_2D(
             v3 = vectorField.get_vector(pos_3d[0] + 0.5 * stepSize * v2[0], pos_3d[1] + 0.5 * stepSize * v2[1], t + 0.5 * stepSize)
             v4 = vectorField.get_vector(pos_3d[0] + stepSize * v3[0], pos_3d[1] + stepSize * v3[1], t + stepSize)
             delta = (stepSize / 6.0) * (v1 + 2 * v2 + 2 * v3 + v4)
+        elif NumericalMethod == "RK5":
+            k1 = vectorField.get_vector(pos_3d[0], pos_3d[1], t)
+            p2 = pos_3d[:2] + stepSize * (1/4 * k1)
+            k2 = vectorField.get_vector(p2[0], p2[1], t + 1/4 * stepSize)
+            p3 = pos_3d[:2] + stepSize * (3/32 * k1 + 9/32 * k2)
+            k3 = vectorField.get_vector(p3[0], p3[1], t + 3/8 * stepSize)
+            p4 = pos_3d[:2] + stepSize * (1932/2197 * k1 - 7200/2197 * k2 + 7296/2197 * k3)
+            k4 = vectorField.get_vector(p4[0], p4[1], t + 12/13 * stepSize)
+            p5 = pos_3d[:2] + stepSize * (439/216 * k1 - 8 * k2 + 3680/513 * k3 - 845/4104 * k4)
+            k5 = vectorField.get_vector(p5[0], p5[1], t + 1 * stepSize)
+            p6 = pos_3d[:2] + stepSize * (-8/27 * k1 + 2 * k2 - 3544/2565 * k3 + 1859/4104 * k4 - 11/40 * k5)
+            k6 = vectorField.get_vector(p6[0], p6[1], t + 1/2 * stepSize)
+            delta = stepSize * (16/135 * k1 + 6656/12825 * k3 + 28561/56430 * k4 - 9/50 * k5 + 2/55 * k6)
         elif NumericalMethod == "Euler":
             v = vectorField.get_vector(pos_3d[0], pos_3d[1], t)
             delta = stepSize * v
@@ -91,6 +104,19 @@ def pathline_integration_one_direction_3D(
             v3 = vectorField.get_vector(pos_3d[0] + 0.5 * stepSize * v2[0], pos_3d[1] + 0.5 * stepSize * v2[1],pos_3d[2] + 0.5 * stepSize * v2[2], t + 0.5 * stepSize)
             v4 = vectorField.get_vector(pos_3d[0] + stepSize * v3[0], pos_3d[1] + stepSize * v3[1],pos_3d[2] + stepSize * v3[2], t + stepSize)
             delta = (stepSize / 6.0) * (v1 + 2 * v2 + 2 * v3 + v4)
+        elif NumericalMethod == "RK5":
+            k1 = vectorField.get_vector(pos_3d[0], pos_3d[1], pos_3d[2], t)
+            p2 = pos_3d + stepSize * (1/4 * k1)
+            k2 = vectorField.get_vector(p2[0], p2[1], p2[2], t + 1/4 * stepSize)
+            p3 = pos_3d + stepSize * (3/32 * k1 + 9/32 * k2)
+            k3 = vectorField.get_vector(p3[0], p3[1], p3[2], t + 3/8 * stepSize)
+            p4 = pos_3d + stepSize * (1932/2197 * k1 - 7200/2197 * k2 + 7296/2197 * k3)
+            k4 = vectorField.get_vector(p4[0], p4[1], p4[2], t + 12/13 * stepSize)
+            p5 = pos_3d + stepSize * (439/216 * k1 - 8 * k2 + 3680/513 * k3 - 845/4104 * k4)
+            k5 = vectorField.get_vector(p5[0], p5[1], p5[2], t + 1 * stepSize)
+            p6 = pos_3d + stepSize * (-8/27 * k1 + 2 * k2 - 3544/2565 * k3 + 1859/4104 * k4 - 11/40 * k5)
+            k6 = vectorField.get_vector(p6[0], p6[1], p6[2], t + 1/2 * stepSize)
+            delta = stepSize * (16/135 * k1 + 6656/12825 * k3 + 28561/56430 * k4 - 9/50 * k5 + 2/55 * k6)
         elif NumericalMethod == "Euler":
             v = vectorField.get_vector(pos_3d[0], pos_3d[1],pos_3d[2], t)
             delta = stepSize * v
@@ -138,6 +164,20 @@ def streamline_integration_one_direction_2D(
             v3 = vectorField.get_vector(pos[0] + 0.5 * abs_step_size * v2[0], pos[1] + 0.5 * abs_step_size * v2[1], time)
             v4 = vectorField.get_vector(pos[0] + abs_step_size * v3[0], pos[1] + abs_step_size * v3[1], time)
             delta = (abs_step_size / 6.0) * (v1 + 2 * v2 + 2 * v3 + v4)
+        elif NumericalMethod == "RK5":
+            t = time
+            k1 = vectorField.get_vector(pos[0], pos[1], t)
+            p2 = pos + abs_step_size * (1/4 * k1)
+            k2 = vectorField.get_vector(p2[0], p2[1], t)
+            p3 = pos + abs_step_size * (3/32 * k1 + 9/32 * k2)
+            k3 = vectorField.get_vector(p3[0], p3[1], t)
+            p4 = pos + abs_step_size * (1932/2197 * k1 - 7200/2197 * k2 + 7296/2197 * k3)
+            k4 = vectorField.get_vector(p4[0], p4[1], t)
+            p5 = pos + abs_step_size * (439/216 * k1 - 8 * k2 + 3680/513 * k3 - 845/4104 * k4)
+            k5 = vectorField.get_vector(p5[0], p5[1], t)
+            p6 = pos + abs_step_size * (-8/27 * k1 + 2 * k2 - 3544/2565 * k3 + 1859/4104 * k4 - 11/40 * k5)
+            k6 = vectorField.get_vector(p6[0], p6[1], t)
+            delta = abs_step_size * (16/135 * k1 + 6656/12825 * k3 + 28561/56430 * k4 - 9/50 * k5 + 2/55 * k6)
         elif NumericalMethod == "Euler":
             v = vectorField.get_vector(pos[0], pos[1], time)
             delta = abs_step_size * v
@@ -185,6 +225,20 @@ def streamline_integration_one_direction_3D(
             v4_pos = pos_3d + abs_step_size * v3
             v4 = vectorField.get_vector(v4_pos[0], v4_pos[1], v4_pos[2], time)
             delta = (abs_step_size / 6.0) * (v1 + 2 * v2 + 2 * v3 + v4)
+        elif NumericalMethod == "RK5":
+            t = time
+            k1 = vectorField.get_vector(pos_3d[0], pos_3d[1], pos_3d[2], t)
+            p2 = pos_3d + abs_step_size * (1/4 * k1)
+            k2 = vectorField.get_vector(p2[0], p2[1], p2[2], t)
+            p3 = pos_3d + abs_step_size * (3/32 * k1 + 9/32 * k2)
+            k3 = vectorField.get_vector(p3[0], p3[1], p3[2], t)
+            p4 = pos_3d + abs_step_size * (1932/2197 * k1 - 7200/2197 * k2 + 7296/2197 * k3)
+            k4 = vectorField.get_vector(p4[0], p4[1], p4[2], t)
+            p5 = pos_3d + abs_step_size * (439/216 * k1 - 8 * k2 + 3680/513 * k3 - 845/4104 * k4)
+            k5 = vectorField.get_vector(p5[0], p5[1], p5[2], t)
+            p6 = pos_3d + abs_step_size * (-8/27 * k1 + 2 * k2 - 3544/2565 * k3 + 1859/4104 * k4 - 11/40 * k5)
+            k6 = vectorField.get_vector(p6[0], p6[1], p6[2], t)
+            delta = abs_step_size * (16/135 * k1 + 6656/12825 * k3 + 28561/56430 * k4 - 9/50 * k5 + 2/55 * k6)
         elif NumericalMethod == "Euler":
             v = vectorField.get_vector(pos_3d[0], pos_3d[1], pos_3d[2], time)
             delta = abs_step_size * v
@@ -222,6 +276,13 @@ def compute_streamline_3D(args):
     return full_path
 
 
+
+
+
+
+
+
+
 class FlowLineObject(Object):
     def __init__(self):
         super().__init__("flowline")
@@ -235,29 +296,89 @@ class FlowLineObject(Object):
         
         self.__initDynamicTypeGLContext__()
         #  material
-        self.create_variable("modelMat",np.eye(4,dtype=np.float32),False)
+        self.create_variable("modelMat",np.eye(4,dtype=np.float32),False,False)
         self.material = Material("flowlineMaterial",  "flowlineMat",texture0="builtIn")
         self.setMaterial(self.material)
 
-        self.create_variable("streamline_active",True)
-        self.create_variable("pathline_active",True)
-        self.create_variable_gui("lineWeight",0.1,True, {'widget': 'slider_float', 'min': 0.0, 'max': 5.0})
-        self.create_variable("zOffset", 0.0,True)
-        self.create_variable_gui("uplifting",0.1,True, {'widget': 'slider_float', 'min': 0.0, 'max': 5.0})
-        self.create_variable("colorMap",self.engine.getBuiltInTextureNames(),True)
-        self.create_variable("maxIteration", 5000,True)
-        self.create_variable("integrator", "RK4",True)#euler,rk4
-        self.create_variable("stepSize", 0.01  ,True)
-        # self.create_variable("flowlineGroupID", self.flowlineGroupID)
+
         def dirtyCallBack(obj):
             if self.getValue("pathline_active"):
                 setattr(self, "pathline_dirty", True)
             if self.getValue("streamline_active"):
                     setattr(self, "streamline_dirty", True)
-        
+
+        self.create_variable("streamline_active",True,True)
+        self.create_variable("pathline_active",True,True)
+        self.create_variable_gui("lineWeight",0.1,True, {'widget': 'slider_float', 'min': 0.0, 'max': 5.0})
+        self.create_variable("zOffset", 0.0,True)
+        self.create_variable_gui("uplifting",0.1,True, {'widget': 'slider_float', 'min': 0.0, 'max': 5.0})
+        self.create_variable("colorMap",self.engine.getBuiltInTextureNames(),True)
+        self.create_variable("maxIteration", 5000,True)
+
+        self.create_variable_callback("integrator", ["RK4","Euler","RK5","dopri5","dopri8","bosh3","fehlberg2","adaptive_heun"],dirtyCallBack,True)#euler,rk4
+        #neural ODE solver method:
+        # dopri8 Runge-Kutta of order 8 of Dormand-Prince-Shampine.
+        # dopri5 Runge-Kutta of order 5 of Dormand-Prince-Shampine [default].
+        # bosh3 Runge-Kutta of order 3 of Bogacki-Shampine.
+        # fehlberg2 Runge-Kutta-Fehlberg of order 2.
+        # adaptive_heun Runge-Kutta of order 2.
+        # https://github.com/rtqichen/torchdiffeq
+
+        self.create_variable_callback("stepSize", 0.01 ,dirtyCallBack,True)
         getEngine().eventRegister.registerChannelEvent("seeding_changed", lambda : dirtyCallBack(self))
 
+        
 
+        def pathline_integrate_torch_action():
+            from FLowUtils.neuralVectorFieldODE import integrate_pathline2D_torch,UnsteadyVectorField2D_Torch
+            actFieldWidget = self.parentScene.getObject("ActiveField")
+            time_current = actFieldWidget.time()
+            vector_field:UnsteadyVectorField2D = actFieldWidget.getActiveField()
+            if vector_field is None:
+                return
+            self.indicatorObject=self.parentScene.getObject("indicator") if self.parentScene.hasObject("indicator") else None
+            if self.indicatorObject is None:
+                return
+            
+            seeds_data = self.indicatorObject.getValue("SeedingGroup0")
+            if not seeds_data:
+                self.erase()
+                return
+
+            start_positions = np.array([p[0][:2] for p in seeds_data], dtype=np.float32)
+
+            vf_torch = UnsteadyVectorField2D_Torch(
+                data_tensor=torch.from_numpy(vector_field.getDataAsNumpy()).float(),
+                domain_min=vector_field.domainMinBoundary,
+                domain_max=vector_field.domainMaxBoundary,
+                t_min=vector_field.tmin,
+                t_max=vector_field.tmax
+            )
+            
+            time_min = vector_field.getMinTime()
+            time_max = vector_field.getMaxTime()
+            step_size = self.getValue("stepSize")
+            method = self.getOptionValue("integrator")
+            if method not in ["dopri5","dopri8","bosh3","fehlberg2","adaptive_heun"]:
+                method = "dopri5"
+
+            forward_cache = integrate_pathline2D_torch(
+                vf_torch, start_positions, time_current, time_max, step_size, method
+            )
+            backward_cache = integrate_pathline2D_torch(
+                vf_torch, start_positions, time_current, time_min, step_size, method
+            )
+
+            pathline_cache = []
+            for i in range(len(start_positions)):
+                bwd_path = backward_cache[i][::-1]
+                fwd_path = forward_cache[i][1:]
+                full_path = bwd_path + fwd_path
+                pathline_cache.append(full_path)
+                
+            self.MappingFlowlineAsRenderingVAO(pathline_cache)
+            self.pathline_dirty = False
+        self.addAction("pathline_integrate_torch", pathline_integrate_torch_action)
 
     def setMaterial(self,material) -> None:
         self.material=material
@@ -376,28 +497,31 @@ class FlowLineObject(Object):
         if vector_field is None:
             return
 
-        
-        seeds=self.indicatorObject.getValue("SeedingGroup0") # [(pos3D, time), ...]
-        number_of_pathlines = len(seeds)
+        method = self.getOptionValue("integrator")
+        if method in ["dopri5","dopri8","bosh3","fehlberg2","adaptive_heun"]:
+          #callNeuralODESolver
+            self.runAction("pathline_integrate_torch")
+        else:
+            #call my classical ODE solver
+            seeds=self.indicatorObject.getValue("SeedingGroup0") # [(pos3D, time), ...]
+            number_of_pathlines = len(seeds)
 
-        min_time = vector_field.getMinTime()
-        max_time = vector_field.getMaxTime()
-        #get integration and rendering paramter from gui
-        step_size=self.getValue("stepSize")
-        max_iteration = self.getValue("maxIteration")
-        method= self.getValue("integrator")
+            min_time = vector_field.getMinTime()
+            max_time = vector_field.getMaxTime()
+            #get integration and rendering paramter from gui
+            step_size=self.getValue("stepSize")
+            max_iteration = self.getValue("maxIteration")
+            args_list = [
+                    (vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method)
+                    for pos3d, t0 in seeds
+                ]
+            if vector_field.getDim()==2:
+                self.pathline_cache = list(map(compute_pathline_2D, args_list))
+            elif vector_field.getDim()==3:
+                self.pathline_cache = list(map(compute_pathline_3D, args_list))
 
-        args_list = [
-                (vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method)
-                for pos3d, t0 in seeds
-            ]
-        if vector_field.getDim()==2:
-            self.pathline_cache = list(map(compute_pathline_2D, args_list))
-        elif vector_field.getDim()==3:
-            self.pathline_cache = list(map(compute_pathline_3D, args_list))
-
-        self.MappingFlowlineAsRenderingVAO(self.pathline_cache)
-        self.pathline_dirty = False
+            self.MappingFlowlineAsRenderingVAO(self.pathline_cache)
+            self.pathline_dirty = False
 
 
 
@@ -438,28 +562,53 @@ class FlowLineObject(Object):
         pathline_sizes = []
         offset_counter = 0
         pathline_vertices = []
-        
-        for path in pathline_cache:
-            # Skip empty pathlines
-            if not path or len(path) < 2:
-                continue
-            # Duplicate the first and last vertex for adjacency
-            first_vertex = path[0]
-            last_vertex = path[-1]
-            # Build the expanded path: [first, ...all..., last]
-            expanded_path = [first_vertex] + path + [last_vertex]
-            # Record offset and size
-            pathline_offset_indices.append(offset_counter)
-            size = len(expanded_path)
-            pathline_sizes.append(size)
-            offset_counter += size
-            # Add vertices
-            for pos3d, t in expanded_path:
-                attrib0_time = (t - min_time) * inverse_time_range
-                pathline_vertices.append([
-                    pos3d[0], pos3d[1], pos3d[2],
-                    attrib0_time, 0.0
-                ])
+        posIs3d=False
+        if pathline_cache[0][0][0].shape[-1] == 3:
+            for path in pathline_cache:
+                # Skip empty pathlines
+                if not path or len(path) < 2:
+                    continue
+                # Duplicate the first and last vertex for adjacency
+                first_vertex = path[0]
+                last_vertex = path[-1]
+                # Build the expanded path: [first, ...all..., last]
+                expanded_path = [first_vertex] + path + [last_vertex]
+                # Record offset and size
+                pathline_offset_indices.append(offset_counter)
+                size = len(expanded_path)
+                pathline_sizes.append(size)
+                offset_counter += size
+                # Add vertices
+
+                for pos3d, t in expanded_path:
+                    attrib0_time = (t - min_time) * inverse_time_range
+                    pathline_vertices.append([
+                        pos3d[0], pos3d[1], pos3d[2],
+                        attrib0_time, 0.0
+                    ])
+        else:
+            for path in pathline_cache:
+                # Skip empty pathlines
+                if not path or len(path) < 2:
+                    continue
+                # Duplicate the first and last vertex for adjacency
+                first_vertex = path[0]
+                last_vertex = path[-1]
+                # Build the expanded path: [first, ...all..., last]
+                expanded_path = [first_vertex] + path + [last_vertex]
+                # Record offset and size
+                pathline_offset_indices.append(offset_counter)
+                size = len(expanded_path)
+                pathline_sizes.append(size)
+                offset_counter += size
+                # Add vertices
+
+                for pos3d, t in expanded_path:
+                    attrib0_time = (t - min_time) * inverse_time_range
+                    pathline_vertices.append([
+                        pos3d[0], pos3d[1],0.0,
+                        attrib0_time, 0.0
+                    ])
         
         if not pathline_vertices:
             return

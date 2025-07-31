@@ -41,8 +41,49 @@ def bilinear_interpolate_numpy(field_slice, x, y):
 
 # 可以为 get_vector_at_grid 也创建一个 njit 函数
 @njit(cache=True)
-def _get_vector_unsteady_numba(field_data, x, y, time):
-    return field_data[time, y, x] # field_data 应该是一个 numpy 数组
+def _get_vector_unsteady_numba(field_data, x, y, time, Xdim, Ydim, time_steps):
+    t0 = int(np.floor(time))
+    t1 = int(np.ceil(time))
+    t0 = max(0, min(t0, time_steps - 1))
+    t1 = max(0, min(t1, time_steps - 1))
+
+    x0 = int(np.floor(x))
+    x1 = int(np.ceil(x))
+    y0 = int(np.floor(y))
+    y1 = int(np.ceil(y))
+
+    x0 = max(0, min(x0, Xdim - 1))
+    x1 = max(0, min(x1, Xdim - 1))
+    y0 = max(0, min(y0, Ydim - 1))
+    y1 = max(0, min(y1, Ydim - 1))
+
+    wx = x - x0
+    wy = y - y0
+    wt = time - t0
+
+    # Ensure wt is not NaN, which can happen if t0 == t1
+    if t0 == t1:
+        wt = 0.0
+
+    v000 = field_data[t0, y0, x0]
+    v100 = field_data[t0, y0, x1]
+    v010 = field_data[t0, y1, x0]
+    v110 = field_data[t0, y1, x1]
+
+    v001 = field_data[t1, y0, x0]
+    v101 = field_data[t1, y0, x1]
+    v011 = field_data[t1, y1, x0]
+    v111 = field_data[t1, y1, x1]
+
+    v0_t0 = v000 * (1.0 - wx) + v100 * wx
+    v1_t0 = v010 * (1.0 - wx) + v110 * wx
+    v_t0 = v0_t0 * (1.0 - wy) + v1_t0 * wy
+
+    v0_t1 = v001 * (1.0 - wx) + v101 * wx
+    v1_t1 = v011 * (1.0 - wx) + v111 * wx
+    v_t1 = v0_t1 * (1.0 - wy) + v1_t1 * wy
+    
+    return v_t0 * (1.0 - wt) + v_t1 * wt
 
 
 
@@ -187,23 +228,20 @@ class UnsteadyVectorField2D(IDiscreteField2D):
         return vec
     
 
-    def get_vector(self, posX: float, posY: float, time: float) -> np.ndarray:
+    def get_vector(self, posX:float,posY:float, time: float) -> np.ndarray:
+        float_grid_x, float_grid_y = self.convert_physical_pos_2_grid_pos(posX, posY)
+        float_grid_time = self.getFloatGridTime(time)
         return _get_vector_unsteady_numba(
             self.field.numpy() if isinstance(self.field, torch.Tensor) else self.field, 
-            posX, posY, time,
-            self.domainMinBoundary[0], self.domainMinBoundary[1],
-            self.gridInterval[0], self.gridInterval[1],
-            self.tmin, self.timeInterval,
-            self.Xdim, self.Ydim, self.time_steps
+            float_grid_x, float_grid_y, float_grid_time, self.Xdim, self.Ydim, self.time_steps
         )
 
 
-    def get_vector(self, posX: float, posY: float, time: float) -> np.ndarray:
+    def get_vector_trilinear(self, posX:float,posY:float, time: float) -> np.ndarray:
         """Get interpolated vector at arbitrary position using trilinear interpolation.
         
         Args:
-            posX (float): X coordinate
-            posY (float): Y coordinate 
+            pos3D (np.ndarray): 3D position [x, y, z]
             time (float): physcial Time 
             
         Returns:
@@ -396,8 +434,8 @@ class UnsteadyVectorField2DTrainable(nn.Module,UnsteadyVectorField2D):
         return steadyVectorField2D
 
     def forward(self,inputFieldV):
-        diff, magnitudeR=VectorFieldLinearOperation.difference(inputFieldV,self.field)
-        killingEnergy=VectorFieldLinearOperation.compute_killing_energy(self)
+        diff, magnitudeR=LinearOperationONTrainableVectorField.difference(inputFieldV,self.field)
+        killingEnergy=LinearOperationONTrainableVectorField.compute_killing_energy(self)
         return killingEnergy+magnitudeR
         
 

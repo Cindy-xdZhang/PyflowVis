@@ -1,363 +1,387 @@
 import torch
-import numpy as np
-from typing import Tuple
-import matplotlib.pyplot as plt
+from torchdiffeq import odeint as odeint_torch
 from FLowUtils.VectorField3d import UnsteadyVectorField3D
+import torch
+import torch.nn.functional as F
+import torch
+import numpy as np
 
-class LagrangianVortexCore:
-    """
-    Lagrangian function L(q, q_dot).
-    """
-    def __init__(self, v_field: UnsteadyVectorField3D, w_field: UnsteadyVectorField3D, params: dict):
-        """
-        Initialization.
 
-        Args:
-            v_field (UnsteadyVectorField3D): Main vector field v.
-            w_field (UnsteadyVectorField3D): Observer/reference vector field w.
-            params (dict): Dictionary containing weights lambda, mu, epsilon1.
-        """
-        self.v_field = v_field
-        self.w_field = w_field
-        self.lambda_ = params.get('lambda', 0.0)
-        self.mu = params.get('mu', 0.0)
-        self.epsilon1 = params.get('epsilon1', 0.0)
+class UnsteadyVectorField2D_Torch(torch.nn.Module):
+    def __init__(self, data_tensor, domain_min, domain_max, t_min, t_max):
+        super().__init__()
+        self.register_buffer('data', data_tensor)
+        self.domain_min = torch.tensor(domain_min, dtype=torch.float32)
+        self.domain_max = torch.tensor(domain_max, dtype=torch.float32)
+        self.t_min = t_min
+        self.t_max = t_max
+        self.time_steps, self.height, self.width, _ = data_tensor.shape
+        self.register_buffer('data_permuted', self.data.permute(0, 3, 1, 2).contiguous())
 
-    def compute_L(self, q: torch.Tensor, q_dot: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """
-        Compute the value of the Lagrangian function at point q, tangent q_dot, and time t.
-        All inputs should be batched.
+    def get_vector(self, x, y, t):
+        device = x.device
+        self.domain_min = self.domain_min.to(device)
+        self.domain_max = self.domain_max.to(device)
+        
+        x_norm = (x - self.domain_min[0]) / (self.domain_max[0] - self.domain_min[0])
+        y_norm = (y - self.domain_min[1]) / (self.domain_max[1] - self.domain_min[1])
+        t_norm = (t - self.t_min) / (self.t_max - self.t_min)
+        
+        grid_x = 2.0 * x_norm - 1.0
+        grid_y = 2.0 * y_norm - 1.0
+        
+        coords = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(1).unsqueeze(1)
+        
+        t_idx_float = t_norm * (self.time_steps - 1)
+        t_idx_floor = torch.floor(t_idx_float).long()
+        t_idx_ceil = torch.ceil(t_idx_float).long()
+        
+        t_idx_floor = torch.clamp(t_idx_floor, 0, self.time_steps - 1)
+        t_idx_ceil = torch.clamp(t_idx_ceil, 0, self.time_steps - 1)
+        
+        field_floor = self.data_permuted[t_idx_floor]
+        field_ceil = self.data_permuted[t_idx_ceil]
+        
+        batch_size = coords.shape[0]
+        field_floor_expanded = field_floor.unsqueeze(0).expand(batch_size, -1, -1, -1)
+        field_ceil_expanded = field_ceil.unsqueeze(0).expand(batch_size, -1, -1, -1)
 
-        Args:
-            q (torch.Tensor): Position of shape (N, 3).
-            q_dot (torch.Tensor): Tangent (unit vector) of shape (N, 3).
-            t (torch.Tensor): Time of shape (N,).
+        vec_floor = F.grid_sample(field_floor_expanded, coords, align_corners=False, mode='bilinear').squeeze(-1).squeeze(-1)
+        vec_ceil = F.grid_sample(field_ceil_expanded, coords, align_corners=False, mode='bilinear').squeeze(-1).squeeze(-1)
+        
+        if vec_floor.dim() == 1:
+            vec_floor = vec_floor.unsqueeze(0)
+            vec_ceil = vec_ceil.unsqueeze(0)
 
-        Returns:
-            torch.Tensor: Lagrangian function value of shape (N,).
-        """
-        # Ensure q_dot requires grad, as we will differentiate with respect to it
-        q_dot.requires_grad_(True)
-        
-        # Get vector field values v and w
-        v = self.v_field.get_vectors_at_points(q, t)
-        w = self.w_field.get_vectors_at_points(q, t)
-        
-        v_minus_w = v - w
-        
-        # --- Compute main component of L ---
-        # According to Eq. 36: ||(u-w)(q,t) x q_dot||^2
-        # Note: ||A x B||^2 == ||A||^2 * ||B||^2 - (A . B)^2
-        # Since ||q_dot||=1, it simplifies to ||v-w||^2 - ((v-w).q_dot)^2
-        # This is numerically more stable, but using cross directly is also fine.
-        term_align = torch.linalg.norm(torch.cross(v_minus_w, q_dot, dim=1), dim=1)**2
-        
-        L = term_align
-        
-        # --- Add other regularization terms mentioned in the paper (Eq. 34) ---
-        
-        # A(q, q_dot) term, depends on observed acceleration 'a'
-        if self.lambda_ > 0:
-            # a(v,w) = dv/dt - dw/dt + (nabla_v)v - 2*(nabla_w)v + (nabla_w)w (Eq. 12)
-            # To compute dv/dt, we need to use autograd again. This will slow down computation.
-            # For simplicity, we assume dv/dt and dw/dt are zero (for steady or slowly varying fields).
-            # A full implementation would require computing time derivatives.
-            nabla_v = self.v_field.get_jacobian_at_points(q, t)
-            nabla_w = self.w_field.get_jacobian_at_points(q, t)
-            
-            # (nabla_v)v -> bmm(nabla_v, v.unsqueeze(-1)).squeeze(-1)
-            term_nabla_v_v = torch.bmm(nabla_v, v.unsqueeze(-1)).squeeze(-1)
-            term_nabla_w_v = torch.bmm(nabla_w, v.unsqueeze(-1)).squeeze(-1)
-            term_nabla_w_w = torch.bmm(nabla_w, w.unsqueeze(-1)).squeeze(-1)
-            
-            # Assume dv/dt = 0, dw/dt = 0
-            a = term_nabla_v_v - 2 * term_nabla_w_v + term_nabla_w_w
-            
-            term_A = torch.linalg.norm(torch.cross(a, q_dot, dim=1), dim=1)**2
-            L = L + self.lambda_ * term_A
-            
-        # D(q, q_dot) and R(q, q_dot) terms can be added here
-        # ...
-        
-        return L
+        weight = (t_idx_float - t_idx_floor.float()).reshape(-1, 1)
+        vec = vec_floor * (1 - weight) + vec_ceil * weight
+        return vec
+
+    def IsInside(self, pos):
+        return (
+            (pos[..., 0] >= self.domain_min[0]) & (pos[..., 0] <= self.domain_max[0]) &
+            (pos[..., 1] >= self.domain_min[1]) & (pos[..., 1] <= self.domain_max[1])
+        )
+
+class VectorFieldODE(torch.nn.Module):
+    def __init__(self, vector_field):
+        super().__init__()
+        self.vector_field = vector_field
+
+    def forward(self, t, pos):
+        if self.vector_field.data.is_cuda and not pos.is_cuda:
+            pos = pos.cuda()
+        if pos.shape[-1] == 2:#(x,y)
+            return self.vector_field.get_vector(pos[:, 0], pos[:, 1], t)
     
-class VariationalIntegrator:
+
+class DifferentiableVectorFieldInterpolator(torch.autograd.Function):
     """
-    Integrate to generate vortex corelines using variational principle and RK4 method.
+    A custom autograd Function to wrap scipy's RegularGridInterpolator,
+    making it differentiable with respect to the query points.
+    This interpolator works with a 3D vector field defined on a regular grid.
     """
-    def __init__(self, lagrangian: LagrangianVortexCore, 
-                 q0: torch.Tensor, q_dot0: torch.Tensor, t: float, 
-                 ds: float = 0.01, device='cpu'):
-        """
-        Initialize the integrator.
 
+    @staticmethod
+    def forward(ctx, query_points, grid_points, grid_values):
+        """
+        Forward pass: Interpolate vector values at query_points.
+        
         Args:
-            lagrangian (LagrangianVortexCore): Lagrangian object defining L.
-            q0 (torch.Tensor): Initial position (1, 3).
-            q_dot0 (torch.Tensor): Initial tangent (1, 3).
-            t (float): Physical time.
-            ds (float): Integration step size along curve s.
-            device (str): Compute device.
-        """
-        self.lagrangian = lagrangian
-        self.q = q0.clone().to(device)
-        self.q_dot = q_dot0.clone().to(device)
-        self.t = torch.tensor([t], dtype=torch.float32, device=device)
-        self.ds = ds
-        self.device = torch.device(device)
-
-    def _get_orthonormal_basis(self, v: torch.Tensor) -> torch.Tensor:
-        """Create an orthonormal basis B = [b1, b2, b3] for unit vector v."""
-        b1 = v / torch.linalg.norm(v)
+            ctx: Context object to save information for backward pass.
+            query_points (torch.Tensor): Tensor of shape (N, 3) with coordinates to query.
+            grid_points (tuple of np.ndarray): Tuple of 3 arrays (grid_x, grid_y, grid_z).
+            grid_values (np.ndarray): Array of shape (Nx, Ny, Nz, 3) holding the vector values.
         
-        # Choose a reference vector not collinear with b1
-        ref = torch.tensor([1.0, 0.0, 0.0], device=self.device)
-        if torch.abs(torch.dot(b1.flatten(), ref)) > 0.99:
-            ref = torch.tensor([0.0, 1.0, 0.0], device=self.device)
-            
-        b3 = torch.cross(b1.flatten(), ref)
-        b3 /= torch.linalg.norm(b3)
-        
-        b2 = torch.cross(b3, b1.flatten())
-        
-        return torch.stack([b1.flatten(), b2, b3], dim=1)
-
-    def _compute_q_ddot(self, q: torch.Tensor, q_dot: torch.Tensor) -> torch.Tensor:
-        """
-        Solve Euler-Lagrange equation to get q_ddot. This is the most critical part.
-        See paper Eq. 46, 47.
-        """
-        # --- 1. Compute required derivatives of L ---
-        
-        # Compute dL/dq and dL/dq_dot
-        L_val = self.lagrangian.compute_L(q, q_dot, self.t)
-        
-        # create_graph=True allows us to compute higher-order derivatives (Hessian)
-        dL_d_vars = torch.autograd.grad(L_val, [q, q_dot], create_graph=True)[0]
-        dL_dq = dL_d_vars[0]       # (1, 3)
-        
-        # To compute mixed Hessian d/dq(dL/dq_dot), we need a new function
-        def dL_dqdot_func(q_in):
-             return torch.autograd.grad(self.lagrangian.compute_L(q_in, q_dot, self.t), q_dot, create_graph=True)[0]
-
-        H_q_qdot = torch.autograd.functional.jacobian(dL_dqdot_func, q) # (1,3,1,3) -> (3,3)
-        H_q_qdot = H_q_qdot.squeeze()
-        
-        # --- 2. Computation in local spherical coordinate system ---
-        B = self._get_orthonormal_basis(q_dot)
-        b2, b3 = B[:, 1], B[:, 2]
-
-        # Define a function L_tilde(theta, phi) to compute 2x2 Hessian
-        def L_tilde_func(spherical_coords: torch.Tensor):
-            theta, phi = spherical_coords[0], spherical_coords[1]
-            # Convert from spherical to local Cartesian coordinates
-            # (cos(th)sin(ph), sin(th)sin(ph), cos(ph)) -> perturbation direction
-            # At our reference point (th=0, ph=pi/2), perturbation is in b2, b3 directions
-            # Here we directly define L_tilde(delta_b2, delta_b3)
-            # perturbed_qdot = q_dot + delta_b2*b2 + delta_b3*b3
-            # H_tilde is d^2L / d(delta)^2
-            # This is equivalent to computing Hessian of L w.r.t. q_dot, then projecting onto the plane spanned by b2, b3
-            return self.lagrangian.compute_L(q, q_dot, self.t)
-
-        # Compute H_qdot_qdot (d^2L/dq_dot^2)
-        H_qdot_qdot = torch.autograd.functional.hessian(lambda qd: self.lagrangian.compute_L(q, qd, self.t), q_dot)
-        H_qdot_qdot = H_qdot_qdot.squeeze() # (3,3)
-
-        # Project onto b2, b3 plane to get H_tilde (Eq. 46)
-        H_tilde = torch.zeros(2, 2, device=self.device)
-        H_tilde[0, 0] = torch.dot(b2, H_qdot_qdot @ b2)
-        H_tilde[0, 1] = torch.dot(b2, H_qdot_qdot @ b3)
-        H_tilde[1, 0] = torch.dot(b3, H_qdot_qdot @ b2)
-        H_tilde[1, 1] = torch.dot(b3, H_qdot_qdot @ b3)
-
-        # Compute right-hand side r_hat (Eq. 47)
-        # r_hat = [b2, b3]^T * (dL/dq - H_q_qdot * q_dot)
-        # There is a bug in the C++ code, which used dL/dq_dot, but the paper derivation seems to require q_dot.
-        # The d/ds(dL/dq_dot) term is H_q_q * q_dot + H_q_qdot * q_ddot
-        # Here we use q_dot
-        rhs_vec = dL_dq.flatten() - (H_q_qdot @ q_dot.flatten())
-        
-        r_hat = torch.zeros(2, device=self.device)
-        r_hat[0] = torch.dot(b2, rhs_vec)
-        r_hat[1] = torch.dot(b3, rhs_vec)
-        
-        # --- 3. Solve linear system ---
-        try:
-            # Check condition number
-            cond_num = torch.linalg.cond(H_tilde)
-            if cond_num > 1e6:
-                print(f"Warning: Hessian is ill-conditioned. Condition number: {cond_num:.2e}")
-            
-            q_ddot_spherical = torch.linalg.solve(H_tilde, r_hat)
-        except torch.linalg.LinAlgError:
-            print("Error: Hessian matrix is singular. Cannot solve for q_ddot. Returning zero.")
-            return torch.zeros_like(q)
-            
-        # --- 4. Convert back to Cartesian coordinates ---
-        # q_ddot = b2 * q_ddot_spherical[0] + b3 * q_ddot_spherical[1]
-        q_ddot = B[:, 1:] @ q_ddot_spherical.unsqueeze(1)
-        
-        return q_ddot.T # (1, 3)
-
-    def _rk4_step(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Perform one RK4 integration step."""
-        ds = self.ds
-        
-        # k1
-        q_dot_k1 = self.q_dot
-        q_ddot_l1 = self._compute_q_ddot(self.q, self.q_dot)
-        
-        # k2
-        q_k2 = self.q + 0.5 * ds * q_dot_k1
-        q_dot_k2 = (self.q_dot + 0.5 * ds * q_ddot_l1).requires_grad_()
-        q_ddot_l2 = self._compute_q_ddot(q_k2, q_dot_k2)
-
-        # k3
-        q_k3 = self.q + 0.5 * ds * q_dot_k2
-        q_dot_k3 = (self.q_dot + 0.5 * ds * q_ddot_l2).requires_grad_()
-        q_ddot_l3 = self._compute_q_ddot(q_k3, q_dot_k3)
-
-        # k4
-        q_k4 = self.q + ds * q_dot_k3
-        q_dot_k4 = (self.q_dot + ds * q_ddot_l3).requires_grad_()
-        q_ddot_l4 = self._compute_q_ddot(q_k4, q_dot_k4)
-
-        # Update
-        q_new = self.q + (ds / 6.0) * (q_dot_k1 + 2*q_dot_k2 + 2*q_dot_k3 + q_dot_k4)
-        q_dot_new = self.q_dot + (ds / 6.0) * (q_ddot_l1 + 2*q_ddot_l2 + 2*q_ddot_l3 + q_ddot_l4)
-        
-        # Normalize q_dot to maintain unit length constraint
-        q_dot_new = q_dot_new / torch.linalg.norm(q_dot_new)
-        
-        return q_new, q_dot_new.requires_grad_()
-
-    def integrate(self, num_steps: int) -> np.ndarray:
-        """
-        Perform integration.
-
-        Args:
-            num_steps (int): Total number of integration steps.
-
         Returns:
-            np.ndarray: Coreline point coordinates of shape (num_steps+1, 3).
+            torch.Tensor: Interpolated vectors of shape (N, 3).
         """
-        coreline = [self.q.cpu().numpy().flatten()]
+        # Ensure inputs are on CPU and in numpy format for scipy
+        query_points_np = query_points.detach().cpu().numpy()
         
-        for step in range(num_steps):
-            try:
-                q_new, q_dot_new = self._rk4_step()
-                
-                # Update state
-                self.q = q_new
-                self.q_dot = q_dot_new
-                
-                coreline.append(self.q.cpu().numpy().flatten())
+        # Create the interpolator object. For efficiency, this should be created
+        # once outside and passed in, but for clarity it's here.
+        # In a real application, the interpolator would be an attribute of the main class.
+        interpolator = RegularGridInterpolator(grid_points, grid_values, method='linear', bounds_error=False, fill_value=0.0)
+        
+        # Perform interpolation
+        interpolated_values_np = interpolator(query_points_np)
+        
+        # Convert back to torch tensor
+        interpolated_values = torch.from_numpy(interpolated_values_np).to(query_points.device, dtype=query_points.dtype)
+        
+        # Save necessary data for backward pass
+        ctx.save_for_backward(query_points)
+        ctx.interpolator = interpolator # Storing the interpolator object
+        
+        return interpolated_values
 
-                # Check for divergence
-                if not torch.all(torch.isfinite(self.q)):
-                    print(f"Integration diverged at step {step+1}. Stopping.")
-                    break
-                    
-            except Exception as e:
-                print(f"An error occurred at step {step+1}: {e}")
-                import traceback
-                traceback.print_exc()
+    @staticmethod
+    def backward(ctx, grad_output):
+        """
+        Backward pass: Compute the gradient of the interpolated values w.r.t. query_points.
+        
+        The gradient of the output w.r.t the input query_points is the Jacobian of the
+        interpolation function. For linear interpolation, this Jacobian is piecewise constant.
+        We can approximate it using finite differences on the interpolator itself.
+        
+        Args:
+            ctx: Context object with saved tensors.
+            grad_output (torch.Tensor): Gradient of the loss w.r.t. the output of this function. Shape (N, 3).
+            
+        Returns:
+            torch.Tensor: Gradient of the loss w.r.t. query_points. Shape (N, 3).
+            (None, None): Gradients for grid_points and grid_values are not needed.
+        """
+        query_points, = ctx.saved_tensors
+        interpolator = ctx.interpolator
+        
+        # Small epsilon for finite differences
+        eps = 1e-6
+        
+        # Move to CPU for numpy operations
+        query_points_np = query_points.detach().cpu().numpy()
+        grad_output_np = grad_output.cpu().numpy()
+        
+        # Initialize Jacobian matrix for the batch
+        # J_batch[i] will be the 3x3 Jacobian for the i-th query point
+        num_points = query_points_np.shape
+        J_batch = np.zeros((num_points, 3, 3)) # (N, output_dim, input_dim)
+        
+        # Compute Jacobian for each query point
+        for i in range(3): # Iterate over input dimensions (x, y, z)
+            # Perturb in the positive direction
+            q_plus = query_points_np.copy()
+            q_plus[:, i] += eps
+            v_plus = interpolator(q_plus)
+            
+            # Perturb in the negative direction
+            q_minus = query_points_np.copy()
+            q_minus[:, i] -= eps
+            v_minus = interpolator(q_minus)
+            
+            # Central difference to get the i-th column of the Jacobian
+            J_column = (v_plus - v_minus) / (2 * eps)
+            J_batch[:, :, i] = J_column
+            
+        # The gradient we need to return is grad_input = grad_output @ J
+        # For a batch, this is computed element-wise:
+        # grad_input[n, j] = sum_k(grad_output[n, k] * J_batch[n, k, j])
+        grad_input_np = np.einsum('nk,nkj->nj', grad_output_np, J_batch)
+        
+        grad_input = torch.from_numpy(grad_input_np).to(query_points.device, dtype=query_points.dtype)
+        
+        # Gradients for grid_points and grid_values are None as they are not inputs to be differentiated against
+        return grad_input, None, None
+
+
+
+
+
+class VariationalCorelineExtractor:
+    def __init__(self, vector_field:UnsteadyVectorField3D, config: dict):
+        """
+        Initializes the extractor.
+        
+        Args:
+            vector_field: An object that provides access to the vector field data
+                          and its differentiable interpolator.
+            config: A dictionary with parameters like lambda, mu, epsilon, t0, t_T, etc.
+        """
+        self.v_field = vector_field
+        self.config = config
+        self.device = vector_field.device
+        self.dtype = torch.float64 # Use float64 for numerical stability
+
+        # Unpack config parameters
+        self.lambda_ = self.config.get('lambda', 1.0)
+        self.mu_ = self.config.get('mu', 1.0)
+        self.epsilon_ = self.config.get('epsilon', 1.0)
+        self.t0 = self.config.get('t0', 0.0)
+        self.t_T = self.config.get('t_T', 1.0)
+        self.time_steps = self.config.get('time_steps', 10)
+        
+        # For now, we assume w=0 (no frame change) for simplicity.
+        # A full implementation would handle a differentiable field w.
+        self.w_field = None 
+
+    def _get_observed_velocity(self, q, t):
+        # q is shape (N, 3), t is a scalar
+        # In a batch setting, t could be (N, 1)
+        # For now, assume batch over q, single t
+        
+        # Create a time tensor for each point in q
+        t_tensor = torch.full((q.shape, 1), t, device=self.device, dtype=self.dtype)
+        qt = torch.cat([q, t_tensor], dim=1) # Shape (N, 4) for a spacetime field
+        
+        v = self.v_field.interpolate(q) # Assuming v_field interpolator handles this
+        
+        if self.w_field:
+            w = self.w_field.interpolate(q)
+            return v - w
+        return v
+
+    def _get_observed_acceleration(self, q, t):
+        # a(v,w) = D/Dt(v-w) + grad(v-w)(v-w)
+        # This is a complex term. For now, let's use a placeholder.
+        # A full implementation requires derivatives of the vector field.
+        # PyTorch's autograd can compute grad(v-w) if the interpolator is differentiable.
+        
+        # Let's compute grad(v-w) w.r.t. q
+        q_clone = q.clone().detach().requires_grad_(True)
+        v_minus_w = self._get_observed_velocity(q_clone, t)
+        
+        grad_v_minus_w = torch.zeros(q.shape, 3, 3, device=self.device, dtype=self.dtype)
+        for i in range(3):
+            grad_v_minus_w[:, :, i] = torch.autograd.grad(v_minus_w[:, i].sum(), q_clone, create_graph=True)
+
+        # a_geom = grad(v-w)(v-w)
+        a_geom = torch.einsum('nij,nj->ni', grad_v_minus_w, v_minus_w)
+        
+        # D/Dt term is more complex, involving time derivatives of the field itself.
+        # Let's assume it's zero for a steady field for now.
+        # D_Dt = partial_t(v-w) + L_w(v-w)
+        # For w=0, D_Dt = partial_t(v)
+        # This requires the vector field to be defined in spacetime.
+        # Let's assume this term is zero for this simplified example.
+        D_Dt = torch.zeros_like(a_geom)
+        
+        return a_geom + D_Dt
+
+    def _compute_lagrangian_integrand(self, q, q_dot, t):
+        """Computes the value inside the time integral of the Lagrangian for a single time t."""
+        # Ensure q_dot is normalized
+        q_dot = q_dot / torch.linalg.norm(q_dot, dim=-1, keepdim=True)
+        
+        # Term 1: Velocity parallelism ||(v-w) x q_dot||^2
+        v_obs = self._get_observed_velocity(q, t)
+        term1 = torch.linalg.norm(torch.cross(v_obs, q_dot, dim=-1), dim=-1)**2
+        
+        # Term 2: Acceleration parallelism ||a(v,w) x q_dot||^2
+        a_obs = self._get_observed_acceleration(q, t)
+        term2 = torch.linalg.norm(torch.cross(a_obs, q_dot, dim=-1), dim=-1)**2
+        
+        # Term 3: D term (assumed zero for now)
+        term3 = torch.zeros_like(term1)
+        
+        # Term 4: R term (requires grad(v-w)(q_dot))
+        # This is another complex term needing the Jacobian.
+        # Let's use a placeholder.
+        term4 = torch.zeros_like(term1)
+        
+        return term1 + self.lambda_ * term2 + self.mu_ * term3 + self.epsilon_ * term4
+
+    def _compute_total_lagrangian(self, q, q_dot):
+        """
+        Computes the full time-integrated Lagrangian.
+        This version is simplified and does not include the flow map for now.
+        It evaluates the integrand at different times t for a fixed q, q_dot.
+        A full implementation needs the flow map.
+        """
+        t_span = torch.linspace(self.t0, self.t_T, self.time_steps, device=self.device, dtype=self.dtype)
+        
+        # Simple trapezoidal integration
+        L_values = torch.stack([self._compute_lagrangian_integrand(q, q_dot, t) for t in t_span])
+        L_total = torch.trapezoid(L_values, t_span, dim=0)
+        
+        return L_total
+
+    def _get_el_equation_terms(self, q, q_dot):
+        """
+        The core function that computes all terms for the Euler-Lagrange equation
+        and solves for q_ddot.
+        """
+        q.requires_grad_(True)
+        q_dot.requires_grad_(True)
+
+        # 1. Define a function for the Hessian calculation
+        def L_func(q_dot_var):
+            # The Lagrangian should be a scalar for hessian computation
+            return self._compute_total_lagrangian(q, q_dot_var).sum()
+
+        # 2. Compute the 3x3 Hessian H = d^2L / dq_dot^2
+        H_3x3 = torch.autograd.functional.hessian(L_func, q_dot, create_graph=False)
+        # H_3x3 shape will be (N, 3, N, 3) for batch size N. We handle N=1 for now.
+        H_3x3 = H_3x3.squeeze() # From (1,3,1,3) to (3,3)
+
+        # 3. Compute dL/dq
+        L_total = self._compute_total_lagrangian(q, q_dot)
+        dL_dq = torch.autograd.grad(L_total.sum(), q, create_graph=False)
+        # 4. Compute the mixed derivative term: d/ds(dL/dq_dot) = (d^2L/dq_dotdq) @ q_dot
+        # This is more involved. A simplification from the paper (Eq. 40) is used.
+        # r = dL/dq - (d^2L/dq_dot dq) @ q_dot
+        # The mixed term is hard to get directly. The paper's formulation avoids it.
+        # Let's follow the paper's final form (Eq. 43, 46, 47)
+        
+        # 5. Solve the constrained 2x2 system
+        q_dot_norm = q_dot / torch.linalg.norm(q_dot) # Ensure unit vector
+        
+        # Create an orthonormal basis B = [b1, b2, b3] where b1 = q_dot
+        b1 = q_dot_norm.squeeze()
+        # Find a vector not parallel to b1
+        tmp = torch.tensor([1.0, 0, 0], device=self.device, dtype=self.dtype)
+        if torch.allclose(torch.abs(torch.dot(tmp, b1)), torch.tensor(1.0)):
+            tmp = torch.tensor([0, 1.0, 0], device=self.device, dtype=self.dtype)
+        
+        b2 = torch.cross(b1, tmp)
+        b2 = b2 / torch.linalg.norm(b2)
+        b3 = torch.cross(b1, b2)
+        
+        B = torch.stack([b1, b2, b3], dim=1) # Basis matrix
+
+        # Project the Hessian and the RHS term dL/dq
+        # H_hat = B_perp^T @ H_3x3 @ B_perp where B_perp = [b2, b3]
+        B_perp = torch.stack([b2, b3], dim=1)
+        H_2x2 = B_perp.T @ H_3x3 @ B_perp
+
+        # RHS_bar = B_perp^T @ (dL/dq)
+        # The full RHS from Eq. 43 is more complex, let's use the simplified one from Eq. 47
+        r_bar = B_perp.T @ dL_dq.squeeze()
+
+        # Solve the 2x2 system: H_hat * q_ddot_local = r_bar
+        try:
+            q_ddot_local = torch.linalg.solve(H_2x2, r_bar)
+        except torch.linalg.LinAlgError:
+            # If H_2x2 is singular, use pseudo-inverse as a fallback
+            print("Warning: 2x2 Hessian is singular, using pseudo-inverse.")
+            H_2x2_inv = torch.linalg.pinv(H_2x2)
+            q_ddot_local = H_2x2_inv @ r_bar
+
+        # Transform q_ddot back to global coordinates
+        q_ddot = B_perp @ q_ddot_local
+        
+        # Detach from graph to use in standard numerical integrator
+        return q_ddot.detach()
+
+    def integrate_curve(self, q0, q_dot0, s_end, ds):
+        """
+        Integrates the curve using a simple forward Euler for demonstration.
+        A better choice is RK4 or using torchdiffeq.
+        """
+        q = q0.clone().to(self.device, self.dtype)
+        q_dot = q_dot0.clone().to(self.device, self.dtype)
+        
+        curve_q = [q.cpu().numpy()]
+        curve_q_dot = [q_dot.cpu().numpy()]
+        
+        num_steps = int(s_end / ds)
+        for s_idx in range(num_steps):
+            q_dot = q_dot / torch.linalg.norm(q_dot) # Re-normalize at each step
+            
+            # Get acceleration
+            q_ddot = self._get_el_equation_terms(q.unsqueeze(0), q_dot.unsqueeze(0))
+            
+            # Update state (Forward Euler)
+            q_dot_new = q_dot + q_ddot * ds
+            q_new = q + q_dot * ds # Use old q_dot for position update
+            
+            q, q_dot = q_new, q_dot_new
+            
+            curve_q.append(q.cpu().numpy())
+            curve_q_dot.append(q_dot.cpu().numpy())
+            
+            if torch.isnan(q).any() or torch.isinf(q).any():
+                print(f"Integration failed at step {s_idx}: NaN or Inf detected.")
                 break
 
-        return np.array(coreline)
-    
-
-
-def create_double_gyre_field(grid_res: int, time_res: int, device: str) -> Tuple[np.ndarray, list, list, list]:
-    """Create a 2.5D double gyre field for demonstration."""
-    t_max = 1.0
-    domain_min = [-1.0, -1.0, -0.5]
-    domain_max = [ 1.0,  1.0,  0.5]
-    
-    x = np.linspace(domain_min[0], domain_max[0], grid_res)
-    y = np.linspace(domain_min[1], domain_max[1], grid_res)
-    z = np.linspace(domain_min[2], domain_max[2], grid_res // 2)
-    t = np.linspace(0, t_max, time_res)
-    
-    xx, yy, zz, tt = np.meshgrid(x, y, z, t, indexing='ij')
-
-    # Double gyre parameters
-    A = 0.1
-    epsilon = 0.25
-    omega = 2 * np.pi / t_max
-
-    a = epsilon * np.sin(omega * tt)
-    b = 1 - 2 * epsilon * np.sin(omega * tt)
-    f = a * xx**2 + b * xx
-    dfdx = 2 * a * xx + b
-    
-    vx = -np.pi * A * np.sin(np.pi * f) * np.cos(np.pi * yy)
-    vy =  np.pi * A * np.cos(np.pi * f) * np.sin(np.pi * yy) * dfdx
-    vz = np.zeros_like(vx) + 0.1 # Add a small z component
-
-    # Shape: (grid, grid, grid/2, time, 3)
-    field_data = np.stack([vx, vy, vz], axis=-1)
-    # Convert to (T, D, H, W, 3)
-    field_data = np.transpose(field_data, (3, 2, 1, 0, 4))
-    
-    return field_data, domain_min, domain_max, [0, t_max]
-
-# ---- Main program ----
-if __name__ == '__main__':
-    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Using device: {DEVICE}")
-
-    # 1. Create vector field data
-    GRID_RESOLUTION = 32
-    TIME_RESOLUTION = 16
-    
-    v_field_data, domain_min, domain_max, time_range = create_double_gyre_field(GRID_RESOLUTION, TIME_RESOLUTION, DEVICE)
-    
-    # In this example, we use a stationary reference frame (w=0)
-    w_field_data = np.zeros_like(v_field_data)
-    
-    # 2. Instantiate vector field objects
-    v_field = UnsteadyVectorField3D(v_field_data, domain_min, domain_max, time_range, device=DEVICE)
-    w_field = UnsteadyVectorField3D(w_field_data, domain_min, domain_max, time_range, device=DEVICE)
-
-    # 3. Set up Lagrangian function
-    # In this simple example, we only use the main alignment term
-    lagrangian_params = {'lambda': 0.0, 'mu': 0.0, 'epsilon1': 0.0}
-    lagrangian = LagrangianVortexCore(v_field, w_field, lagrangian_params)
-
-    # 4. Initialize integrator
-    # Initial point and direction
-    q_initial = torch.tensor([[0.5, 0.5, 0.0]], dtype=torch.float32, device=DEVICE)
-    # Initial q_dot is usually aligned with (v-w) direction at this point
-    v0 = v_field.get_vectors_at_points(q_initial, torch.tensor([0.0], device=DEVICE))
-    q_dot_initial = (v0 / torch.linalg.norm(v0)).requires_grad_()
-    
-    
-    integrator = VariationalIntegrator(
-        lagrangian=lagrangian,
-        q0=q_initial,
-        q_dot0=q_dot_initial,
-        t=0.0, # Physical time
-        ds=0.05, # Curve step size
-        device=DEVICE
-    )
-
-    # 5. Run integration
-    print("Starting integration...")
-    coreline_points = integrator.integrate(num_steps=200)
-    print(f"Integration finished. Found {len(coreline_points)} points.")
-
-    # 6. Visualize result
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection='3d')
-    ax.plot(coreline_points[:, 0], coreline_points[:, 1], coreline_points[:, 2], '-o', markersize=2)
-    
-    # Plot starting point
-    ax.scatter(q_initial[0,0].cpu(), q_initial[0,1].cpu(), q_initial[0,2].cpu(), color='red', s=100, label='Start Point')
-    
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    ax.set_title('Extracted Vortex Coreline using Variational Method')
-    ax.legend()
-    plt.show()
+        return np.array(curve_q).squeeze(), np.array(curve_q_dot).squeeze()
