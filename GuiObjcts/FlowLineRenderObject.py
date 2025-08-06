@@ -466,7 +466,7 @@ class FlowLineObject(Object):
         
         step_size = self.getValue("stepSize")
         max_iteration = self.getValue("maxIteration")
-        method = self.getValue("integrator")
+        method = self.getOptionValue("integrator")
 
         args_list = [
             (vector_field, pos3d, time, step_size, max_iteration, method)

@@ -6,6 +6,8 @@ from .VisualizationEngine import getEngine
 from .Object import getScene
 from FLowUtils.vtk_coreline import *
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
+from FLowUtils.VectorField3d import UnsteadyVectorField3D
+from .varational_coreline import execute_varational_coreline_extractor
 
 #enum for instance type
 InstanceTypes=[
@@ -67,6 +69,13 @@ class GeometryRenderObject(VertexArrayObject):
                                                                               [0.2,0,0]])))
         self.addAction("delete geometry",lambda obj:obj.deleteGeometry(obj.getOptionValue("activeGeometry")))
 
+
+        self.create_variable("weight_A", 1.0, True,True)
+        self.create_variable("weight_D", 1.0, True,True)
+        self.create_variable("weight_R", 1.0, True,True)
+        self.create_variable("max_RK4_iter", 10, True)
+        self.create_variable("ds", 0.05, True,True)
+
         def extract_coreline2d_vtk(obj:GeometryRenderObject) -> None:
             """extract coreline from active field"""
             fieldname=self.actFieldObject.getActiveFieldName()
@@ -110,21 +119,44 @@ class GeometryRenderObject(VertexArrayObject):
                 print("No vortex corelines found with current parameters")
 
         def extract_coreline3d_variantional(obj:GeometryRenderObject) -> None:
+            import torch
             """extract coreline from active field"""
             fieldname=self.actFieldObject.getActiveFieldName()
             time=self.actFieldObject.time()
             vector_field:UnsteadyVectorField3D = self.actFieldObject.getActiveField()  
             if vector_field is None:
                 return
-            lengthFilter=obj.getValue("coreline_length_filter") 
-            threshold=obj.getValue("coreline_threshold")
             method='variantional'
             resultName=f"vortex_coreline__{fieldname}_{method}"
-            if resultName in obj.cached_curves:
+            if resultName in obj.cached_curves.keys():
                 del obj.cached_curves[resultName]
-            curves = extract_vortex_corelines_3d_variantional(vector_field, time, lengthFilter, threshold)
-            if curves:
-                obj.add_curve(f"vortex_coreline3d__{fieldname}_{method}", curves,segments=self.getValue("segments"),instanceType="curve_3D")    
+            weight_A=obj.getValue("weight_A")
+            weight_D=obj.getValue("weight_D")
+            weight_R=obj.getValue("weight_R")
+            seeds_data = self.indicatorObject.getValue("SeedingGroup1")
+            #initialize q as seeds[0], qdot as vector value at seeds[0]
+            q0,time=seeds_data[0][0],seeds_data[0][1]
+            q_dot0=vector_field.get_vector(q0[0],q0[1],q0[2],time)
+            q_dot0=q_dot0/np.linalg.norm(q_dot0)
+            q_dot0=q_dot0.reshape(1,-1)
+            q0=q0.reshape(1,-1)
+            q_dot0=torch.from_numpy(q_dot0)
+
+            timeWindow=0.0
+            config = {
+                'weight_A': weight_A,
+                'weight_D': weight_D,
+                'weight_R': weight_R,
+                't0': time,
+                't_T': time + timeWindow,
+                'time_steps': 10, # Reduced for performance during testing
+                'max_RK4_iter': obj.getValue("max_RK4_iter"),
+                'ds': obj.getValue("ds"),
+            }
+            curves = execute_varational_coreline_extractor(vector_field, q0,q_dot0,config)
+            curves=np.array(curves)
+            if curves.shape[0]>0:
+                obj.add_curve(resultName, curves,segments=self.getValue("segments"),instanceType="curve_3D")    
 
         self.addAction("extract coreline",lambda obj:extract_coreline2d_vtk(obj))
         self.addAction("extract coreline3d",lambda obj:extract_coreline3d_vtk(obj))
@@ -154,6 +186,7 @@ class GeometryRenderObject(VertexArrayObject):
         super().postInit()
         self.actFieldObject=self.parentScene.getObject("ActiveField") if self.parentScene.hasObject("ActiveField") else None
         self.flowlineObject=self.parentScene.getObject("flowline") if self.parentScene.hasObject("flowline") else None
+        self.indicatorObject=self.parentScene.getObject("indicator") if self.parentScene.hasObject("indicator") else None
 
     
     def add_curve(self, name, points, segments=8,instanceType:str="curve_2D"):
