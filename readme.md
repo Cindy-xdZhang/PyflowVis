@@ -15,20 +15,29 @@ A simplified Python fluid visualization renderer and GUI based on imgui, possibl
 - **Scalar Field**: Supports visualization of scalar fields (e.g., magnitude, vorticity) as color maps or overlays.
 
 ### 3D Vector Field Visualization
-- **(wip)**: 3D features are under development. Planned features include 3D vector glyphs, 3D pathlines, and observer-relative isosurface/pathline filtering.
+- **Basic:** 3 D vector glyphs, 3D pathlines,streamlines,coreline using vtkVortexCore lower Order(v||a).
+- **(wip)**: Other 3D features are under development. Planned features include iso-surface rendering, volume rendering of scalar field, observer-relative isosurface/pathline filtering, etc.
 
 
-## Install dependency for PyFlowVis
-``` 
+## Installation
+
+To install the necessary dependencies for PyFlowVis, run:
+```bash
 pip install -r requirements_gui.txt
 ```
-## Start the visualization Engine
-```
+
+## Running the Visualization Engine
+To start the engine, execute:
+```bash
 python main.py
 ```
-## Instruction for developer
-0. PyflowVis is using an Engine-Plugin system, you can define your own object(with variables and custom UI interfaces), and pluguin to the system, then it will become a imgui pannel, you can get thoes variables Example code:
-```
+
+## Developer Instructions
+
+PyFlowVis utilizes an engine-plugin architecture. You can define custom objects with their own variables and UI elements and integrate them into the system as ImGui panels.
+
+For example:
+```python
 class GuiTest(Object):
     def __init__(self):
         super().__init__("GuiTest")
@@ -55,29 +64,25 @@ class GuiTest(Object):
         self.create_variable("testDictionary",testDictionary,False)
 ```
 
-1. [`VisualizationEngine.py`](./GuiObjcts/VisualizationEngine.py) is the main logic of this Engine-Plugin system. Check  [`PlanarManifold.py`](./GuiObjcts/PlanarManifold.py) as an example how to use objects, and then you can write your own object and plugin to the system.
-   
-2. For performance-senstive operation, you can write C++ functions in the 'Cppmodules ' folder and build with CMake to export C++ functions to Python (using pybind), e.g,. CppProjects\PybindCppModules\LicRendering.cpp. A pythond interface to use pybind c++ LicRendering is given in: FLowUtils\LicRenderer.py
-   
-3. For pure cpp program , write it in  'CppProjects' folder and build with CMake, e.g. Vastitas data generator.
+1. **Engine-Plugin System**: The core logic is in [`VisualizationEngine.py`](./GuiObjcts/VisualizationEngine.py). See [`PlanarManifold.py`](./GuiObjcts/PlanarManifold.py) for an example of how to create and use custom objects.
 
-# TODO list General
-1. add Lic for the plane.
-2. reference frame transformation
-3. 3d field
-4. optc optimize di term +ci term
+2. **Performance-Sensitive Operations**: For demanding tasks, write C++ functions in the `CppProjects/PybindCppModules` folder and build them with CMake to export them to Python using PyBind11. An example of a Python interface for a C++ module is `FLowUtils/LicRenderer.py`, which wraps the C++ LIC renderer.
+
+3. **Standalone C++ Programs**: For pure C++ applications, such as the Vatistas data generator, place the source code in the `CppProjects` folder and build it using CMake.
 
 
 
 
-# Project 1: VortexTransformer: End‐to‐End Objective Vortex Detection in 2D Unsteady Flow Using Transformers
+# Project 1: VortexTransformer
+End‐to‐End Objective Vortex Detection in 2D Unsteady Flow Using Transformers
+
 ![Weixin Screenshot_20250429110328](https://github.com/user-attachments/assets/4c3b0712-e8bc-4838-bf4a-463938b3da9c)
 
-The implementation of the "VortexTransformer: End‐to‐End Objective Vortex Detection in 2D Unsteady Flow Using Transformers" project includes three parts:
+The implementation of the "VortexTransformer" project consists of three main components:
 
-> + A.  Vastitas training data generation implemented in C++: CppProjects/src/flowGenerator.cpp and main.cpp.
-> + B.  licrender implemented with pybind/C++ for fast Line Integral Convolution (LIC) rendering from Python: CppProjects/PybindCppModules
-> + C.  VortexTransformer model components: [`DeepUtils\models\segmentation\pathline_transformer.py`](./DeepUtils/models/segmentation/pathline_transformer.py)
+- **A. Vatistas Data Generator**: A C++ tool for generating training data, located in `CppProjects/src/flowGenerator.cpp` and `main.cpp`.
+- **B. LIC Renderer**: A high-performance Line Integral Convolution (LIC) renderer implemented in C++ and exposed to Python via PyBind11. The source code is in `CppProjects/PybindCppModules`.
+- **C. VortexTransformer Model**: The core model components are implemented in [`DeepUtils/models/segmentation/pathline_transformer.py`](./DeepUtils/models/segmentation/pathline_transformer.py).
 
 ### Install dependency for project 1
 ``` 
@@ -86,7 +91,7 @@ pip install -r requirements.txt
 ```
 
 ### Build Vatistas velocity data generator
-
+Due to the size of dataset, we can't share it here, but you can request by contact my email or generate the sythetic Vatistas dataset by yourself: Built the project using CMAKE, and  then open the FlowGenerator.sln in visual studio and generate your dataset.
 ```
 cd  CppProjects
 Git submodule update --init
@@ -94,15 +99,24 @@ mkdir build
 cd build
 cmake ..  -B .
 ```
-### Train & Test Vortex Transformer
-``` 
-python train.py  --config config/segmentation/pathline_transformer.yaml
-                        //config/segmentation/vortexboundary_unet.yaml for runing other baselines     
-python test.py  --config config/segmentation/pathline_transformer.yaml             
-``` 
+
+### Training and Testing the Vortex Transformer
+Once the dataset is generated, you can train the model:
+```bash
+python train.py --config config/segmentation/pathline_transformer.yaml --data_dir "PATH_TO_DATASET"
+```
+
+We also provide a pretrained model for testing, first unzip trainedVortexTransformer/demoValidationDataset.7z(.001,.002) as folder "trainedVortexTransformer/demoValidationDataset", then:
+```bash
+# Test the pretrained VortexTransformer model
+python test.py --config config/segmentation/pathline_transformer.yaml --data_dir ./trainedVortexTransformer/demoValidationDataset/ --model_path ./trainedVortexTransformer/best_checkpoint.pth.tar
+
+# Run other baselines (e.g., VortexBoundary-UNet)
+python train.py --config config/segmentation/vortexboundary_unet.yaml --data_dir "PATH_TO_DATASET"
+```
 
 If you use this code, please cite:
-```
+```bibtex
 @inproceedings{zhang2025vortextransformer,
   title={VortexTransformer: End-to-End Objective Vortex Detection in 2D Unsteady Flow Using Transformers},
   author={Zhang, Xingdi and Rautek, Peter and Hadwiger, Markus},
@@ -121,12 +135,13 @@ If you use this code, please cite:
 
 
 
-# Project 2: Exploring 3D Unsteady Flow using 6D Observer Space Interactions
+# Project 2: Exploring 3D Unsteady Flow with 6D Observer-Space Interactions
 
 ![teaser3D](./assets/readmePics/teaser.png)
 
 ### Code
-We provide C++ code for the algorithm proposed in our paper "Exploring 3D Unsteady Flow using 6D Observer Space Interactions." Please note that while our implementation relies on a custom C++-based visualization engine, we are unable to share the full engine source code. Instead, we provide extracted and slightly modified portions of the code to improve readability and accessibility.
+We provide C++ code for the algorithm proposed in our paper "Exploring 3D Unsteady Flow using 6D Observer Space Interactions." Please note that while our implementation relies on a custom C++-based visualization engine, we are unable to share the full engine source code. Instead, we provide extracted and slightly modified portions of the c++ code to improve readability and accessibility.
+
 
 The implementation includes the following key components:
 
@@ -142,6 +157,7 @@ The implementation relies on several utility classes and interfaces defined in:
 For a complete understanding of the algorithms, please refer to the supplementary materials of our paper which include detailed pseudocode for all core components.
 Our code relies on VTK-9.4.1.
 
+***Note*** : We will gradually migrate these C++ code to PyFlowVis. Once done, you will see specification and links to python files.
 
 
 If you use this code, please cite:

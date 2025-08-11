@@ -9,10 +9,13 @@ from FLowUtils.GlyphRenderer import glyphsRenderSteadyFieldAlgorthim
 def getDatasetRootaMeta(root_directory):
     try_path0=os.path.join(root_directory, 'meta.json')
     try_path1=os.path.join(root_directory, 'train/meta.json')
+    try_path2=os.path.join(root_directory, 'validation/meta.json')
     if os.path.exists(try_path0):
         return read_rootMetaGridresolution(try_path0)
     elif os.path.exists(try_path1):
         return read_rootMetaGridresolution(try_path1)
+    elif os.path.exists(try_path2):
+        return read_rootMetaGridresolution(try_path2)
     else:
         raise ValueError("no root meta file found.")
 

@@ -200,7 +200,9 @@ def argParseAndPrepareConfig():
     parser.add_argument("--learning_rate", type=float, help="Learning rate for the optimizer")
     parser.add_argument("--wandb", action='store_true', help="Enable wandb logging")
     parser.add_argument("--num_workers", type=int, help="Number of data loading workers")
-
+    parser.add_argument("--data_dir", type=str, default=None,help="path to the dataset")
+    parser.add_argument("--model_path", type=str, default=None,help="path to the model")
+    
     args = parser.parse_args()
     cfg = EasyConfig()
     cfg.load(args.config, recursive=True)
@@ -218,6 +220,10 @@ def argParseAndPrepareConfig():
         cfg['wandb'] = True
     if args.num_workers is not None:
         cfg['dataloader']['num_workers'] = args.num_workers
+    if args.data_dir is not None:
+        cfg['dataset']['data_dir'] = args.data_dir
+    if args.model_path is not None:
+        cfg['model_path'] = args.model_path
 
     if 'random_seed' not in cfg:
         cfg['random_seed']=np.random.randint(0,5000)

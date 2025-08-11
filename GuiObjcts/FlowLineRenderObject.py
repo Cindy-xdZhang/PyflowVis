@@ -5,6 +5,8 @@ from FLowUtils.VectorField2d import *
 from FLowUtils.VectorField3d import *
 from OpenGL import GL as gl 
 import ctypes
+import numpy as np
+from FLowUtils.ScalarField2d import *
 
 
 
@@ -278,6 +280,84 @@ def compute_streamline_3D(args):
 
 
 
+
+def _compute_ftle_at_point(args):
+    """
+    Helper function to compute FTLE at a single point using the local cross method.
+    This function is designed to be called by a multiprocessing pool.
+    """
+    vector_field, start_pos, t0, integration_time, step_size, method, epsilon = args
+    
+    # Create four neighboring points
+    pos_x_plus = start_pos + np.array([epsilon, 0, 0])
+    pos_x_minus = start_pos - np.array([epsilon, 0, 0])
+    pos_y_plus = start_pos + np.array([0, epsilon, 0])
+    pos_y_minus = start_pos - np.array([0, epsilon, 0])
+
+    # Integrate pathlines for the four neighbors
+    path_x_plus = pathline_integration_one_direction_2D(vector_field, pos_x_plus, t0, t0 + integration_time, step_size, 5000, method)
+    path_x_minus = pathline_integration_one_direction_2D(vector_field, pos_x_minus, t0, t0 + integration_time, step_size, 5000, method)
+    path_y_plus = pathline_integration_one_direction_2D(vector_field, pos_y_plus, t0, t0 + integration_time, step_size, 5000, method)
+    path_y_minus = pathline_integration_one_direction_2D(vector_field, pos_y_minus, t0, t0 + integration_time, step_size, 5000, method)
+
+    # Get the final positions
+    final_pos_x_plus = path_x_plus[-1][0][:2]
+    final_pos_x_minus = path_x_minus[-1][0][:2]
+    final_pos_y_plus = path_y_plus[-1][0][:2]
+    final_pos_y_minus = path_y_minus[-1][0][:2]
+
+    # Estimate the flow map gradient (Jacobian) using central differences
+    dPhi_dx = (final_pos_x_plus - final_pos_x_minus) / (2 * epsilon)
+    dPhi_dy = (final_pos_y_plus - final_pos_y_minus) / (2 * epsilon)
+    
+    jacobian = np.array([[dPhi_dx[0], dPhi_dy[0]],
+                         [dPhi_dx[1], dPhi_dy[1]]])
+
+    # Compute the Cauchy-Green deformation tensor (J^T * J)
+    cauchy_green = np.dot(jacobian.T, jacobian)
+
+    # Compute the eigenvalues of the Cauchy-Green tensor
+    eigenvalues, _ = np.linalg.eig(cauchy_green)
+    max_eigenvalue = np.max(eigenvalues)
+
+    # Compute the FTLE value
+    if max_eigenvalue > 0 and integration_time != 0:
+        ftle = (1.0 / abs(integration_time)) * np.log(np.sqrt(max_eigenvalue))
+    else:
+        ftle = 0.0
+        
+    return ftle
+
+def compute_FTLE_2D(vector_field:UnsteadyVectorField2D, t0:float, result_resolution:tuple, step_size:float, integral_method:str, integration_time:float, epsilon:float=1e-4) -> ScalarField2D:
+    """
+    Estimate FTLE using a local "cross" at every seeding point of a grid.
+    This function integrates four neighboring pathlines to estimate the flow map gradient
+    and thus the FTLE value at each point on the grid.
+    """
+    domain_min = vector_field.domainMinBoundary
+    domain_max = vector_field.domainMaxBoundary
+    
+    # Create the grid of seeding points
+    x = np.linspace(domain_min[0], domain_max[0], result_resolution[0])
+    y = np.linspace(domain_min[1], domain_max[1], result_resolution[1])
+    xx, yy = np.meshgrid(x, y)
+    seeding_points = np.vstack([xx.ravel(), yy.ravel(), np.zeros_like(xx.ravel())]).T
+
+    args_list = [
+        (vector_field, pos, t0, integration_time, step_size, integral_method, epsilon)
+        for pos in seeding_points
+    ]
+
+    ftle_values = np.zeros(result_resolution[0] * result_resolution[1], dtype=np.float32)
+    
+    # Use a process pool to compute FTLE in parallel
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        results = executor.map(_compute_ftle_at_point, args_list)
+        ftle_values = np.array(list(results), dtype=np.float32)
+
+    ftle_grid = ftle_values.reshape((result_resolution[1], result_resolution[0]))
+    
+    return ScalarField2D(ftle_grid, domain_min, domain_max)
 
 
 

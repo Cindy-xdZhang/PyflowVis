@@ -105,7 +105,6 @@ class TestSegmentation(object):
         device=self.device
         segError=0.0
         meta_=test_data_loader.dataset.dastasetMetaInfo
-        Xdim,Ydim=meta_["Xdim"],meta_["Ydim"]
         test_loss=0
      
         for batch_idx, (data, label) in enumerate(test_data_loader):
@@ -230,8 +229,6 @@ class TestPathlineSeg(object):
         out_folder=f"./testOutput/{self.runName}"
         className=str(__class__)
         print(f"{className} save to {out_folder}")
-        Xdim=test_data_loader.dataset.dastasetMetaInfo["Xdim"]
-        Ydim=test_data_loader.dataset.dastasetMetaInfo["Ydim"]
         Tdim=getattr(test_data_loader.dataset.dastasetMetaInfo,"unsteadyFieldTimeStep",5)
         DomainMin=test_data_loader.dataset.dastasetMetaInfo["domainMinBoundary"]
         DomainMax=test_data_loader.dataset.dastasetMetaInfo["domainMaxBoundary"]
@@ -251,6 +248,8 @@ class TestPathlineSeg(object):
             label=label.cpu().numpy()
             name=test_data_loader.dataset.getSampleName(sample)
             
+            #xdim ydim is from vectorFieldImage
+            Xdim,Ydim=vectorFieldImage.shape[2],vectorFieldImage.shape[3]
             UnsteadyField=  UnsteadyVectorField2D(Xdim,Ydim,Tdim,DomainMin ,DomainMax)
             UnsteadyField.field=vectorFieldImage.transpose(0,-1).cpu().numpy()
             label_seg=pathlineSegToFieldSeg(pathlines,label,Xdim,Ydim,DomainMin,DomainMax)
@@ -335,23 +334,25 @@ def test_model(model,cfg):
 
     
 
-def test_pipeline(model_path=None):
+def test_pipeline():
     cfg=argParseAndPrepareConfig()
+    model_path=cfg['model_path']
     readDataSetRelatedConfig(cfg)
-    model = build_model_from_cfg(cfg.model)
+
     if model_path is not None and os.path.exists(model_path):
         checkpoint=torch.load(model_path) 
+        model = build_model_from_cfg(cfg.model)
+
         model.load_state_dict(checkpoint['state_dict'])
-    
-    model.to(cfg['device'])
-    test_model(model,cfg)
+        model.to(cfg['device'])
+        test_model(model,cfg)
   
 
 
 # test_model_path="outputModels\\TobiasVortexBoundaryUnet\\bs_256_ep_100_lr_0.0001_20240924_170417_seed_4462\\best_checkpoint.pth.tar"    
-test_model_path="outputModels\\bs_100_ep_200_lr_0.0001_20240926_123336_seed_3097\\best_checkpoint.pth.tar"    
+# test_model_path="outputModels\\bs_100_ep_200_lr_0.0001_20240926_123336_seed_3097\\best_checkpoint.pth.tar"    
 if __name__ == '__main__':
-    test_pipeline(test_model_path)
+    test_pipeline()
 
 
 

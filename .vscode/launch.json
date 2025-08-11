@@ -15,8 +15,12 @@
             "console": "integratedTerminal",
             "args": [
                 // "--config",
-                // "config/segmentation/vortexboundary_unet.yaml"
-                // "config/segmentation/pathline_transformer.yaml"
+                // // "config/segmentation/vortexboundary_unet.yaml"
+                // "config/segmentation/pathline_transformer.yaml",
+                // "--data_dir",
+                // "./trainedVortexTransformer/demoValidationDataset/",
+                // "--model_path",
+                // "./trainedVortexTransformer/best_checkpoint.pth.tar"
             ]
         }
     ]
