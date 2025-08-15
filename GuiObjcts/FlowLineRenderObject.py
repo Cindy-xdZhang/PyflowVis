@@ -169,15 +169,15 @@ def streamline_integration_one_direction_2D(
         elif NumericalMethod == "RK5":
             t = time
             k1 = vectorField.get_vector(pos[0], pos[1], t)
-            p2 = pos + abs_step_size * (1/4 * k1)
+            p2 = pos[:2] + abs_step_size * (1/4 * k1)
             k2 = vectorField.get_vector(p2[0], p2[1], t)
-            p3 = pos + abs_step_size * (3/32 * k1 + 9/32 * k2)
+            p3 = pos[:2] + abs_step_size * (3/32 * k1 + 9/32 * k2)
             k3 = vectorField.get_vector(p3[0], p3[1], t)
-            p4 = pos + abs_step_size * (1932/2197 * k1 - 7200/2197 * k2 + 7296/2197 * k3)
+            p4 = pos[:2] + abs_step_size * (1932/2197 * k1 - 7200/2197 * k2 + 7296/2197 * k3)
             k4 = vectorField.get_vector(p4[0], p4[1], t)
-            p5 = pos + abs_step_size * (439/216 * k1 - 8 * k2 + 3680/513 * k3 - 845/4104 * k4)
+            p5 = pos[:2] + abs_step_size * (439/216 * k1 - 8 * k2 + 3680/513 * k3 - 845/4104 * k4)
             k5 = vectorField.get_vector(p5[0], p5[1], t)
-            p6 = pos + abs_step_size * (-8/27 * k1 + 2 * k2 - 3544/2565 * k3 + 1859/4104 * k4 - 11/40 * k5)
+            p6 = pos[:2] + abs_step_size * (-8/27 * k1 + 2 * k2 - 3544/2565 * k3 + 1859/4104 * k4 - 11/40 * k5)
             k6 = vectorField.get_vector(p6[0], p6[1], t)
             delta = abs_step_size * (16/135 * k1 + 6656/12825 * k3 + 28561/56430 * k4 - 9/50 * k5 + 2/55 * k6)
         elif NumericalMethod == "Euler":
@@ -186,7 +186,8 @@ def streamline_integration_one_direction_2D(
         else:
             raise ValueError(f"Unknown NumericalMethod: {NumericalMethod}")
         
-        pos = pos + delta
+        pos[0] = pos[0] + delta[0]
+        pos[1] = pos[1] + delta[1]
         path.append((pos.copy(), time))
         
         # Check if we've gone out of bounds (optional safety check)
@@ -195,7 +196,6 @@ def streamline_integration_one_direction_2D(
             break
     
     return path
-
 
 def streamline_integration_one_direction_3D(
     vectorField: UnsteadyVectorField3D,
@@ -277,7 +277,13 @@ def compute_streamline_3D(args):
     full_path = backward + forward[1:]
     return full_path
 
-
+def compute_streamline_2D(args):
+    vector_field, pos3d, time, step_size, max_iteration, method = args
+    forward = streamline_integration_one_direction_2D(vector_field, pos3d, time, step_size, max_iteration, method, "forward")
+    backward = streamline_integration_one_direction_2D(vector_field, pos3d, time, step_size, max_iteration, method, "backward")
+    backward = backward[::-1]
+    full_path = backward + forward[1:]
+    return full_path
 
 
 
@@ -538,7 +544,7 @@ class FlowLineObject(Object):
             return
 
         vector_field:UnsteadyVectorField3D = actFieldWidget.getActiveField()
-        if vector_field is None or not isinstance(vector_field, UnsteadyVectorField3D):
+        if vector_field is None :
             return
 
         time = actFieldWidget.time()
@@ -555,6 +561,9 @@ class FlowLineObject(Object):
         
         if vector_field.getDim() == 3:
             self.streamline_cache = list(map(compute_streamline_3D, args_list))
+            self.MappingFlowlineAsRenderingVAO(self.streamline_cache)
+        else:
+            self.streamline_cache = list(map(compute_streamline_2D, args_list))
             self.MappingFlowlineAsRenderingVAO(self.streamline_cache)
 
         self.streamline_dirty = False

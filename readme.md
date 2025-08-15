@@ -110,9 +110,14 @@ We also provide a pretrained model for testing, first unzip trainedVortexTransfo
 ```bash
 # Test the pretrained VortexTransformer model
 python test.py --config config/segmentation/pathline_transformer.yaml --data_dir ./trainedVortexTransformer/demoValidationDataset/ --model_path ./trainedVortexTransformer/best_checkpoint.pth.tar
+```
 
+We also implement other baselines talked in our paper, and you can run them by:
+```bash
 # Run other baselines (e.g., VortexBoundary-UNet)
 python train.py --config config/segmentation/vortexboundary_unet.yaml --data_dir "PATH_TO_DATASET"
+python train.py --config config/classification/vortex_viz.yaml --data_dir "PATH_TO_DATASET"
+python train.py --config config/segmentation/mvu_net.yaml --data_dir "PATH_TO_DATASET"
 ```
 
 If you use this code, please cite:
@@ -162,7 +167,7 @@ Our code relies on VTK-9.4.1.
 
 If you use this code, please cite:
 
-```
+```bibtex
 @inproceedings{zhang2025Explore3DUnsteadyFlow,
   title={Exploring 3D Unsteady Flow using 6D Observer Space Interactions},
   author={Zhang, Xingdi and  Ageeli,Amani and  Theu{\ss}l,Thomas and  Hadwiger, Markus and  Rautek, Peter},

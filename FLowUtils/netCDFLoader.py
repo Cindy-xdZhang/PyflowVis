@@ -27,7 +27,7 @@ class NetCDFLoader:
             dimensions = list(dataset.variables.keys())
             time_axis_name=None
             for dim in dimensions:
-                if str(dim).lower()  in ["time", "tdim"]:
+                if str(dim).lower()  in ["time", "tdim","t"]:
                     time_axis_name=dim
 
             spatial_dims = [dim for dim in dimensions if str(dim).lower()  in ["z","y","x",'xdim',"ydim","zdim"]]
@@ -35,11 +35,11 @@ class NetCDFLoader:
                 raise ValueError(f"Expected 2 spatial dimensions, found {len(spatial_dims)}")
             xdim_axis=None
             for dim in spatial_dims:
-                if str(dim).lower()  in ["xdim", "X"]:
+                if str(dim).lower()  in ["xdim", "x"]:
                     xdim_axis=dim
             ydim_axis=None
             for dim in spatial_dims:
-                if str(dim).lower()  in ["ydim", "Y"]:
+                if str(dim).lower()  in ["ydim", "y"]:
                     ydim_axis=dim
                     
             Xdim ,  Ydim = len(dataset.dimensions[xdim_axis]) ,len(dataset.dimensions[ydim_axis]) 
@@ -97,7 +97,51 @@ class NetCDFLoader:
         return vector_field
     
     @staticmethod
- 
+    def save_vector_field2d(file_path: str,vector_field: UnsteadyVectorField2D,timestep_begin=-1,timestep_end=-1):
+        if not isinstance(vector_field, UnsteadyVectorField2D):
+            raise TypeError("Expected UnsteadyVectorField2D instance.")
+
+        # Ensure field data is numpy array
+        field_data = vector_field.getDataAsNumpy()
+
+        # Adjust time steps based on input parameters
+        total_timesteps = vector_field.time_steps
+        if timestep_begin < 0:
+            timestep_begin = 0
+        if timestep_end < 0 or timestep_end > total_timesteps:
+            timestep_end = total_timesteps
+        if timestep_begin >= timestep_end:
+            raise ValueError(f"Invalid time range: begin={timestep_begin}, end={timestep_end}")
+
+        # Get sliced data
+        time_slice = slice(timestep_begin, timestep_end)
+        sliced_field_data = field_data[time_slice, :, :, :]
+        vector_field_time = np.linspace(vector_field.tmin, vector_field.tmax, vector_field.time_steps)
+        sliced_time = vector_field_time[time_slice]
+
+        with nc.Dataset(file_path, 'w', format='NETCDF4') as dataset:
+            dataset.createDimension('time', sliced_time.shape[0])
+            dataset.createDimension('x', vector_field.Xdim)
+            dataset.createDimension('y', vector_field.Ydim)
+
+            # Create variables
+            times = dataset.createVariable('time', 'f8', ('time',))
+            xs = dataset.createVariable('x', 'f8', ('x',))
+            ys = dataset.createVariable('y', 'f8', ('y',))
+            us = dataset.createVariable('u', 'f8', ('time', 'y', 'x'))
+            vs = dataset.createVariable('v', 'f8', ('time', 'y', 'x'))
+
+            # Write data
+            times[:] = sliced_time
+            # Calculate x and y coordinates
+            vector_field_x = np.linspace(vector_field.domainMinBoundary[0], vector_field.domainMaxBoundary[0], vector_field.Xdim)
+            vector_field_y = np.linspace(vector_field.domainMinBoundary[1], vector_field.domainMaxBoundary[1], vector_field.Ydim)
+     
+
+            xs[:] = vector_field_x
+            ys[:] = vector_field_y
+            us[:] = sliced_field_data[:, :, :, 0]
+            vs[:] = sliced_field_data[:, :, :, 1]
 
     @staticmethod
     @measure_execution_time

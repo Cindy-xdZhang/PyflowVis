@@ -7,11 +7,10 @@ import OpenGL.GL as gl
 from FLowUtils.ScalarField2d import *
 
 class PlanarManifold(VertexArrayObject):
-    def __init__(self,Xdim:int=8,Ydim:int=8):
+    def __init__(self,Div:int=8,):
         super().__init__(f"plane")
         self.engine=getEngine()
-        self.Xdim=Xdim
-        self.Ydim=Ydim       
+        self.DimDiv=Div   
         self.colormapMat0=Material("planarManifoldMaterial","planarManifoldMat",texture0="builtIn")
         self.colormapMat1=getShaderManager().getMaterial("colormapMat")
         self.setMaterial(self.colormapMat1)# when there is no scalar field, use the colormapMat0 WILL CAUSE WIRED IMGUI BUGS
@@ -50,7 +49,7 @@ class PlanarManifold(VertexArrayObject):
         if vectorField is None:
             return
 
-        grid_size = [self.Xdim, self.Ydim]
+        grid_size = [int(vectorField.Xdim/self.DimDiv)+1, int(vectorField.Ydim/self.DimDiv)+1]
         self.point_on_plane = None
         self.normal = None
 
@@ -154,6 +153,8 @@ class PlanarManifold(VertexArrayObject):
         gl.glDrawElements(gl.GL_TRIANGLES, len(self.indices), gl.GL_UNSIGNED_INT, None)
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)
+        gl.glActiveTexture(gl.GL_TEXTURE0) 
+        gl.glBindTexture(gl.GL_TEXTURE_3D, 0)
 
 
 

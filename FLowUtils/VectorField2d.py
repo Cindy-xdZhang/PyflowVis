@@ -114,11 +114,12 @@ class IDiscreteField2D(ABC):
         self.gridInterval = [(domainMaxBoundary[0]-domainMinBoundary[0])/(Xdim-1),(domainMaxBoundary[1]-domainMinBoundary[1])/(Ydim-1)]
         self.tmin=domainMinBoundary[2]
         self.tmax=domainMaxBoundary[2]
-        self.timeInterval = (self.tmax-self.tmin)/(timsteps-1)
+        self.timeInterval = (self.tmax-self.tmin)/(timsteps-1) if timsteps>1 else 0
         self.valid=(self.domainMinBoundary[0]  <= self.domainMaxBoundary[0] and self.domainMinBoundary[1]  <= self.domainMaxBoundary[1])and (1 <= Xdim  and 1 <= Ydim)  and (timsteps>=1) and (self.timeInterval>=0)
         assert self.valid
         self.__name = f"Unnamed_Field_{Xdim}x{Ydim}_{timsteps}t_ID{np.random.randint(0, 10000)}"
 
+   
     # def getName(self):
     #     return self.__name
     # def setName(self, name):
@@ -144,7 +145,7 @@ class IDiscreteField2D(ABC):
     def getPhysicalTime(self,idt:int)->float:
         return self.timeInterval*idt+self.tmin
     def getFloatGridTime(self,time:float)->float:
-        return float((time - self.tmin) / self.timeInterval)
+        return float((time - self.tmin) / self.timeInterval) if self.timeInterval>0 else 0
     def getIntGridTime(self,time:float)->int:
         return int((time - self.tmin) / self.timeInterval)
     def convert_physical_pos_2_grid_pos(self, posX:float,posY:float):

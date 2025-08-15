@@ -13,7 +13,8 @@ from GuiObjcts.FlowLineRenderObject import *
 from GuiObjcts.Indicator import *
 from GuiObjcts.geometryRender import *
 from GuiObjcts.ActiveFieldObject import *
-
+from FLowUtils.JHTDB_Lodader import JHTDB_Lodader
+from typing import Tuple
 def test_opengl_state():
     program = gl.glGetIntegerv(gl.GL_CURRENT_PROGRAM)
     depth_test = gl.glIsEnabled(gl.GL_DEPTH_TEST)
@@ -162,14 +163,17 @@ def main():
     engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
 
-    # vectorField2d= rotation_four_center((256,256),128)
-    # actFieldWidget.insertField("rfc",vectorField2d)
+    vectorField2d= rotation_four_center((256,256),128)
+    actFieldWidget.insertField("rfc",vectorField2d)
 
-    flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
-    cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
-    vectorField3d= NetCDFLoader.load_vector_field3d(cylider_netCDF,64);
-    actFieldWidget.insertField("tornado3d",vectorField3d)
+    # flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
+    # cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
+    # vectorField3d= NetCDFLoader.load_vector_field3d(cylider_netCDF,64);
+    # actFieldWidget.insertField("tornado3d",vectorField3d)
 
+    # jhtdb_loader=JHTDB_Lodader()
+    # vf2d=jhtdb_loader.load_2d_unsteadyFlow("channel5200","xz",64,64, 0.9,(0, 0.4*np.pi),(0, 0.15*np.pi),1.0,1.0,1,temporal_method="none")
+    # actFieldWidget.insertField("channel",vf2d)
 
     # args=config['training']
     # # device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")

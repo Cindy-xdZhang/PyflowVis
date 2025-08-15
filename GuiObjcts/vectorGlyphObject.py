@@ -147,7 +147,7 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         self.create_variable_callback("scale",1.0,dirtyCallBack,False)
         self.create_variable_callback("radius",0.01,dirtyCallBack,False)
         self.create_variable_callback("height",0.1,dirtyCallBack,False)
-        self.create_variable_callback_with_gui_customization("sampling",1.5,dirtyCallBack,False, {'widget': 'slider_float', 'min': 0.0, 'max': 1.0})
+        self.create_variable_callback_with_gui_customization("sampling",1.5,dirtyCallBack,False, {'widget': 'slider_float', 'min': 0.01, 'max': 5.0})
         self.create_variable_gui("color",(0.2,-.2,0.2),False,{'widget': 'color_picker'})
 
     def postInit(self):
@@ -159,7 +159,7 @@ class VertexArrayVectorGlyph(VertexArrayObject):
     def _vectorized_interpolation_2DVectorField(self, vector_field, time, sampling_distance):
         """Fully vectorized field interpolation for all sample points with 3-channel output"""
         # Calculate time interpolation
-        time_idx = (time - vector_field.tmin) / vector_field.timeInterval
+        time_idx = (time - vector_field.tmin) / vector_field.timeInterval if vector_field.timeInterval>0 else 0
         lower_idx = int(np.floor(time_idx))
         upper_idx = int(np.ceil(time_idx))
         alpha = time_idx - lower_idx
@@ -225,7 +225,9 @@ class VertexArrayVectorGlyph(VertexArrayObject):
 
         # Create position grid - ensure 3D positions (ensure float32)
         positions = np.stack([pos_x, pos_y, np.zeros_like(pos_x, dtype=np.float32)], axis=-1)  # (num_samples_y, num_samples_x, 3)
-        return positions, vectors
+        vectors_reshaped = vectors.reshape(-1, 3)
+        positions_reshaped = positions.reshape(-1, 3)
+        return positions_reshaped, vectors_reshaped
     
     def _vectorized_interpolation_3DVectorField(self, vector_field, time, sampling_distance):
         """Fully vectorized field interpolation for all sample points in 3D."""

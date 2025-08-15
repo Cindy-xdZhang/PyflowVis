@@ -237,7 +237,14 @@ class Object:
         if not visible:
             self.invisibleProperties.append(name)
             
-
+    def delete_variable(self, name:str) -> None:
+        if name in self.persistentProperties:
+            del self.persistentProperties[name]
+        elif name in self.nonPersistentProperties:
+            del self.nonPersistentProperties[name]
+        else:
+            print(f"'{self.name}' object has no attribute '{name}'")
+            return
 
     def create_variable_callback(self, name:str, value:any, callback:callable,persistent:bool=False,visible:bool=True) -> None:
         self.create_variable(name, value, persistent,visible)
