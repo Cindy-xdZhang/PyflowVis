@@ -62,6 +62,8 @@ class Object:
         self.actions = {}
         self.callbacks={}
         self.optionValues = {}
+        # cache for widget callables to avoid repeated lookup per variable
+        self._widget_callable_cache = {}
         self.create_variable("GuiVisible",True,True,False)
 
         self.parentScene=None
@@ -359,13 +361,12 @@ class Object:
                     self.DrawPropertiesInGui(value,parentNamelist=parentNamelist)
                     imgui.tree_pop() 
             elif  typeName=="options": 
-                    callableF= get_imgui_widget_for_type(typeName)
+                    callableF= self._get_widget_callable(key, typeName)
                     changed, new_value = callableF(key,value,self.getOptionValue(key))
                     if changed:
                         self.updateOptionValue(key, new_value)
             else:
-                Customization=self.getGuiCustomization(key,typeName)#some type has multiple way to render in gui, customization is used to select the way
-                callableF= get_imgui_widget_for_type(typeName,Customization)
+                callableF= self._get_widget_callable(key, typeName)
                 if callableF is not None:
                     changed, new_value = callableF(key,value)
                     if changed:
@@ -375,6 +376,19 @@ class Object:
                             #parentName is a list of keys to reach the parent dictionary                           
                             valueDictToOperate=self.getValue(parentNamelist[0]) 
                             operate_on_dict(valueDictToOperate,parentNamelist[1:]+[key],new_value,0)
+
+    def _get_widget_callable(self, key:str, typeName:str):
+        """
+        Return cached imgui widget callable for a variable identified by (key, typeName)
+        and its optional customization. If not cached, resolve and cache it.
+        """
+        Customization=self.getGuiCustomization(key,typeName)
+        cache_key=(key, typeName)
+        callableF=self._widget_callable_cache.get(cache_key)
+        if callableF is None:
+            callableF = get_imgui_widget_for_type(typeName,Customization)
+            self._widget_callable_cache[cache_key]=callableF
+        return callableF
          
     def DrawActionButtons(self) -> None:
         """        
@@ -490,6 +504,15 @@ class Scene(Object):
     
 
     def drawGui(self):
+        if imgui.begin_main_menu_bar():
+            if imgui.begin_menu("File", True):
+                clicked_open, _ = imgui.menu_item("Open", "Ctrl+O")
+                imgui.end_menu()
+            if imgui.begin_menu("Edit", True):
+                imgui.menu_item("Copy", "Ctrl+C")
+                imgui.end_menu()
+            imgui.end_main_menu_bar()
+            
         #draw the scene as an object(draw its properties, if any) 
         if imgui.begin(self.name):
             self.DrawPropertiesInGui(self.persistentProperties)

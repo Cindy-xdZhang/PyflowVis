@@ -12,15 +12,15 @@ class AnalyticalFlowCreator:
         """
         Initialize the analytical flow creator.
 
-        :param expression_x: String, the mathematical expression for the x-component of the flow.
-        :param expression_y: String, the mathematical expression for the y-component of the flow.
+        :param expression_x: String or Callable, x-component expression. If Callable, signature should be f(x, y, t, **params) and return array like (Y, X).
+        :param expression_y: String or Callable, y-component expression. If Callable, signature should be f(x, y, t, **params) and return array like (Y, X).
         :param parameters: Dictionary, additional parameters to be used in the expression.
         """
         self.expression_x = expression_x
         self.expression_y = expression_y
         self.parameters = parameters if parameters is not None else {}
 
-    def create_flow_field(self, grid_size, time_steps, domainBoundaryMin=(-2.0,-2.0,0.0), domainBoundaryMax=(2.0,2.0,2*np.pi)):
+    def create_flow_field(self, grid_size, time_steps, domainBoundaryMin, domainBoundaryMax):
         """
         Create the flow field based on the mathematical expressions.
 
@@ -34,7 +34,7 @@ class AnalyticalFlowCreator:
         Ydim = grid_size[1]
         
         # Adding a time dimension
-        t = np.linspace(0, 2*np.pi, time_steps)
+        t = np.linspace(domainBoundaryMin[2], domainBoundaryMax[2], time_steps)
         
         # Generating grid for x and y dimensions
         x, y = np.meshgrid(
@@ -44,13 +44,23 @@ class AnalyticalFlowCreator:
         
         # Initializing empty arrays for vx and vy with an additional time dimension
         data = np.zeros((time_steps, Ydim, Xdim, 2))
-        local_dict = {'x': x, 'y': y}
-        local_dict.update(self.parameters)  # Add additional parameters to the dictionary
         
         for i, t_val in enumerate(t):
-            local_dict['t'] = t_val
-            vx_time_slice_i = ne.evaluate(self.expression_x, local_dict=local_dict)
-            vy_time_slice_i = ne.evaluate(self.expression_y, local_dict=local_dict)
+            if callable(self.expression_x):
+                vx_time_slice_i = self.expression_x(x, y, t_val, **self.parameters)
+            else:
+                local_dict = {'x': x, 'y': y, 't': t_val}
+                local_dict.update(self.parameters)
+                vx_time_slice_i = ne.evaluate(self.expression_x, local_dict=local_dict)
+
+            if callable(self.expression_y):
+                vy_time_slice_i = self.expression_y(x, y, t_val, **self.parameters)
+            else:
+                # reuse the local_dict with current t
+                if 'local_dict' not in locals():
+                    local_dict = {'x': x, 'y': y, 't': t_val}
+                    local_dict.update(self.parameters)
+                vy_time_slice_i = ne.evaluate(self.expression_y, local_dict=local_dict)
             data[i, :, :, 0] = vx_time_slice_i
             data[i, :, :, 1] = vy_time_slice_i
 
@@ -124,6 +134,31 @@ def beadsFLow(grid_size, timestep, domainBoundaryMin=(-2.0,-2.0,0.0), domainBoun
     if scale != 1.0:
         vectorField2d.field *= scale
     return vectorField2d
+
+
+def double_gyre_2D(grid_size, timestep,Tmax=10,omega=0.2*np.pi):
+	# 2D time-dependent Double Gyre derived from the provided analytical expression (ignore w)
+    # https://shaddenlab.berkeley.edu/uploads/LCS-tutorial/examples.html
+    def u_fn(x, y, t, eps, A, omega):
+        f = eps *np.sin(omega * t) * x**2 + (1.0 - 2.0 * eps * np.sin(omega * t)) * x
+        # u = -sin(pi*f) * cos(pi*y) * (pi*A)
+        return -np.sin(pi * f) * np.cos(pi * y) * (np.pi * A)
+    def v_fn(x, y, t, eps, A, omega):
+        f = eps *np.sin(omega * t) * x**2 + (1.0 - 2.0 * eps * np.sin(omega * t)) * x
+        dfdx = (1.0 - 2.0 * eps * np.sin(omega * t)) + 2.0 * eps * np.sin(omega * t) * x
+        # v = cos(pi*f) * sin(pi*y) * dfdx * (pi*A)
+        return np.cos(pi * f) * np.sin(pi * y) * dfdx * (np.pi * A)
+    
+    flow_creator = AnalyticalFlowCreator(u_fn, v_fn, parameters={'eps': 0.25, 'A': 0.1, 'omega': omega})
+    vectorField2d = flow_creator.create_flow_field(grid_size, timestep, (0.0, 0.0, 0.0), (2.0, 1.0, Tmax))
+    return vectorField2d
+
+
+
+
+
+
+
 
 # def test_analytical_flow_creator():
 #     flow_creator = AnalyticalFlowCreator('cos(y)', '-cos(x)')    

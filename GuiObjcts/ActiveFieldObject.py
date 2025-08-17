@@ -5,6 +5,7 @@ import pygame
 from typeguard import typechecked
 from FLowUtils.ScalarField2d import *
 from .VisualizationEngine import getEngine
+from FLowUtils.FTLE import *
 
 class LICRender(Object):
     def __init__(self,name):
@@ -63,6 +64,19 @@ class ActiveField(Object):
         self.create_variable_gui("scalarFieldOperation", ["MAGNITUDE","CURL","Q_CRITERION","LAMBDA2","IVD"], False)
         self.addAction("compute scalar field",lambda obj:obj.requestScalarField())
 
+        self.create_variable("FTLE_dt_MaxIter_upSampling_timeUps", np.array([0.01,2000,2,1]) ,True)
+
+        def FTLE_2D_CUDA_action(*args, **kwargs):
+            actFieldWidget:ActiveField = self.parentScene.getObject("ActiveField")
+            vector_field:UnsteadyVectorField2D = actFieldWidget.getActiveField()
+            if vector_field is None:
+                return
+            ftle_params=self.getValue("FTLE_dt_MaxIter_upSampling_timeUps")
+            FTLE_dt,MaxIter,upSampling,timeUps=ftle_params[0],ftle_params[1],ftle_params[2],ftle_params[3]
+            resultScalarFieldSlice=compute_FTLE_2D_field_CUDA(vector_field, FTLE_dt, MaxIter,upSampling,timeUps)
+            actFieldWidget.insertScalarField("FTLE_2D_CUDA",resultScalarFieldSlice)      
+        self.addAction("FTLE_2D_CUDA", FTLE_2D_CUDA_action)
+
 
         self.activeField= {}
 
@@ -82,7 +96,7 @@ class ActiveField(Object):
     
     def draw(self):
         time=self.getValue("time")
-        if self.pause==False and  0<=time<2*np.pi:#running the animation
+        if self.pause==False and self.getActiveField().getMinTime()<=time<self.getActiveField().getMaxTime():#running the animation
             time+=self.getValue("animationSpeed")
             self.setValue("time",time)
         elif self.pause==False:
@@ -92,11 +106,11 @@ class ActiveField(Object):
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
             self.pause = not self.pause
             time=self.getValue("time")
-            time=0.0 if time>= 2*np.pi and self.pause==False else time
+            time= self.getActiveField().getMinTime()if time>= self.getActiveField().getMaxTime() and self.pause==False else time
             self.setValue("time",time)
 
     @typechecked
-    def insertField(self,fieldName:str,field:UnsteadyVectorField2D|UnsteadyVectorField3D):
+    def insertField(self,fieldName:str,field:UnsteadyVectorField2D|UnsteadyVectorField3D|None):
         if field is None or fieldName is None:
             return
         self.activeField[fieldName]=field

@@ -13,6 +13,8 @@ A simplified Python fluid visualization renderer and GUI based on imgui, possibl
 - **Flowline/Pathline**: Integrates and visualizes flowlines (streamlines at a fixed time) and pathlines (trajectories over time) from user-defined seeds.
 - **Coreline**: coreline (of 2D unsteady field) extraction based on q-crterion/jacobian/velocity critical points.
 - **Scalar Field**: Supports visualization of scalar fields (e.g., magnitude, vorticity) as color maps or overlays.
+- **FTLE**: Computes 2D FTLE using a CUDA kernel. To use this feature, ensure you have a working PyCUDA environment. You can first run [`TestPyCUDA.py`](misc/TestPyCUDA.py) to verify your setup.
+
 
 ### 3D Vector Field Visualization
 - **Basic:** 3 D vector glyphs, 3D pathlines,streamlines,coreline using vtkVortexCore lower Order(v||a).

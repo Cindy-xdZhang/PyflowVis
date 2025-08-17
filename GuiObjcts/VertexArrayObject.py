@@ -385,8 +385,8 @@ class CoordinateSystem(Object):
         for axis in self.Vaos:
             axis.cameraObject=self.cameraObject
 
-    def drawGui(self):
-        pass
+ 
+
     def render(self):
        for axis in self.Vaos:
             axis.render()

@@ -7,7 +7,7 @@ import OpenGL.GL as gl
 from FLowUtils.ScalarField2d import *
 
 class PlanarManifold(VertexArrayObject):
-    def __init__(self,Div:int=8,):
+    def __init__(self,Div:int=2):
         super().__init__(f"plane")
         self.engine=getEngine()
         self.DimDiv=Div   
@@ -23,6 +23,7 @@ class PlanarManifold(VertexArrayObject):
         self.z=0.0
         self.Scalarfield=None
         self.actFieldObject=None
+        self.grid_size=None
 
 
         def updatePlaneGeometry(self):
@@ -49,7 +50,12 @@ class PlanarManifold(VertexArrayObject):
         if vectorField is None:
             return
 
-        grid_size = [int(vectorField.Xdim/self.DimDiv)+1, int(vectorField.Ydim/self.DimDiv)+1]
+        self.grid_size = [int(vectorField.Xdim/self.DimDiv), int(vectorField.Ydim/self.DimDiv)]
+        if self.grid_size[0]==0:
+            self.grid_size[0]=1
+        if self.grid_size[1]==0:
+            self.grid_size[1]=1
+
         self.point_on_plane = None
         self.normal = None
 
@@ -62,7 +68,7 @@ class PlanarManifold(VertexArrayObject):
             self.domain_max_box = np.array([v_max[0], v_max[1], 0.0], dtype=np.float32)
             self.erase()
             self.vertices, self.indices, self.textures = createPlaneSimple(
-                grid_size,
+                self.grid_size,
                 self.domain_min_box,
                 self.domain_max_box
             )
@@ -85,7 +91,7 @@ class PlanarManifold(VertexArrayObject):
                 self.normal = np.array([0.0, 0.0, 1.0], dtype=np.float32)
             self.erase()
             self.vertices, self.indices, self.textures = createPlane(
-                grid_size,
+                self.grid_size,
                 self.point_on_plane,
                 self.normal,
                 self.domain_min_box,
@@ -144,6 +150,18 @@ class PlanarManifold(VertexArrayObject):
         self.updateValue("scalarFieldMinTime", float(Scalarfield.getMinTime()))
         self.updateValue("scalarFieldMaxTime", float(Scalarfield.getMaxTime()))
         self.setMaterial(self.colormapMat0)
+
+        #update grid_size
+        #if scalar field resolution is DimDiv times or higher than the plane, update the plane
+        if Scalarfield.Xdim/self.DimDiv > self.grid_size[0] or Scalarfield.Ydim/self.DimDiv > self.grid_size[1]:
+            self.grid_size = [int(Scalarfield.Xdim/self.DimDiv), int(Scalarfield.Ydim/self.DimDiv)]
+            self.erase()
+            self.vertices, self.indices, self.textures = createPlaneSimple(
+                self.grid_size,
+                self.domain_min_box,
+                self.domain_max_box
+            )
+            self.appendVertexGeometry(self.vertices,  self.indices,  self.textures)
 
 
     def render(self):

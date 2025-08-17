@@ -1,6 +1,7 @@
 from GuiObjcts.VertexArrayObject import *
 from .VisualizationEngine import getEngine
 from FLowUtils.netCDFLoader import *
+
 def path2name(path):
     name = path.split('/')[-1].split('\\')[-1]  # Handle both forward and back slashes
     if '.' in name:  # Remove extension if present
@@ -19,13 +20,28 @@ class NetCDFLoaderOBJ(Object):
         self.addAction("save cdf file", lambda x:self.saveCDF()) 
 
     def loadCDF(self):
-        resolved_path=self.getValue("path")
+        resolved_path = self.getValue("path")
+        if  not isinstance(resolved_path, str) or resolved_path.strip() == "":
+            import tkinter as tk
+            from tkinter import filedialog
+            try:
+                root = tk.Tk()
+                root.withdraw()  # Hide the main window
+                file_path = filedialog.askopenfilename()
+                if file_path:  # Only update if a file was selected
+                    self.setValue("path",file_path)
+                    resolved_path=file_path
+            except Exception as e:
+                print(f"Filedialog Error: {e}")
+                return
+            
         time_step_begin=self.getValue("time_step_begin")
         time_step_end=self.getValue("time_step_end")
         vectorfield=NetCDFLoader.load_vector_field2d(resolved_path,time_step_begin,time_step_end)
         scene=self.getParentScene()
         # Extract name from path - get last folder/file name
         name=path2name(resolved_path)
+
         scene.getObject("ActiveField").insertField(name,vectorfield)
 
 

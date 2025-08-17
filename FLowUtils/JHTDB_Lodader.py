@@ -5,7 +5,7 @@ import numpy as np
 import netCDF4 as nc
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 from FLowUtils.VectorField3d import UnsteadyVectorField3D
-from givernylocal.turbulence_toolkit import getData
+
 
 
 dataset_meta={
@@ -23,8 +23,8 @@ dataset_meta={
     },
     "channel5200":{
         "range":{
-            "x":(0, 0.4*np.pi),
-            "y":(0, 0.15*np.pi),
+            "x":(0,8*np.pi),
+            "y":(-1,1),
             "z":(0,3*np.pi)
         }
 }
@@ -57,35 +57,67 @@ class JHTDB_Lodader:
     # ---------- internal query helpers ----------
     def _query_getData(self, dataset_name: str, variable_name: str, times: np.ndarray, temporal_method: str,
                        spatial_method: str, spatial_operator: str, points: np.ndarray,
-                       option: Optional[Union[List[float], Dict]] = None) -> Tuple[List[np.ndarray], np.ndarray]:
-        """Call givernylocal.getData and return (list of (N,3) arrays, times)."""
+                       option: Optional[Union[List[float], Dict]] = None,maxQueryOnce:int=4096) -> np.ndarray:
+        """按批次调用 givernylocal.getData（每批不超过 maxQueryOnce），并在每个时间点拼接后按时间维堆叠返回。
+
+        返回值：shape 为 (T, N, 3) 的 ndarray，其中 T 为时间步数，N 为点数。
+        """
+        from givernylocal.turbulence_toolkit import getData
+        import time
         dataset = self._get_or_create_dataset(dataset_name)
-        if  isinstance(times, (list, tuple, np.ndarray)):
-            time_start = float(times[0])
-            resultData = []
-            for time in times:
-                result_t = getData(dataset, variable_name, time, temporal_method, spatial_method, spatial_operator, points)
-                result_t=np.array(result_t[0]).reshape(-1,3)
-                resultData.append(np.array(result_t))
-            resultData = np.stack(resultData, axis=0)
-            return resultData
-        else:
-            result = getData(dataset, variable_name, time_start, temporal_method, spatial_method, spatial_operator, points)
-            time_component=0
-            result = np.array(result[time_component])
-            return result
-  
+
+        num_points = int(points.shape[0])
+        resultData = []
+        for query_time in times:
+            per_time_chunks = []
+            for start in range(0, num_points, int(maxQueryOnce)):
+                end = min(start + int(maxQueryOnce), num_points)
+                print(f"querying time {query_time} from {start} to {end} of {num_points},progress {start/num_points*100}%")
+                chunk_points = points[start:end]
+                # 重试逻辑：getData 偶发失败（例如 HTTP 500 / result was not filled correctly）时重试
+                max_retries = 8
+                backoff_seconds = 1.0
+                last_err = None
+                for attempt in range(max_retries):
+                    try:
+                        chunk_result = getData(dataset, variable_name, query_time, temporal_method, spatial_method, spatial_operator, chunk_points)
+                        chunk_vals = np.array(chunk_result[0]).reshape(-1, 3)
+                        per_time_chunks.append(chunk_vals)
+                        last_err = None
+                        break
+                    except Exception as e:
+                        print(f"querying failed for error {e}, retrying...")
+                        last_err = e
+                        if attempt < max_retries - 1:
+                            time.sleep(backoff_seconds)
+                            backoff_seconds *= 2.0
+                        else:
+                            raise last_err
+                        
+            if len(per_time_chunks) == 1:
+                result_t = per_time_chunks[0]
+            else:
+                result_t = np.concatenate(per_time_chunks, axis=0) if per_time_chunks else np.empty((0, 3), dtype=np.float64)
+            
+            resultData.append(result_t)
+         
+
+        resultData = np.stack(resultData, axis=0) if len(resultData) > 0 else np.empty((0, num_points, 3), dtype=np.float64)
+        return resultData
+   
   
 
 
     # ---------- grid/time generation (resolution-based) ----------
     @staticmethod
-    def _generate_times(temporal_method: str, time_start: float, time_res: int, time_end: Optional[float]) -> Tuple[np.ndarray, Optional[List[float]]]:
+    def _generate_times(temporal_method: str, time_start: float, time_res: int, time_end: Optional[float],integerTime:bool=False) -> Tuple[np.ndarray, Optional[List[float]]]:
         """Generate time samples and getData option from resolution input.
 
         For 'pchip': requires time_end and time_res >= 2; returns times linspace and option [time_end, delta_t].
         For others (e.g., 'none'): requires time_res == 1 and returns single time and option None.
         """
+        if integerTime:
+            return np.arange(time_start, time_end+1, dtype=np.int32), None
         if str(temporal_method).lower() == 'pchip':
             if time_end is None or time_res < 2:
                 temporal_method="none"
@@ -199,10 +231,12 @@ class JHTDB_Lodader:
                               spatial_method: str="lag8",
                               spatial_operator: str="field",
                               variable_name: str="velocity",
-                              temporal_method: str="pchip") -> UnsteadyVectorField2D:
+                              integerTime:bool=False
+                              ) -> UnsteadyVectorField2D:
         """Generate plane grid from resolution, query, and return UnsteadyVectorField2D."""
         p, a_vals, b_vals, points = self._generate_grid_2d(plane, a_res, b_res, fixed_value, a_range, b_range)
-        times, option = self._generate_times(temporal_method, time_start, time_res, time_end)
+        temporal_method="none" if time_res==1 or integerTime else "pchip"
+        times, option = self._generate_times(temporal_method, time_start, time_res, time_end,integerTime)
         per_time_values = self._query_getData(dataset_name, variable_name, times, temporal_method,
                                                  spatial_method, spatial_operator, points, option)
         data_4d, axis_names = self._pack_structured_grid_2d(per_time_values, a_res, b_res, p)
@@ -236,8 +270,8 @@ class JHTDB_Lodader:
         """Generate 3D grid from resolution, query, and return UnsteadyVectorField3D."""
         times, option = self._generate_times(temporal_method, time_start, time_res, time_end)
         x_vals, y_vals, z_vals, points = self._generate_grid_3d(x_res, y_res, z_res, x_range, y_range, z_range)
-        per_time_values, _ = self._query_getData(dataset_name, variable_name, times, temporal_method,
-                                                 spatial_method, spatial_operator, points, option)
+        per_time_values = self._query_getData(dataset_name, variable_name, times, temporal_method,
+                                              spatial_method, spatial_operator, points, option)
         data_5d = self._pack_structured_grid_3d(per_time_values, x_res, y_res, z_res)
         tmin = float(times[0]) if times.size else 0.0
         tmax = float(times[-1]) if times.size else 0.0

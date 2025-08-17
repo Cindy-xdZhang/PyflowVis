@@ -304,7 +304,7 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         """Batch generate glyph geometry using direct arrow generation"""
         # Filter out zero vectors
         vector_magnitudes = np.linalg.norm(vectors, axis=-1)
-        valid_mask = vector_magnitudes > 1e-6
+        valid_mask = vector_magnitudes > 1e-6*scale
         
         if not np.any(valid_mask):
             return

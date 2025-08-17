@@ -74,53 +74,6 @@ class GuiTest(Object):
         self.create_variable("testDictionary",testDictionary,False)
    
    
-        
-
-
-class Renderable:
-    def __init__(self, image_data,x=0.0,y=0.0,z=0.0):
-        self.width, self.height = image_data.shape[1]/10, image_data.shape[0]/10
-        self.texture_id = create_texture(image_data)
-        self.x = x
-        self.y = y
-        self.z = z
-        self.name="renderable"
-
-   
-    def check_collision(self, point):
-        half_width, half_height = self.width / 2, self.height / 2
-        min_x, max_x = self.x - half_width, self.x+ half_width
-        min_y, max_y = self.y- half_height, self.y + half_height
-        if min_x <= point[0] <= max_x and min_y <= point[1] <= max_y:
-            self.selected = True
-            logging.debug(f"click select success")
-        else:
-            self.selected = False
-
-    def draw(self):
-    
-        glPushMatrix()  # Save the current matrix state
-        glTranslatef(self.x, self.y, self.z)  # Move the object to its position
-
-        glBindTexture(GL_TEXTURE_2D, self.texture_id)
-        glBegin(GL_QUADS)
-        glTexCoord2f(0.0, 0.0); glVertex3f(-self.width / 2,  -self.height / 2,0)
-        glTexCoord2f(1.0, 0.0); glVertex3f(self.width / 2,-self.height / 2,0)
-        glTexCoord2f(1.0, 1.0); glVertex3f(self.width / 2, self.height / 2,0)
-        glTexCoord2f(0.0, 1.0); glVertex3f(-self.width / 2,  self.height / 2,0)
-        glEnd()
-        glPopMatrix()  # Restore the matrix state
-        
-    def eventCallBacks(self,event):
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 2:# mid button
-            x, y = event.pos
-            modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
-            projection = glGetDoublev(GL_PROJECTION_MATRIX)
-            viewport = glGetIntegerv(GL_VIEWPORT)
-            world_coordinates = screen_to_world(x, y, viewport[2], viewport[3], modelview, projection, viewport)
-            self.check_collision(world_coordinates[:3])
-            
-
 
 
 
@@ -163,8 +116,8 @@ def main():
     engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
 
-    vectorField2d= rotation_four_center((256,256),128)
-    actFieldWidget.insertField("rfc",vectorField2d)
+    vectorField2d= double_gyre_2D((1000,500),64,Tmax=20)
+    actFieldWidget.insertField("double_gyre",vectorField2d)
 
     # flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
     # cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
@@ -172,7 +125,7 @@ def main():
     # actFieldWidget.insertField("tornado3d",vectorField3d)
 
     # jhtdb_loader=JHTDB_Lodader()
-    # vf2d=jhtdb_loader.load_2d_unsteadyFlow("channel5200","xz",64,64, 0.9,(0, 0.4*np.pi),(0, 0.15*np.pi),1.0,1.0,1,temporal_method="none")
+    # vf2d=jhtdb_loader.load_2d_unsteadyFlow("channel5200","xz",64,64, 0.000997615051193464,(0, 0.4*np.pi),(0, 0.15*np.pi),1,11,11,integerTime=True)
     # actFieldWidget.insertField("channel",vf2d)
 
     # args=config['training']

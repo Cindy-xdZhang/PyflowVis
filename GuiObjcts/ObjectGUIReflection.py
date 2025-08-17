@@ -91,7 +91,7 @@ def draw_numpy_array3_input( label, arr):
         raise ValueError("The input array must have a shape of (3,)")
 
     value = arr.copy()
-    changed, new_value = imgui.drag_float3(label, *value)
+    changed, new_value = imgui.input_float3(label, *value)
     return changed, np.array(new_value,dtype=arr.dtype)
 
 def draw_numpy_array4_input( label, arr):
@@ -107,7 +107,7 @@ def draw_numpy_array4_input( label, arr):
         raise ValueError("The input array must have a shape of (4,)")
 
     value = arr.copy()
-    changed, new_value = imgui.drag_float4(label, *value)
+    changed, new_value = imgui.input_float4(label, *value)
     return changed, np.array(new_value,dtype=arr.dtype)
 
 
@@ -254,13 +254,13 @@ def input_vecn_int_float(label, vecn_input):
     # imgui.same_line()
     if all(isinstance(x, float) for x in vecn):
         for i in range(n):
-            changed_iterm, vecn[i] = imgui.drag_float(f"{label}[{i}]", vecn[i],)
+            changed_iterm, vecn[i] = imgui.input_float(f"{label}[{i}]", vecn[i],)
             changed = changed_iterm or changed   
             if i < n - 1:
                 imgui.same_line()
     else:
         for i in range(n):
-            changed_iterm, vecn[i] = imgui.drag_float(f"{label}[{i}]", vecn[i])
+            changed_iterm, vecn[i] = imgui.input_float(f"{label}[{i}]", vecn[i])
             changed = changed_iterm or changed   
             if i < n - 1:
                 imgui.same_line()

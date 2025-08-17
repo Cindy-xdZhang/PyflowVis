@@ -97,9 +97,16 @@ class ScalarField2D(IDiscreteField2D):
         self.analytical_func = None  # Analytical expression
 
     def set_discrete_data(self, data):
-        """Set discrete data for the scalar field."""
-        assert data.shape == (self.time_steps, self.Ydim, self.Xdim), f"Expected shape {(self.time_steps, self.Ydim, self.Xdim)}, got {data.shape}"
+        """为标量场设置离散数据。支持 data 为 list[slice_data,...] 或 ndarray。"""
+        # 如果 data 是 list（如 [slice0, slice1, ...]），将其转换为 ndarray
+        if isinstance(data, list):
+            data = np.stack(data, axis=0)
+        # 处理 time_steps=1 且 data.shape=(Y,X) 的情况
+        if self.time_steps == 1 and data.shape == (self.Ydim, self.Xdim):
+            data = data[np.newaxis, :, :]
+        assert data.shape == (self.time_steps, self.Ydim, self.Xdim), f"期望形状 {(self.time_steps, self.Ydim, self.Xdim)}, 实际为 {data.shape}"
         self.field = data.astype(self.dtype)
+
 
     def set_analytical_func(self, func):
         """Set analytical function for the scalar field."""
