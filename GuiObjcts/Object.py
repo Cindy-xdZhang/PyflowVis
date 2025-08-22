@@ -457,6 +457,8 @@ class Scene(Object):
         super().__init__(name,autoSaveFolderPath)
         self.objects = {}
         self.create_variable("light",np.array([1.0,1.0,1.0],dtype=np.float32))
+        self.addAction("save_state_all",lambda  obj:self.save_state_all())
+        self.addAction("restore_state_all",lambda obj:self.restore_state_all())
 
     def getTime(self):
         if self.hasObject("ActiveField"):
@@ -505,35 +507,35 @@ class Scene(Object):
 
     def drawGui(self):
         if imgui.begin_main_menu_bar():
-            if imgui.begin_menu("File", True):
-                clicked_open, _ = imgui.menu_item("Open", "Ctrl+O")
+            if imgui.begin_menu("scene", True):
+                self.DrawPropertiesInGui(self.persistentProperties)
+                self.DrawPropertiesInGui(self.nonPersistentProperties)
+                self.DrawActionButtons()
                 imgui.end_menu()
-            if imgui.begin_menu("Edit", True):
-                imgui.menu_item("Copy", "Ctrl+C")
-                imgui.end_menu()
-            imgui.end_main_menu_bar()
-            
-        #draw the scene as an object(draw its properties, if any) 
-        if imgui.begin(self.name):
-            self.DrawPropertiesInGui(self.persistentProperties)
-            self.DrawPropertiesInGui(self.nonPersistentProperties)
-            self.DrawActionButtons()
-            expanded, visible =imgui.collapsing_header("Objects List", flags=imgui.TREE_NODE_DEFAULT_OPEN)
-            if expanded:
+            # Objects visibility toggles moved from collapsing header into main menu bar
+            if imgui.begin_menu("Objects", True):
+                clicked_all_on, _ = imgui.menu_item("select all", None, False, True)
+                if clicked_all_on:
+                    for obj in self.objects.values():
+                        if isinstance(obj, Object):
+                            obj.setGuiVisibility(True)
+                clicked_all_off, _ = imgui.menu_item("select none", None, False, True)
+                if clicked_all_off:
+                    for obj in self.objects.values():
+                        if isinstance(obj, Object):
+                            obj.setGuiVisibility(False)
+                imgui.separator()
                 for obj_name in self.objects:
-                    # This variable tracks the visibility; you might need to store visibility state elsewhere
-                    # For demonstration, using a local variable. Consider adapting it to your object's properties
                     obj:Object=self.getObject(obj_name)
                     if isinstance(obj,Object) is False:
                         continue
                     visible = obj.getValue("GuiVisible")
-                    imgui.text(obj_name)
-                    imgui.same_line()
-                    changed, new_visible = imgui.checkbox(f"##{obj_name}", visible)
-                    if changed:
-                        obj.setGuiVisibility(new_visible) 
-                    
-            imgui.end()
+                    clicked, new_visible = imgui.menu_item(obj_name, None, visible, True)
+                    if clicked:
+                        obj.setGuiVisibility(new_visible)
+                imgui.end_menu()
+            imgui.end_main_menu_bar()
+            
         #draw all the objects in the scene
         for obj in self.objects.values():
             obj.drawGui()

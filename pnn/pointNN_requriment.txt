@@ -1,0 +1,7 @@
+cycler
+einops
+h5py
+scikit-learn
+tqdm
+numpy
+scipy

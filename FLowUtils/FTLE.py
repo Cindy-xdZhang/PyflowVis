@@ -115,7 +115,8 @@ def compute_FTLE_2D_CUDA_oneSlice(vector_field:UnsteadyVectorField2D,  time:floa
 def compute_FTLE_2D_field_CUDA(vector_field:UnsteadyVectorField2D, step_size:float, max_iteration:int,upSampling:int=2,temporalUpSampling:int=1):
     resultSlice=[]
     #geneate time to calculate FTLE
-    time_list = np.linspace(vector_field.tmin, vector_field.tmax, int((vector_field.tmax - vector_field.tmin) / (vector_field.timeInterval / temporalUpSampling)) + 1)
+    time_list = np.linspace(0, vector_field.tmax-vector_field.tmin, int((vector_field.tmax - vector_field.tmin) / (vector_field.timeInterval / temporalUpSampling)) + 1)
+
     for time_slice in time_list:
         print(f"Computing FTLE at time {time_slice},progress {time_slice/time_list[-1]*100}%...")
         resultSlice.append(compute_FTLE_2D_CUDA_oneSlice(vector_field, time_slice, step_size, max_iteration,upSampling))

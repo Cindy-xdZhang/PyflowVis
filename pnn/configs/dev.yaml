@@ -1,0 +1,59 @@
+seed: 9061
+
+pnn:
+  split: 3
+  bz: 16
+  points: 1024
+  stages: 4
+  dim: 72
+  k: 24
+  alpha: 3000
+  beta: 19
+dataset:
+  dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
+  name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
+  extension: nc
+
+
+# set the params to generate the point clouds
+pcds:
+  line_type: p_line # streamline   p_line-> pathline
+  line_method: RK4 # RK4 Euler
+  line_steps: 800 # time step
+  line_sample: 30 # samples one the line
+  sample_area: full #points full areas
+  interval_scale: 5
+  sample_nerbors: 5 
+  normalized: True
+  localized: True
+  offset_scale: 0.1 # scale of grid interval
+  time_slice: None # get the specific time_slice
+  dt_scale: 0.2
+
+  #params for s_lines
+  t_start: 0.6 #% for the whole time
+  t_target: 1.0 #
+
+
+  max_seg: 50
+  start_points: [[0.0,0.0]]
+  bbox: [[2.5,0.5],[5.5,1.5]] # [[xmin1,ymin1] [xmax1,ymax1],[xmin2,ymin2],[xmax2,ymax2]]
+
+
+cluster:
+  alg: kmeans #DBSCAN kmeans
+  classes: 2
+
+  #params for DBSCAN
+  eps: 5 # larger for bigger search space
+  min_samples: 3 # 3-10
+
+output:
+  exp: dev
+
+
+
+
+
+
+

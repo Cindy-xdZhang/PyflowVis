@@ -119,7 +119,12 @@ class IDiscreteField2D(ABC):
         assert self.valid
         self.__name = f"Unnamed_Field_{Xdim}x{Ydim}_{timsteps}t_ID{np.random.randint(0, 10000)}"
 
-   
+    def showInfo(self):
+        print(f"Vector Field 2D Info:")
+        print(f"Xdim: {self.Xdim}, Ydim: {self.Ydim}, time_steps: {self.time_steps}")
+        print(f"domainMinBoundary: {self.domainMinBoundary}, domainMaxBoundary: {self.domainMaxBoundary}")
+        print(f"gridInterval: {self.gridInterval}, tmin: {self.tmin}, tmax: {self.tmax}, timeInterval: {self.timeInterval}")
+
     # def getName(self):
     #     return self.__name
     # def setName(self, name):

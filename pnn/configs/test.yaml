@@ -1,0 +1,47 @@
+seed: 9061
+
+pnn:
+  split: 3
+  bz: 16
+  points: 1024
+  stages: 4
+  dim: 72
+  k: 16
+  alpha: 1000
+  beta: 100
+
+dataset:
+  dat_dir: data\vectorField
+  name: doublegyre2d #beads2d  doublegyre2d
+  extension: nc
+
+# set the params to generate the point clouds
+pcds:
+  line_type: p_line # streamline   p_line-> pathline
+  line_steps: 600 # time step
+  line_sample: 1 # samples one the line
+  sample_area: points # full | points
+  interval_scale: 20
+  sample_nerbors: 5
+  normalized: True
+  localized: True
+  offset_scale: 0.1 # scale of grid interval
+  time_slice: 0 # get the specific time_slice
+  dt_scale: 1
+
+  #params for s_lines
+  t_start: 0.0 #% for the whole time
+  t_target: 1.0 #
+
+  #params for points lines
+  start_points: [[1.0, 0.5],[1.5,0.5]]
+
+output:
+  exp: dev
+
+
+
+
+
+
+

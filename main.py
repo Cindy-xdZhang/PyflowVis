@@ -116,8 +116,8 @@ def main():
     engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
 
-    vectorField2d= double_gyre_2D((1000,500),64,Tmax=20)
-    actFieldWidget.insertField("double_gyre",vectorField2d)
+    # vectorField2d= double_gyre_2D((250,125),64,Tmax=20)
+    # actFieldWidget.insertField("double_gyre",vectorField2d)
 
     # flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
     # cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")

@@ -7,7 +7,7 @@ import OpenGL.GL as gl
 from FLowUtils.ScalarField2d import *
 
 class PlanarManifold(VertexArrayObject):
-    def __init__(self,Div:int=2):
+    def __init__(self,Div:int=4):
         super().__init__(f"plane")
         self.engine=getEngine()
         self.DimDiv=Div   
