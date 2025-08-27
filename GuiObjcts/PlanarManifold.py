@@ -152,8 +152,10 @@ class PlanarManifold(VertexArrayObject):
         self.setMaterial(self.colormapMat0)
 
         #update grid_size
-        #if scalar field resolution is DimDiv times or higher than the plane, update the plane
-        if Scalarfield.Xdim/self.DimDiv > self.grid_size[0] or Scalarfield.Ydim/self.DimDiv > self.grid_size[1]:
+        if self.grid_size is None:
+            self.domain_min_box = np.array([Scalarfield.domainMinBoundary[0],Scalarfield.domainMinBoundary[1],0.0], dtype=np.float32)
+            self.domain_max_box = np.array([Scalarfield.domainMaxBoundary[0],Scalarfield.domainMaxBoundary[1],0.0], dtype=np.float32)
+
             self.grid_size = [int(Scalarfield.Xdim/self.DimDiv), int(Scalarfield.Ydim/self.DimDiv)]
             self.erase()
             self.vertices, self.indices, self.textures = createPlaneSimple(
@@ -162,6 +164,19 @@ class PlanarManifold(VertexArrayObject):
                 self.domain_max_box
             )
             self.appendVertexGeometry(self.vertices,  self.indices,  self.textures)
+        #if scalar field resolution is DimDiv times or higher than the plane, update the plane
+        elif Scalarfield.Xdim/self.DimDiv > self.grid_size[0] or Scalarfield.Ydim/self.DimDiv > self.grid_size[1]:
+            self.grid_size = [int(Scalarfield.Xdim/self.DimDiv), int(Scalarfield.Ydim/self.DimDiv)]
+            self.erase()
+            self.vertices, self.indices, self.textures = createPlaneSimple(
+                self.grid_size,
+                self.domain_min_box,
+                self.domain_max_box
+            )
+            self.appendVertexGeometry(self.vertices,  self.indices,  self.textures)
+        # else:#do nothing
+        #     pass
+        return
 
 
     def render(self):

@@ -53,7 +53,7 @@ def get_logger(config):
     return logger
 
 
-def check_group_lengths(valid_steps: torch.Tensor, nerbors: int = 5):
+def check_group_have_same_lengths(valid_steps: torch.Tensor, nerbors: int = 5):
     """
     valid_steps: [M]，M = N*nerbors，按 (seed0的5条, seed1的5条, ...) 排序
     返回:
@@ -82,7 +82,7 @@ def select_good_groups(valid_steps: torch.Tensor, nerbors: int, K: int, strict: 
       keep_lines:  [M]  逐线布尔掩码（按组重复 nerbors 次）
       good_idx:    [G]  满足条件的组索引
     """
-    same, _, g_min, _ = check_group_lengths(valid_steps, nerbors)
+    same, _, g_min, _ = check_group_have_same_lengths(valid_steps, nerbors)
     cond_len = (g_min > K) if strict else (g_min >= K)
     # keep_groups = same & cond_len                     # [N]
     keep_groups = cond_len                     # [N]
@@ -186,15 +186,15 @@ if __name__ == "__main__":
         
         # Vis the comparsion between RK4 and Euler
         labels_test=np.ones(points_ori.shape[0])
-        multi_lines_vis_fast(vectorfield,[points_ori.detach().cpu(),
-                                          points_ori_rk4.detach().cpu(),
-                                     ], \
+        # multi_lines_vis_fast(vectorfield,[points_ori.detach().cpu(),
+        #                                   points_ori_rk4.detach().cpu(),
+        #                              ], \
                                         
-                        [labels_test,labels_test],time_index=config.pcds.time_slice,max_step=vis_max_steps,\
-                        title=["Original pds Euler",
-                               "Original pds RK4"
-                               ]
-                        ,layout=[2,1])
+        #                 [labels_test,labels_test],time_index=config.pcds.time_slice,max_step=vis_max_steps,\
+        #                 title=["Original pds Euler",
+        #                        "Original pds RK4"
+        #                        ]
+        #                 ,layout=[2,1])
         
         
         """
@@ -375,10 +375,10 @@ if __name__ == "__main__":
                                         
                         [labels_ori_rk4,labels_loc_rk4,labels_t_loc_rk4,labels_nor_rk4,labels_t_nor_rk4],time_index=config.pcds.time_slice,max_step=vis_max_steps,\
                         title=["Original pds features RK4",
-                               "Local pds features RK4 wo time(First Point)",
-                               "Local pds features RK4 w time(Center Line)",
-                               "Normalized pds features wo time(First Point)",
-                               "Normalized pds features w time(Center Line)"
+                               "Local pds latent features RK4 wo time(First Point)",
+                               "Local pds latent features RK4 w time(Center Line)",
+                               "Normalized pds latent features wo time(First Point)",
+                               "Normalized pds latent features w time(Center Line)"
                                ]
                         ,layout=[5,1])
          
@@ -396,7 +396,7 @@ if __name__ == "__main__":
         labels_t_nor=None
         
         if config.cluster.alg=="kmeans":
-            kmeans = KMeans(n_clusters=n_clusters, random_state=0)
+            kmeans = KMeans(n_clusters=n_clusters, init="k-means++",random_state=0)
             kmeans.fit(syn_points_no_features_np_ori)
             # 3. get labels
             labels_ori = kmeans.labels_
@@ -453,14 +453,23 @@ if __name__ == "__main__":
         
         
         #---- Curvature Clustering  ----#
-        labels_curvature=None
-        if config.cluster.alg=="kmeans":
-            kmeans = KMeans(n_clusters=n_clusters, random_state=0)
-            kmeans.fit(curvature.detach().cpu().numpy())
-            # 3. get labels
-            labels_curvature = kmeans.labels_
+        # labels_curvature=None
+        # if config.cluster.alg=="kmeans":
+        #     kmeans = KMeans(n_clusters=n_clusters, random_state=0)
+        #     kmeans.fit(curvature.detach().cpu().numpy())
+        #     # 3. get labels
+        #     labels_curvature = kmeans.labels_
         
-        # multi_lines_vis_fast(vectorfield,[points_ori_rk4.detach().cpu(),
+        # # multi_lines_vis_fast(vectorfield,[points_ori_rk4.detach().cpu(),
+        # #                              points_ori_rk4.detach().cpu(),
+        # #                              ], \
+        # #                 [labels_t_nor,labels_curvature],time_index=config.pcds.time_slice,max_step=vis_max_steps,\
+        # #                 title=[
+        # #                         "Normalized pds  w time(Center Line)",
+        # #                         "labels_curvature features clustering",
+        # #                        ]
+        # #                 ,layout=[2,1])
+        # multi_points_vis_fast(vectorfield,[points_ori_rk4.detach().cpu(),
         #                              points_ori_rk4.detach().cpu(),
         #                              ], \
         #                 [labels_t_nor,labels_curvature],time_index=config.pcds.time_slice,max_step=vis_max_steps,\
@@ -469,14 +478,5 @@ if __name__ == "__main__":
         #                         "labels_curvature features clustering",
         #                        ]
         #                 ,layout=[2,1])
-        multi_points_vis_fast(vectorfield,[points_ori_rk4.detach().cpu(),
-                                     points_ori_rk4.detach().cpu(),
-                                     ], \
-                        [labels_t_nor,labels_curvature],time_index=config.pcds.time_slice,max_step=vis_max_steps,\
-                        title=[
-                                "Normalized pds  w time(Center Line)",
-                                "labels_curvature features clustering",
-                               ]
-                        ,layout=[2,1])
         
         # plt.pause(0.001)        # 让UI有时间渲染

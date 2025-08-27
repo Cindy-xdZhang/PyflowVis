@@ -1,9 +1,36 @@
 import numpy as np
+import os
+import json
+import re
 from numba import njit, prange
 from typeguard import typechecked
 from FLowUtils.VectorField2d import *
 from FLowUtils.decoration import singleton
 from .VectorField2d import IDiscreteField2D
+from decimal import Decimal, ROUND_HALF_UP, localcontext
+import logging
+def _sanitize_name(name: str) -> str:
+    """将任意名称转换为安全文件名（Windows 友好）。"""
+    name = str(name).strip().replace(' ', '_')
+    # 只保留字母数字、下划线、短横线和点
+    return re.sub(r"[^A-Za-z0-9._-]", "_", name)
+
+def _format_float(value: float, digits: int = 4) -> str:
+    """稳定格式化小数，避免 0.01 显示为 0.0099999... 等浮点数artifact。"""
+    try:
+        with localcontext() as ctx:
+            ctx.prec = max(28, digits + 8)
+            d = Decimal(str(value))
+            q = Decimal('1') if digits <= 0 else (Decimal('1') / (Decimal('10') ** digits))
+            d = d.quantize(q, rounding=ROUND_HALF_UP)
+            s = format(d, 'f')
+    except Exception:
+        s = f"{float(value):.{digits}f}"
+    if '.' in s:
+        s = s.rstrip('0').rstrip('.')
+    if s == '-0':
+        s = '0'
+    return s
 
 @typechecked
 def compute_velocity_magnitude_2D(vector_field, **kwargs):
@@ -76,7 +103,11 @@ def compute_ivd_2D(vector_field, **kwargs):
     ivd = np.abs(curl - mean_curl)
     return ivd
 
-
+def compute_ivd_minus_mean_2D(vector_field, **kwargs):
+    ivd = compute_ivd_2D(vector_field)
+    mean_ivd = np.mean(ivd, axis=(1, 2), keepdims=True)  # (T, 1, 1)
+    ivd_minus_mean = np.abs(ivd - mean_ivd)
+    return ivd_minus_mean
 
 
 class ScalarField2D(IDiscreteField2D):
@@ -274,6 +305,7 @@ class ScalarFieldManager:
             'Q_CRITERION': compute_q_criterion_2D,
             'LAMBDA2': compute_lambda2_criterion_2D,
             'IVD': compute_ivd_2D,
+            'IVD_MINUS_MEAN': compute_ivd_minus_mean_2D,
         }
 
     def _make_key(self, field_name, operation):
@@ -303,5 +335,246 @@ class ScalarFieldManager:
         key = self._make_key(field_name, operation)
         return self.scalar_fields.get(key, None)
 
+    # ---------------------- Naming & IO Helpers ----------------------
+
+    def build_scalar_filename(self, field_name: str, scalar_field: 'ScalarField2D',
+                              extra_tags: dict | None = None, ext: str = ".npz") -> str:
+        """构造标准化文件名: scalar__<field>__<X>x<Y>x<T>__t<tmin>-<tmax>__<dtype>[__k=v...].npz"""
+        fname = [
+            "scalar",
+            _sanitize_name(field_name),
+            f"{scalar_field.Xdim}x{scalar_field.Ydim}x{scalar_field.time_steps}",
+            f"t{_format_float(scalar_field.tmin)}-{_format_float(scalar_field.tmax)}",
+            str(np.dtype(scalar_field.dtype).name)
+        ]
+        if extra_tags:
+            for k in extra_tags:
+                fname.append(f"{self._sanitize_name(k)}")
+        return "__".join(fname) + ext
+
+    # ---------------------- NPZ Compressed IO ----------------------
+    def save_scalar_field_to_file(self, scalar_field: 'ScalarField2D', out_dir: str ,   field_name: str | None = None, extra_tags: list[str] | None = None,
+                                  quantization: str | None = None,
+                                  overwrite: bool = True):
+        """
+        保存标量场为压缩 .npz，包含必要元数据。
+
+        参数:
+        - scalar_field: 要保存的 `ScalarField2D`
+        - out_dir: 输出目录，必填
+        - field_name: 文件名中的场名称部分
+        - extra_tags: 附加到文件名中的键值信息（如数据源/备注）
+        - quantization: None | 'float16' | 'uint16'；'uint16'将保存 min/max 以反量化
+        - overwrite: 若 False 且文件存在，将在文件名后追加递增序号
+        """
+        assert scalar_field is not None and isinstance(scalar_field, ScalarField2D)
+
+        data = scalar_field.getDataAsNumpy()
+        orig_dtype_name = str(np.dtype(scalar_field.dtype).name)
+        save_arr = data
+        qinfo = None
+
+        if quantization is not None:
+            q = quantization.lower()
+            if q == 'float16':
+                save_arr = data.astype(np.float16, copy=False)
+                qinfo = {"type": "float16"}
+            elif q == 'uint16':
+                vmin = float(np.min(data))
+                vmax = float(np.max(data))
+                if vmax == vmin:
+                    scale = 1.0
+                else:
+                    scale = (vmax - vmin) / 65535.0
+                # 映射到 [0, 65535]
+                save_arr = np.round((data - vmin) / scale).clip(0, 65535).astype(np.uint16)
+                qinfo = {"type": "uint16", "min": vmin, "max": vmax}
+            else:
+                raise ValueError("quantization 仅支持 None|'float16'|'uint16'")
+
+        meta = {
+            "version": 1,
+            "Xdim": int(scalar_field.Xdim),
+            "Ydim": int(scalar_field.Ydim),
+            "time_steps": int(scalar_field.time_steps),
+            "domainMinBoundary": list(map(float, scalar_field.domainMinBoundary)),
+            "domainMaxBoundary": list(map(float, scalar_field.domainMaxBoundary)),
+            "tmin": float(scalar_field.tmin),
+            "tmax": float(scalar_field.tmax),
+            "dtype": orig_dtype_name,
+            "quantization": qinfo,
+            "field_name": str(field_name) if field_name is not None else None,
+        }
+
+        # 自动命名（不包含 operation）
+        fname = self.build_scalar_filename(
+            field_name or "unnamed", scalar_field, extra_tags=extra_tags
+        )
+        os.makedirs(out_dir, exist_ok=True)
+        file_path = os.path.join(out_dir, fname)
+
+        if not overwrite and os.path.exists(file_path):
+            base, ext = os.path.splitext(file_path)
+            idx = 1
+            new_path = f"{base}__{idx}{ext}"
+            while os.path.exists(new_path):
+                idx += 1
+                new_path = f"{base}__{idx}{ext}"
+            file_path = new_path
+
+        np.savez_compressed(
+            file_path,
+            data=save_arr,
+            meta=json.dumps(meta)
+        )
+        logging.getLogger().info(f"Saved scalar field {field_name} to {file_path}")
+        return file_path
+
+    def load_scalar_field_from_file(self, file_path: str) -> 'ScalarField2D':
+        """
+        加载标量场：
+          1) 优先按照本工程保存的 .npz 规范（含 'data' 与 'meta' 键）读取；
+          2) 若为 .npz 但缺少 meta/data，则取第一个数组作为数据并推断元信息；
+          3) 若为 .npy 或被误写为 .npz 的原始数组，直接按数据形状推断；
+        均保持对已有保存文件的兼容，不修改保存逻辑。
+        返回 (ScalarField2D, field_name or None)
+        """
+        # 第一次尝试：严格不允许 pickle
+        try:
+            obj = np.load(file_path, allow_pickle=False)
+        except Exception:
+            # 安全兜底：允许 pickle 以兼容历史文件
+            obj = np.load(file_path, allow_pickle=True)
+
+        # 情况 A：标准 .npz 文件
+        if isinstance(obj, np.lib.npyio.NpzFile):
+            try:
+                meta_raw = obj.get('meta', None)
+                data_arr = obj.get('data', None)
+
+                # 若无 data，则尝试取第一个数组
+                if data_arr is None:
+                    keys = list(obj.keys())
+                    if len(keys) == 0:
+                        raise ValueError("空 .npz 文件：未找到任何数组")
+                    data_arr = obj[keys[0]]
+
+                # 解析 meta（若存在）
+                meta = None
+                if meta_raw is not None:
+                    meta = json.loads(str(meta_raw))
+
+                # 量化反解
+                if meta and isinstance(meta, dict) and meta.get('quantization'):
+                    qinfo = meta['quantization']
+                    if isinstance(qinfo, dict) and qinfo.get('type') == 'float16':
+                        data = data_arr.astype(np.float32)
+                    elif isinstance(qinfo, dict) and qinfo.get('type') == 'uint16':
+                        vmin = float(qinfo['min']); vmax = float(qinfo['max'])
+                        if vmax == vmin:
+                            data = np.full(data_arr.shape, vmin, dtype=np.float32)
+                        else:
+                            scale = (vmax - vmin) / 65535.0
+                            data = (data_arr.astype(np.float32) * scale + vmin)
+                    else:
+                        data = data_arr
+                else:
+                    data = data_arr
+
+                # 构造 ScalarField2D
+                if meta is not None:
+                    dtype = np.dtype(meta.get('dtype', 'float32'))
+                    sf = ScalarField2D(
+                        int(meta['Xdim']), int(meta['Ydim']), int(meta['time_steps']),
+                        meta['domainMinBoundary'], meta['domainMaxBoundary'], dtype=dtype
+                    )
+                    sf.set_discrete_data(data.astype(dtype, copy=False))
+                    fieldName = meta.get('field_name')
+                    return sf, fieldName
+                else:
+                    # 无 meta：按数据形状推断 (T, Y, X)
+                    if data.ndim == 3:
+                        T, Y, X = data.shape
+                        sf = ScalarField2D(X, Y, T,
+                                           [0.0, 0.0, 0.0],
+                                           [float(X-1), float(Y-1), float(max(0, T-1))],
+                                           dtype=data.dtype)
+                        sf.set_discrete_data(data)
+                        return sf, None
+                    elif data.ndim == 2:
+                        Y, X = data.shape
+                        sf = ScalarField2D(X, Y, 1,
+                                           [0.0, 0.0, 0.0],
+                                           [float(X-1), float(Y-1), 0.0],
+                                           dtype=data.dtype)
+                        sf.set_discrete_data(data)
+                        return sf, None
+                    else:
+                        raise ValueError(f"无法从数据形状 {data.shape} 推断标量场元信息")
+            finally:
+                try:
+                    obj.close()
+                except Exception:
+                    pass
+
+        # 情况 B：直接是 ndarray（.npy 或其它）
+        if isinstance(obj, np.ndarray):
+            data = obj
+            if data.ndim == 3:
+                T, Y, X = data.shape
+                sf = ScalarField2D(X, Y, T,
+                                   [0.0, 0.0, 0.0],
+                                   [float(X-1), float(Y-1), float(max(0, T-1))],
+                                   dtype=data.dtype)
+                sf.set_discrete_data(data)
+                return sf, None
+            elif data.ndim == 2:
+                Y, X = data.shape
+                sf = ScalarField2D(X, Y, 1,
+                                   [0.0, 0.0, 0.0],
+                                   [float(X-1), float(Y-1), 0.0],
+                                   dtype=data.dtype)
+                sf.set_discrete_data(data)
+                return sf, None
+            else:
+                raise ValueError(f"无法从数据形状 {data.shape} 推断标量场元信息")
+
+        raise ValueError("无法识别的标量场文件格式：" + str(file_path))
+
+    # ---------------------- Batch IO ----------------------
+    def save_all_cached(self, out_dir: str, quantization: str | None = None, overwrite: bool = True):
+        """将当前缓存的所有标量场保存到指定目录，文件名由命名规范自动生成。"""
+        os.makedirs(out_dir, exist_ok=True)
+        results = []
+        for key, sf in self.scalar_fields.items():
+            # 从 key 中解析 field_name（形如 OP(field)），若失败则使用 key
+            field_name = str(key)
+            if isinstance(key, str) and '(' in key and key.endswith(')'):
+                try:
+                    left = key.index('(')
+                    field_name = key[left+1:-1]
+                except Exception:
+                    field_name = str(key)
+            path = self.save_scalar_field_to_file(
+                sf, out_dir=out_dir, field_name=field_name,
+                quantization=quantization, overwrite=overwrite
+            )
+            results.append((key, path))
+        return results
+
+    def load_all_from_dir(self, dir_path: str):
+        """加载目录下所有 .npz 标量场文件并返回列表。"""
+        loaded = []
+        for name in os.listdir(dir_path):
+            if not name.lower().endswith('.npz'):
+                continue
+            path = os.path.join(dir_path, name)
+            try:
+                sf = self.load_scalar_field_from_file(path)
+                loaded.append((name, sf))
+            except Exception:
+                # 忽略不兼容文件
+                continue
+        return loaded
 
     

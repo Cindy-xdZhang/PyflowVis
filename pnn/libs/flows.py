@@ -1280,29 +1280,46 @@ def resample_to_fixed_count(points: torch.Tensor,
     """
     device, dtype = points.device, points.dtype
     M, Nmax, D = points.shape
-    n = valid_steps.to(torch.long).clamp_min(1)  # [M]
+    if K <= 0:
+        raise ValueError("K must be >= 2")
 
-    # 用最后一个有效点“填充”超出部分，避免脏数据
+    # 每条线的有效长度 n_i，限制到 [1, Nmax]
+    n = valid_steps.to(torch.long).clamp_min(1)
+    n = torch.minimum(n, torch.full_like(n, Nmax))  # [M]
+
+    # 先构造一个“清洗过”的 P：超出 n_i 的位置用最后一个有效点填充
     idxs = torch.arange(Nmax, device=device).view(1, -1).expand(M, -1)      # [M,Nmax]
     last_idx = (n - 1).view(-1, 1).expand(-1, Nmax)                          # [M,Nmax]
     take_idx = torch.where(idxs < n.view(-1, 1), idxs, last_idx)             # [M,Nmax]
     P = points.gather(1, take_idx.unsqueeze(-1).expand(-1, -1, D))           # [M,Nmax,D]
 
-    # 在“索引域” [0, n_i-1] 上等分取 K 个位置
-    if K == 1:
-        s = torch.zeros(M, 1, device=device, dtype=dtype)
+
+    # 固定保留首尾索引（0 与 n_i-1）
+    start_idx = torch.zeros(M, 1, dtype=torch.long, device=device)          # [M,1]
+    end_idx = (n - 1).view(-1, 1)                                           # [M,1]
+
+    # 中间随机选择 K-2 个 time slice（按行自适应范围 1..n_i-2）
+    num_mid = max(K - 2, 0)
+    if num_mid > 0:
+        mid_range_len = torch.clamp(n - 2, min=0)                           # [M]
+        if mid_range_len.dtype.is_floating_point:
+            mid_range_len = mid_range_len.to(torch.long)
+        # 生成 [0, mid_range_len_i) 的随机整数，再整体 +1 → [1, n_i-2]；
+        # 对于 n_i <= 2，mid_range_len=0，先得到全 0，再与 (n_i-1) 做最小化，安全回落到 0 或 1。
+        r = torch.rand(M, num_mid, device=device)
+        idx_mid = (r * mid_range_len.view(-1, 1).to(r.dtype)).floor().to(torch.long) + 1  # [M,num_mid]
+        max_idx = (n.view(-1, 1) - 1).expand(-1, num_mid)                                  # [M,num_mid]
+        idx_mid = torch.minimum(idx_mid, max_idx)                                           # clamp 到 [0, n_i-1]
+        sel_idx = torch.cat([start_idx, idx_mid, end_idx], dim=1)                           # [M,K]
     else:
-        s = torch.linspace(0, 1, K, device=device, dtype=dtype).unsqueeze(0) * (n - 1).unsqueeze(1).to(dtype)  # [M,K]
+        sel_idx = torch.cat([start_idx, end_idx], dim=1)                                    # [M,2]
 
-    s0 = s.floor().to(torch.long).clamp_max(Nmax - 1)  # 左索引
-    s1 = (s0 + 1).clamp_max(Nmax - 1)                  # 右索引
-    alpha = (s - s0.to(dtype)).unsqueeze(-1)           # [M,K,1]
+    # 按时间顺序排序
+    sel_idx, _ = torch.sort(sel_idx, dim=1)                                                 # [M,K]
 
-    P0 = P.gather(1, s0.unsqueeze(-1).expand(-1, -1, D))  # [M,K,D]
-    P1 = P.gather(1, s1.unsqueeze(-1).expand(-1, -1, D))  # [M,K,D]
-
-    Pk = (1 - alpha) * P0 + alpha * P1                    # 线性插值（按索引）
-    return Pk
+    # 取出对应点
+    out = P.gather(1, sel_idx.unsqueeze(-1).expand(-1, -1, D))                              # [M,K,D]
+    return out
 
 
 def LocLines(sample_nerbors,points):

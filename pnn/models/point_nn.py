@@ -149,7 +149,7 @@ class EncNP(nn.Module):
         # Multi-stage Hierarchy
         for i in range(self.num_stages):
             out_dim = out_dim * 2
-            group_num = group_num // 2
+            # group_num = group_num // 2
             self.FPS_kNN_list.append(FPS_kNN(group_num, k_neighbors))
             self.LGA_list.append(LGA(out_dim, self.alpha, self.beta))
             self.Pooling_list.append(Pooling(out_dim))

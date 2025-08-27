@@ -6,7 +6,7 @@ from typeguard import typechecked
 from FLowUtils.ScalarField2d import *
 from .VisualizationEngine import getEngine
 from FLowUtils.FTLE import *
-
+from FLowUtils.ScalarField2d import _format_float
 class LICRender(Object):
     def __init__(self,name):
         super().__init__(name)
@@ -53,6 +53,7 @@ class ActiveField(Object):
            planarObj=obj.parentScene.getObject("plane")
            planarObj.setScalarField(obj.getActiveScalarField())
 
+    
 
         self.create_variable_callback_with_gui_customization("time",0.0,dirtyCallBack,False, {'widget': 'input'})
         self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
@@ -64,19 +65,54 @@ class ActiveField(Object):
         self.create_variable_gui("scalarFieldOperation", ["MAGNITUDE","CURL","Q_CRITERION","LAMBDA2","IVD"], False)
         self.addAction("compute scalar field",lambda obj:obj.requestScalarField())
 
+        self.create_variable_gui("scalarfield_path", "", False, {'widget': 'file_dialog'})
         self.create_variable("FTLE_dt_MaxIter_upSampling_timeUps", np.array([0.01,2000,2,1]) ,True)
 
         def FTLE_2D_CUDA_action(*args, **kwargs):
-            actFieldWidget:ActiveField = self.parentScene.getObject("ActiveField")
+            actFieldWidget:ActiveField = self
             vector_field:UnsteadyVectorField2D = actFieldWidget.getActiveField()
+            activeFieldName=actFieldWidget.getActiveFieldName()
             if vector_field is None:
                 return
             ftle_params=self.getValue("FTLE_dt_MaxIter_upSampling_timeUps")
             FTLE_dt,MaxIter,upSampling,timeUps=ftle_params[0],ftle_params[1],ftle_params[2],ftle_params[3]
             resultScalarFieldSlice=compute_FTLE_2D_field_CUDA(vector_field, FTLE_dt, MaxIter,upSampling,timeUps)
-            actFieldWidget.insertScalarField("FTLE_2D_CUDA",resultScalarFieldSlice)      
+            FTLE_param_str=f"_dt{_format_float(FTLE_dt)}_MaxIter{MaxIter}_upSampling{_format_float(upSampling)}_timeUps{_format_float(timeUps)}"
+
+            actFieldWidget.insertScalarField(activeFieldName +FTLE_param_str,resultScalarFieldSlice)      
+
         self.addAction("FTLE_2D_CUDA", FTLE_2D_CUDA_action)
 
+        def saveActiveFieldAction(*args, **kwargs) -> None:
+            actFieldWidget:ActiveField = self
+            activeField=actFieldWidget.getActiveScalarField()
+            activeFieldName=actFieldWidget.getActiveScalarFieldName()
+            if activeField is not None:
+                self.scalarFieldManager.save_scalar_field_to_file(activeField, "outputs/scalarFields",activeFieldName)
+
+        self.addAction("save active scalarfield",saveActiveFieldAction)\
+        
+
+        def loadActiveFieldAction(*args, **kwargs) -> None:
+            resolved_path = self.getValue("scalarfield_path")
+            if  not isinstance(resolved_path, str) or resolved_path.strip() == "":
+                import tkinter as tk
+                from tkinter import filedialog
+                try:
+                    root = tk.Tk()
+                    root.withdraw()  # Hide the main window
+                    file_path = filedialog.askopenfilename()
+                    if file_path:  # Only update if a file was selected
+                        self.setValue("scalarfield_path",file_path)
+                        resolved_path=file_path
+                except Exception as e:
+                    print(f"Filedialog Error: {e}")
+                    return
+            loaded_scalar_field,loaded_scalar_fieldName=self.scalarFieldManager.load_scalar_field_from_file(resolved_path)
+            if loaded_scalar_field is not None:
+                self.insertScalarField(loaded_scalar_fieldName,loaded_scalar_field)
+
+        self.addAction("load scalar field",loadActiveFieldAction)
 
         self.activeField= {}
 

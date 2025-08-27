@@ -22,3 +22,4 @@ FlowDataAndVisualizationScripts/.ipynb_checkpoints/
 *.nbc
 *.nbi
 pnn/pointnet2_ops_lib/build/
+outputs/

@@ -1,8 +1,17 @@
 seed: 9061
+epochs: 100
+bs: 32
+print_freq: 10
+
+lr: 0.001
+optimizer:
+ NAME: 'adam'
+ weight_decay: 0.00000001
+loss:
+  NAME: MSELoss
 
 pnn:
   split: 3
-  bz: 16
   points: 1024
   stages: 2
   dim: 72
@@ -17,19 +26,22 @@ dataset:
 
 # set the params to generate the point clouds
 pcds:
+  sample_area: full #points full areas
   line_type: p_line # streamline   p_line-> pathline
   line_method: RK4 # RK4 Euler
-  line_steps: 200 # time step
-  line_sample: 25 # samples one the line
-  sample_area: full #points full areas
+  dt: 0.01 # flowline integration dt 
+
+  max_iterations: 200 # time step
+  sampled_points_per_line: 25 # samples one the line
+  offset_scale: 0.1 # scale of grid interval
+  num_cross_points_per_seeding: 5 
   interval_scale: 5
-  sample_nerbors: 5 
+
+
   normalized: True
   localized: True
-  offset_scale: 0.1 # scale of grid interval
+  
   time_slice: None # get the specific time_slice
-  dt_scale: 0.2 # flowline integration dt will be  dt_scale*vectorfield.dt
-
   #params for s_lines
   t_start: 0.6 #% for the whole time
   t_target: 1.0 #

@@ -15,13 +15,13 @@ def batched_pathlines(
     tmin, tmax,            # floats
     time_interval,         # Δt between frames
     starts_xy,             # [N, 2] in physical coord
-    t_start,               # scalar float
-    t_target,              # scalar float
+    t_start,               # scalar float,physcial time
+    t_target,              # scalar float,physcial time
     dt,                    # scalar float
     max_steps,             # int
     offsets_size=0.1,
-    method="euler",        # or "rk4"
-    time_interp="nearest"  # "nearest" or "linear"
+    method="rk4",        # or "rk4"
+    time_interp="linear"  # "nearest" or "linear"
 ):
     device = field_tensor.device
     dtype  = field_tensor.dtype
@@ -82,7 +82,7 @@ def batched_pathlines(
 
     # 4) buffers ---------------------------------------------------------------
     M = seeds.shape[0]
-    P = torch.full((M, max_steps+1, 3), float('nan'), device=device, dtype=dtype)
+    P = torch.full((M, max_steps, 3), float('nan'), device=device, dtype=dtype)
     alive = torch.ones((M,), dtype=torch.bool, device=device)
 
     # 记录“最后写入的步索引”（从0起），以及物理弧长
@@ -94,23 +94,23 @@ def batched_pathlines(
 
     # 写入 step 0
     P[:,0,:2] = x
-    P[:,0,  2] = (t - tmin)/(tmax - tmin)
+    P[:,0,  2] = t 
 
     # 初速近零者直接标记为死亡
     v0 = sample_velocity(x, t)
     alive &= (v0.abs().max(dim=1).values > 1e-6)
 
     # 5) main loop -------------------------------------------------------------
-    for k in range(max_steps):
+    for k in range(max_steps-1):
         if not alive.any(): break
 
         idx_alive = torch.where(alive)[0]
         x_prev = x[idx_alive]                        # 保存上一位置用于弧长
         v = sample_velocity(x_prev, t[idx_alive])
 
-        if method == "Euler":
+        if method.lower() == "euler":
             x_new = x_prev + v*dt
-        elif method== "RK4":
+        elif method.lower() == "rk4":
             k1 = v
             k2 = sample_velocity(x_prev + 0.5*dt*k1, t[idx_alive] + 0.5*dt)
             k3 = sample_velocity(x_prev + 0.5*dt*k2, t[idx_alive] + 0.5*dt)
@@ -130,7 +130,7 @@ def batched_pathlines(
         x[idx_alive] = x_new
         t[idx_alive] = t_new
         P[idx_alive, k+1, :2] = x_new
-        P[idx_alive, k+1,  2] = (t_new - tmin)/(tmax - tmin)
+        P[idx_alive, k+1,  2] = t_new 
 
         # 1) 更新最后步索引
         last_step[idx_alive] = k + 1
@@ -253,9 +253,9 @@ def run_pathlines_batched(samples, vectorfield, line_method="Euler",
                           rows_per_batch=4, device="cuda"):
     # 统一准备
     field_tensor = torch.from_numpy(vectorfield.field).to(device)  # [T,H,W,2]
-    t_start  = float(samples.t_start * (vectorfield.tmax - vectorfield.tmin))
-    t_target = float(samples.t_target * (vectorfield.tmax - vectorfield.tmin))
-    dt       = vectorfield.timeInterval * samples.dt_scale
+    t_start  = float(samples.t_start * (vectorfield.tmax - vectorfield.tmin)+vectorfield.tmin)
+    t_target = float(samples.t_target * (vectorfield.tmax - vectorfield.tmin)+vectorfield.tmin)
+    dt       =  samples.dt
     max_steps = samples.line_steps
     offset_dist = vectorfield.gridInterval[0] * samples.offset_scale
 
