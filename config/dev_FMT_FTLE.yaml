@@ -1,9 +1,9 @@
 seed: 9061
-epochs: 100
-bs: 32
-print_freq: 10
+epochs: 2
+bs: 256
+print_freq: 200
 
-lr: 0.001
+lr: 0.0008
 optimizer:
  NAME: 'adam'
  weight_decay: 0.00000001
@@ -13,8 +13,8 @@ loss:
 pnn:
   split: 3
   points: 1024
-  stages: 2
-  dim: 72
+  stages: 1
+  dim: 36
   k: 6
   alpha: 1000
   beta: 100
@@ -32,10 +32,10 @@ pcds:
   dt: 0.01 # flowline integration dt 
 
   max_iterations: 200 # time step
-  sampled_points_per_line: 25 # samples one the line
+  sampled_points_per_line: 20 # samples one the line
   offset_scale: 0.1 # scale of grid interval
   num_cross_points_per_seeding: 5 
-  interval_scale: 5
+  interval_scale: 4
 
 
   normalized: True

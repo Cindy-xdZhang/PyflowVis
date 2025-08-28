@@ -8,12 +8,14 @@ from torch.utils.data import Dataset, DataLoader, TensorDataset
 from DeepUtils.utils import EasyConfig
 from DeepUtils.loss import build_criterion_from_cfg
 from DeepUtils.optim import build_optimizer_from_cfg
+import matplotlib.pyplot as plt
+import hashlib
 
 from FLowUtils.ScalarField2d import ScalarField2D,ScalarFieldManager
 from FLowUtils.VectorField2d import *
 from FLowUtils.netCDFLoader import *
 from pnn.models.point_nn import EncNP
-from pnn.libs.parallel_flows import run_pathlines_batched, batched_pathlines
+from FLowUtils.flowlineIntegral import *
 from pnn.libs.flows import resample_to_fixed_count, LocLines, normalizeLines
 
 
@@ -120,27 +122,99 @@ class Decoder(nn.Module):
         self.DecoderLayer = nn.Sequential(
             nn.Linear(in_dim, 512),
             nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
             nn.Linear(512, 256),
             nn.ReLU(),
             nn.Linear(256, 1)
         )
 
     def forward(self, x):
-        x = self.DecoderLayer(x)
+        x = self.DecoderLayer(x.contiguous())
         return x.squeeze(-1)
     
 class FTLERegressor(nn.Module):
-    def __init__(self, input_points=1024, num_stages=2, embed_dim=72, k_neighbors=6, beta=100, alpha=1000):
+    def __init__(self, KStpesPerline,num_stages=2, embed_dim=72, k_neighbors=6, cross_neighborsize=5,beta=100, alpha=1000):
         super().__init__()
-        self.encoder = EncNP(input_points, num_stages, embed_dim, k_neighbors, alpha, beta)
-        self.decoder = Decoder(in_dim=embed_dim * (2 ** (num_stages - 0)))
+        #FTLERegressor is a point wise regressor, has no cross primitive, no neighbor information aggregation
+        self.cross_neighborsize=cross_neighborsize
+        self.pointsPerPrimitive=KStpesPerline*cross_neighborsize
+        self.encoder = EncNP(self.pointsPerPrimitive, num_stages, embed_dim, k_neighbors, alpha, beta)
+
+        self.decoderInputDim=embed_dim * (2 ** (num_stages - 0))+ 3*2*cross_neighborsize
+        self.decoder = Decoder(in_dim=self.decoderInputDim)
 
     def forward(self, pts: torch.Tensor):
+        B,_,N,=pts.shape
         xyz = pts.permute(0, 2, 1)
         feat = self.encoder(xyz, pts)
-        pred = self.decoder(feat)
+        #feat: (B, embed_dim)
+        start_pos=xyz.view(B,-1,self.cross_neighborsize, 3)[:,0,:,:].reshape(B, -1)
+        end_pos=xyz.view(B,-1,self.cross_neighborsize,3)[:,-1,:,:].reshape(B, -1)
+
+        every_cross_feature=torch.cat([feat,start_pos,end_pos],dim=1)
+
+        #feature dimension is in_dim*K(steps per line)
+        pred = self.decoder(every_cross_feature)
         return pred
     
+
+# Torch Dataset for training samples generated on-the-fly via generate_training_samples
+class FTLETrainDataset(Dataset):
+    def __init__(
+        self,
+        vectorfield: UnsteadyVectorField2D,
+        count: int,
+        max_steps: int,
+        dt: float,
+        t_start: float,
+        t_target: float,
+        offset_dist: float,
+        nerbors: int,
+        K: int,
+        localized: bool,
+        normalized: bool,
+    ):
+        # 1) 生成样本（跨路径线），只保留满长组
+        P_all, V_all = generate_training_samples(
+            vectorfield=vectorfield,
+            count=int(count),
+            max_steps=int(max_steps),
+            dt=float(dt),
+            t_start=float(t_start),
+            t_target=float(t_target),
+            offset_dist=float(offset_dist),
+            nerbors=int(nerbors),
+            device="cpu",
+            cacheSystem=True,
+        )
+
+        # 2) 重采样到固定 K，并按组拼接为 [N, nerb*K, 3]
+        P_K = resample_to_fixed_count(P_all.cpu(), V_all.cpu(), int(K))  # [count*nerb, K, 3]
+        group_N = P_K.shape[0] // int(nerbors)
+        P_grouped = P_K.view(group_N, int(nerbors), int(K), -1).reshape(group_N, int(nerbors)*int(K), -1)
+
+        # 3) 计算每组的真值 FTLE（标签）
+        #    先恢复为 [N, nerb, K, 3] 再喂入 primitive 计算
+        P_grouped_for_label = P_K.view(group_N, int(nerbors), int(K), -1)
+        y = computeFTLEFromPathlineCrossPrimitive(
+            P_grouped_for_label, sample_nerbors=int(nerbors), line_steps=int(K), vectorfield=vectorfield
+        ).cpu().float()
+
+        # 4) 预处理（本地化/归一化），作为网络输入 [N, nerb*K, 3]
+        X = preprocess_localization_normalization(
+            P_grouped, int(nerbors), int(K), bool(localized), bool(normalized), vectorfield
+        ).cpu().float()
+
+        # 存储为 CPU Tensor，配合 DataLoader 的 pin_memory 提升拷贝效率
+        self.points = X.contiguous()         # [N, nerb*K, 3]
+        self.labels = y.contiguous()         # [N]
+
+    def __len__(self):
+        return self.points.shape[0]
+
+    def __getitem__(self, idx):
+        return self.points[idx], self.labels[idx]
 
 #every scalar field is a 2d-time volume.
 # we can generate thousands of training samples from this scalar field.
@@ -191,8 +265,8 @@ def make_optimizer(model: nn.Module, lr: float = 1e-3, wd: float = 1e-5):
 def sample_random_starts(vectorfield: UnsteadyVectorField2D, count: int, device: str = "cuda") -> torch.Tensor:
     xrange = vectorfield.domainMaxBoundary[0] - vectorfield.domainMinBoundary[0]
     yrange = vectorfield.domainMaxBoundary[1] - vectorfield.domainMinBoundary[1]
-    xmin, ymin, _ = vectorfield.domainMinBoundary+0.1*np.array([xrange, yrange, 0])
-    xmax, ymax, _ = vectorfield.domainMaxBoundary-0.1*np.array([xrange, yrange, 0])
+    xmin, ymin, _ = vectorfield.domainMinBoundary+0.01*np.array([xrange, yrange, 0])
+    xmax, ymax, _ = vectorfield.domainMaxBoundary-0.01*np.array([xrange, yrange, 0])
 
     rx = torch.rand(count, device=device)
     ry = torch.rand(count, device=device)
@@ -210,15 +284,41 @@ def generate_training_samples(
     t_target: float,
     offset_dist: float,
     nerbors: int = 5,
-    device: str = "cuda"
+    device: str = "cuda",
+    cacheSystem: bool = True
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     在线随机采样起点，生成 cross pathlines，并丢弃所有组内存在长度<max_steps 的样本，
     反复补采直到收集到 count 组“满长(max_steps)”的 pathlines。
+    若启用 cacheSystem，则根据参数生成唯一 tag 并缓存到 outputs/temp/{tag}.npz，后续相同参数可直接加载。
     返回：
       - P_all:       [count*nerbors, max_steps, 3]
       - valid_all:   [count*nerbors] (恒等于 max_steps)
     """
+    # 缓存逻辑：构造唯一 tag 并尝试加载
+    if cacheSystem:
+        dom_min = tuple(map(float, vectorfield.domainMinBoundary))
+        dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
+        key_str = (
+            f"cnt={count}|ms={max_steps}|dt={dt:.8g}|ts={t_start:.8g}|tt={t_target:.8g}|"
+            f"off={offset_dist:.8g}|nb={nerbors}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
+            f"domMin={dom_min}|domMax={dom_max}"
+        )
+        tag = "PL_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+        cache_dir = os.path.join("./outputs", "temp")
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = os.path.join(cache_dir, f"{tag}.npz")
+
+        if os.path.exists(cache_path):
+            try:
+                data = np.load(cache_path)
+                P_np = data["P"]
+                V_np = data["V"]
+                P_all = torch.from_numpy(P_np).to(device).float()
+                V_all = torch.from_numpy(V_np).to(device).to(torch.int32)
+                return P_all, V_all
+            except Exception as e:
+                print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
     collected_groups = 0
     kept_P = []
     kept_V = []
@@ -227,16 +327,12 @@ def generate_training_samples(
         need = count - collected_groups
         batch_groups = max(need, 16)
         starts_xy = sample_random_starts(vectorfield, count=batch_groups, device=str(device))
-        P_b, V_b = batched_pathlines(
-            field_tensor=torch.from_numpy(vectorfield.field).to(device),
-            domain_min=vectorfield.domainMinBoundary,
-            domain_max=vectorfield.domainMaxBoundary,
-            tmin=vectorfield.tmin, tmax=vectorfield.tmax,
-            time_interval=vectorfield.timeInterval,
-            starts_xy=starts_xy,
-            t_start=t_start, t_target=t_target,
-            dt=dt, max_steps=max_steps,
-            offsets_size=offset_dist
+        P_b, V_b = batch_pathlineCross_integration_2D_auto(
+            points=starts_xy.detach().cpu().numpy(),
+            vectorfield=vectorfield,
+            t_start=float(t_start), t_target=float(t_target),
+            dt=float(dt), max_steps=int(max_steps),
+            offsets_size=float(offset_dist), method="rk4"
         )
         # 按组筛选“满长”
         if P_b.numel() == 0:
@@ -266,14 +362,226 @@ def generate_training_samples(
     # 只保留前 count 组（防御性切片）
     P_all = P_all[:count * nerbors]
     V_all = V_all[:count * nerbors]
+    # 保存缓存
+    if cacheSystem:
+        try:
+            # 使用同样的 tag 构造路径（若前面加载失败，需重新构造）
+            dom_min = tuple(map(float, vectorfield.domainMinBoundary))
+            dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
+            key_str = (
+                f"cnt={count}|ms={max_steps}|dt={dt:.8g}|ts={t_start:.8g}|tt={t_target:.8g}|"
+                f"off={offset_dist:.8g}|nb={nerbors}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
+                f"domMin={dom_min}|domMax={dom_max}"
+            )
+            tag = "PL_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+            cache_dir = os.path.join("outputs", "temp")
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(cache_dir, f"{tag}.npz")
+            np.savez(cache_path,
+                     P=P_all.detach().cpu().numpy().astype(np.float32),
+                     V=V_all.detach().cpu().numpy().astype(np.int32),
+                     meta=key_str)
+        except Exception as e:
+            print(f"[generate_training_samples] cache save failed: {e}")
     return P_all, V_all
         
+
+def test_ftle_from_model(cfg,model: nn.Module, vectorfield: UnsteadyVectorField2D, time:float, device: str = "cuda", save_path: str | None = None,
+                        starts_chunk: int = 64):
+    #first generate grid points for this time, then generate pathlines, 
+    # then call computeFTLEFromPathlineCrossPrimitive get correct ftle
+    # then compare the ftle from model and the correct ftle
+    #report the error
+    nerb = int(cfg.pcds.num_cross_points_per_seeding)
+    K = int(cfg.pcds.sampled_points_per_line)
+    max_steps = int(cfg.pcds.max_iterations)
+    dt = float(cfg.pcds.dt)
+    offset_dist = vectorfield.gridInterval[0] * float(cfg.pcds.offset_scale)
+    localized = bool(cfg.pcds.localized)
+    normalized = bool(cfg.pcds.normalized)
+
+    # 时间设置：以输入的 physical time 为起始，目标时间与训练保持相同的时间跨度
+    tmin, tmax = float(vectorfield.tmin), float(vectorfield.tmax)
+    base_t_start_ratio = float(cfg.pcds.t_start)
+    base_t_target_ratio = float(cfg.pcds.t_target)
+    delta_T = (base_t_target_ratio - base_t_start_ratio) * (tmax - tmin)
+    t_start = float(time)
+    t_target = float(np.clip(t_start + delta_T, tmin, tmax))
+
+    # 2) 生成均匀采样的起点网格（覆盖全域，步长=interval_scale*gridInterval）
+    xmin, ymin, _ = vectorfield.domainMinBoundary
+    xmax, ymax, _ = vectorfield.domainMaxBoundary
+    gx, gy = vectorfield.gridInterval
+    step_x = float(gx) * float(cfg.pcds.interval_scale)
+    step_y = float(gy) * float(cfg.pcds.interval_scale)
+    boundary_offset = 5e-2
+    xs = np.arange(xmin+boundary_offset, xmax - boundary_offset, step_x, dtype=np.float32)
+    ys = np.arange(ymin+boundary_offset, ymax - boundary_offset, step_y, dtype=np.float32)
+    XX, YY = np.meshgrid(xs, ys)
+    starts_xy = torch.from_numpy(np.stack([XX.reshape(-1), YY.reshape(-1)], axis=1)).to(device).float()
+
+    # 3) 分批生成 pathlines 与分批预测，避免内存溢出
+    ny, nx = len(ys), len(xs)
+    true_grid = np.full((ny, nx), 0, dtype=np.float32)
+    pred_grid = np.full((ny, nx), 0, dtype=np.float32)
+
+    total_groups = 0
+    se_sum = 0.0
+    ae_sum = 0.0
+    max_abs_err = 0.0
+    y_global_min = float('inf')
+    y_global_max = float('-inf')
+
+    M_all = starts_xy.shape[0]
+    with torch.no_grad():
+        for s0 in range(0, M_all, max(1, int(starts_chunk))):
+            s1 = min(M_all, s0 + int(starts_chunk))
+            starts_xy_b = starts_xy[s0:s1]
+
+            P_b, V_b = batch_pathlineCross_integration_2D_auto(
+                points=starts_xy_b.detach().cpu().numpy(),
+                vectorfield=vectorfield,
+                t_start=float(t_start), t_target=float(t_target),
+                dt=float(dt), max_steps=int(max_steps),
+                offsets_size=float(offset_dist), method="rk4"
+            )
+            if P_b.numel() == 0:
+                continue
+
+            assert P_b.shape[0] % nerb == 0, "lines count must be multiple of nerbors"
+            G_b = P_b.shape[0] // nerb
+            P_g = P_b.view(G_b, nerb, max_steps, -1)
+            V_g = V_b.view(G_b, nerb)
+            keep_groups = (V_g == max_steps).all(dim=1)
+            if not keep_groups.any():
+                continue
+
+            keep_local = torch.nonzero(keep_groups, as_tuple=False).squeeze(1)
+            keep_global = (keep_local + s0).cpu().numpy()
+
+            # 重采样到 K
+            P_kept = P_g[keep_groups].reshape(-1, max_steps, P_b.shape[-1])
+            V_kept = V_g[keep_groups].reshape(-1)
+            P_K = resample_to_fixed_count(P_kept, V_kept, K)                # [Ng*nerb, K, 3]
+            Ng_b = P_K.shape[0] // nerb
+            P_K = P_K.view(Ng_b, nerb, K, -1).reshape(Ng_b, nerb*K, -1)    # [Ng, nerb*K, 3]
+
+            # 计算真值 FTLE（按组）
+            y_true_b = computeFTLEFromPathlineCrossPrimitive(P_K, sample_nerbors=nerb, line_steps=K, vectorfield=vectorfield)
+            y_true_b = y_true_b.to(device).float()
+            y_global_min = min(y_global_min, float(y_true_b.min().item()))
+            y_global_max = max(y_global_max, float(y_true_b.max().item()))
+
+            # 预处理并分批预测
+            P_in = preprocess_localization_normalization(P_K, nerb, K, localized, normalized, vectorfield).to(device).float()
+            P_in = P_in.reshape(Ng_b, nerb*(K), 3)
+            points_all = P_in.to(device).permute(0, 2, 1)
+            pred_b = model(points_all).to(device).float()
+
+            # 误差累计
+            diff = pred_b - y_true_b
+            se_sum += float((diff ** 2).sum().item())
+            ae_sum += float(diff.abs().sum().item())
+            max_abs_err = max(max_abs_err, float(diff.abs().max().item()))
+            total_groups += int(Ng_b)
+
+            # 回填网格
+            rows = keep_global // nx
+            cols = keep_global % nx
+            true_grid[rows, cols] = y_true_b.detach().cpu().numpy()
+            pred_grid[rows, cols] = pred_b.detach().cpu().numpy()
+
+        if total_groups == 0:
+            print("[test_ftle] No full-length groups found across all chunks.")
+            return
+
+        mse = se_sum / total_groups
+        mae = ae_sum / total_groups
+        maxe = max_abs_err
+        dyn_range = max(abs(y_global_max - y_global_min), 1e-12)
+        psnr = float('inf') if mse <= 1e-20 else 20.0 * np.log10(dyn_range) - 10.0 * np.log10(mse)
+        print(f"[test_ftle] Ngroups={total_groups}, MSE={mse:.6f}, MAE={mae:.6f}, MaxE={maxe:.6f}, PSNR={psnr:.2f} dB")
+
+        # 可视化 2D 切片
+        visualize_ftle_slice(true_grid, pred_grid,psnr, vectorfield, xs, ys, save_path=save_path)
+
+        return {
+            "groups": int(total_groups),
+            "mse": mse,
+            "mae": mae,
+            "maxe": maxe,
+            "psnr": psnr,
+            "true_grid": true_grid,
+            "pred_grid": pred_grid,
+            "xs": xs,
+            "ys": ys
+        }
+
+def visualize_ftle_slice(true_grid: np.ndarray, pred_grid: np.ndarray,psnr: float, vectorfield: UnsteadyVectorField2D,
+                         xs: np.ndarray, ys: np.ndarray, save_path: str | None = None,
+                         upscale_factor: int = 1, dpi: int = 300):
+    # 公共显示范围（稳健地忽略极端值）
+    def robust_minmax(a):
+        if np.all(np.isnan(a)):
+            return 0.0, 1.0
+        vmin = np.nanpercentile(a, 2)
+        vmax = np.nanpercentile(a, 98)
+        if not np.isfinite(vmin): vmin = np.nanmin(a)
+        if not np.isfinite(vmax): vmax = np.nanmax(a)
+        if vmin == vmax:
+            vmax = vmin + 1e-6
+        return float(vmin), float(vmax)
+
+    xmin, ymin, _ = vectorfield.domainMinBoundary
+    xmax, ymax, _ = vectorfield.domainMaxBoundary
+    extent = [xmin, xmax, ymin, ymax]
+
+    vmin_t, vmax_t = robust_minmax(true_grid)
+    vmin_p, vmax_p = robust_minmax(pred_grid)
+    # vmin = min(vmin_t, vmin_p)
+    # vmax = max(vmax_t, vmax_p)
+    vmin=vmin_t
+    vmax=vmax_t
+
+    err = pred_grid - true_grid
+    eabs = np.abs(err)
+    evmin, evmax = robust_minmax(eabs)
+
+    # 可选：提升栅格分辨率（先双线性上采样，再像素级显示）
+    if upscale_factor and upscale_factor > 1:
+        with torch.no_grad():
+            tg = torch.from_numpy(true_grid)[None, None, ...].float()
+            pg = torch.from_numpy(pred_grid)[None, None, ...].float()
+            tg_hi = torch.nn.functional.interpolate(tg, scale_factor=upscale_factor, mode='bilinear', align_corners=False)[0, 0]
+            pg_hi = torch.nn.functional.interpolate(pg, scale_factor=upscale_factor, mode='bilinear', align_corners=False)[0, 0]
+            true_grid = tg_hi.cpu().numpy()
+            pred_grid = pg_hi.cpu().numpy()
+
+    fig, axes = plt.subplots(3, 1, figsize=(4, 12), constrained_layout=True, dpi=dpi)
+    ims = []
+    ims.append(axes[0].imshow(true_grid, origin='lower', extent=extent, cmap='coolwarm', vmin=vmin, vmax=vmax, interpolation='bilinear'))
+    axes[0].set_title('FTLE True'); axes[0].set_xlabel('X'); axes[0].set_ylabel('Y'); axes[0].set_aspect('equal')
+    ims.append(axes[1].imshow(pred_grid, origin='lower', extent=extent, cmap='coolwarm', vmin=vmin, vmax=vmax, interpolation='bilinear'))
+    axes[1].set_title(f'Pred,PSNR={psnr:.2f}dB'); axes[1].set_xlabel('X'); axes[1].set_ylabel('Y'); axes[1].set_aspect('equal')
+    ims.append(axes[2].imshow(eabs, origin='lower', extent=extent, cmap='coolwarm', vmin=evmin, vmax=evmax, interpolation='bilinear'))
+    axes[2].set_title('|Pred-True|'); axes[2].set_xlabel('X'); axes[2].set_ylabel('Y'); axes[2].set_aspect('equal')
+
+    for ax, im in zip(axes, ims):
+        cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cb.formatter.set_powerlimits((0, 0))
+        cb.update_ticks()
+
+    if save_path is not None:
+        plt.savefig(save_path, dpi=200)
+    plt.show(block=True)
+    plt.close(fig)
 
 
 
 if __name__=="__main__":
     config = EasyConfig()
     config.load("config/dev_FMT_FTLE.yaml", recursive=False)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # 1) 加载向量场 and precomputed FTLE
     vectorfield_datapath=f"{config.dataset.dat_dir}\\{config.dataset.name}.{config.dataset.extension}"
@@ -284,31 +592,27 @@ if __name__=="__main__":
     mode = getattr(config, 'mode', 'point_regression')
 
     if mode == 'point_regression':
-        # 在线随机采样起点 -> 生成 cross pathlines -> 传统FTLE作为标签 -> 训练
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        # 构造一个临时feature shape来初始化模型（N, nerbors*(K+1), 3）
-        tmp_points_size = config.pcds.num_cross_points_per_seeding*(config.pcds.max_iterations)
-        model = FTLERegressor(input_points=tmp_points_size, num_stages=config.pnn.stages, embed_dim=config.pnn.dim,
+        total_points_count = 20000
+        nerb = int(config.pcds.num_cross_points_per_seeding)
+        K = int(config.pcds.sampled_points_per_line)
+        #the input point cloud tensor runing in the network is (B,  N=K*nerb, 3)
+        model = FTLERegressor(KStpesPerline=K, num_stages=config.pnn.stages, embed_dim=config.pnn.dim,
                               k_neighbors=config.pnn.k, beta=config.pnn.beta, alpha=config.pnn.alpha).to(device)
         #training params
         optimizer = build_optimizer_from_cfg(model, lr=config.lr, **config.optimizer)
         loss_fn = build_criterion_from_cfg(config.loss)
         model.train()
-        epochs = 3
         batch_size = int(config.bs)
         print_freq = int(config.print_freq)
         epochs = int(config.epochs)
 
         #point cloud params
-        K = int(config.pcds.sampled_points_per_line)
-        nerb = int(config.pcds.num_cross_points_per_seeding)
         max_steps = int(config.pcds.max_iterations)
         dt = float(config.pcds.dt)
         offset_dist = vectorfield.gridInterval[0] * float(config.pcds.offset_scale)
         t_start = float(config.pcds.t_start * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
         t_target = float(config.pcds.t_target * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
         
-        total_points_count = 32*40
         iters_per_epoch = int(total_points_count/batch_size)
 
 
@@ -330,8 +634,9 @@ if __name__=="__main__":
         group_N = total_Pathline_points.shape[0] // nerb
         total_Pathline_points = total_Pathline_points.view(group_N, nerb, K, -1).reshape(group_N, nerb*K, -1)
 
+        total_y = computeFTLEFromPathlineCrossPrimitive(total_Pathline_points, sample_nerbors=nerb, line_steps=K, vectorfield=vectorfield)
+
         total_points = preprocess_localization_normalization(total_Pathline_points, nerb, K, config.pcds.localized, config.pcds.normalized, vectorfield).to(device).float()
-        total_y = computeFTLEFromPathlineCrossPrimitive(total_points, sample_nerbors=nerb, line_steps=K, vectorfield=vectorfield)
 
 
         for epoch in range(epochs):
@@ -344,7 +649,7 @@ if __name__=="__main__":
 
                 points = Pk.to(device).permute(0, 2, 1)
                 pred = model(points).to(device).float()
-                loss = loss_fn(pred, label_y)
+                loss = 10.0*loss_fn(pred, label_y)
                 optimizer.zero_grad(); loss.backward(); optimizer.step()
                 epoch_avg_loss += loss.item()
                 if iter % print_freq == 0:
@@ -353,10 +658,12 @@ if __name__=="__main__":
             epoch_avg_loss /= iters_per_epoch
             print(f"epoch {epoch}: loss={epoch_avg_loss:.6f}")
 
-
+        #step 2: test model
+        test_ftle_from_model(config,model, vectorfield, time=t_start, device=str(device))
     elif mode == 'volume_prediction':
         # 直接学习一个体素的回归可视化原型（此处留空接口，后续可接高维解码器）
-        print("[volume_prediction] 暂留接口，建议使用卷积/UNet式解码器对 EncNP 全局特征做体生成。")
+     pass
+
 
     elif mode == 'upsampling':
         # 未来模式：低分辨pathlines+低分辨FTLE -> 高分辨FTLE
@@ -364,9 +671,3 @@ if __name__=="__main__":
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
-
-
-
-
-
-#step 1: train model 

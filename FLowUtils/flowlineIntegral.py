@@ -1,6 +1,8 @@
 import numpy as np
+import torch
 from .VectorField2d import UnsteadyVectorField2D
 from .VectorField3d import UnsteadyVectorField3D
+import importlib
 
 
 def pathline_integration_one_direction_2D(
@@ -277,3 +279,261 @@ def compute_streamline_2D(args):
     backward = backward[::-1]
     full_path = backward + forward[1:]
     return full_path
+
+
+def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVectorField2D,t_start:float,t_target:float,dt:float,max_steps:int,method:str):
+    """
+    使用 CUDA 在 2D 非定常场中批量积分路径线（RK4）。
+
+    Args:
+        points: np.ndarray, 形状 [N,2]，物理坐标 (x,y)
+        vectorfield: UnsteadyVectorField2D
+        t_start: 起始物理时间（所有点共享）
+        t_target: 目标物理时间（同向/反向由与 t_start 的相对大小与 dt 符号决定）
+        dt: 单步时间间隔（正值，内部根据方向取正/负）
+        max_steps: 最大步数（包含 step0 的写入，输出有效长度为 [1..max_steps+1]）
+        method: 积分方法，"RK4" 或 "Euler"
+
+    Returns:
+        positions: np.ndarray [N, max_steps+1, 3]，(x,y,t)
+        valid_steps: np.ndarray [N]，每条线有效点数（包含 step0）
+    """
+    methodId=None
+    if method.lower() not in ["rk4","euler"]:
+        raise ValueError(f"Unknown NumericalMethod: {method}")
+    elif method.lower() == "euler":
+        methodId=0
+    elif method.lower() == "rk4":
+        methodId=1
+
+    assert points.ndim == 2 and points.shape[1] == 2, "points must be [N,2]"
+    data = vectorfield.getDataAsNumpy()  # (T,H,W,2)
+    assert data is not None and data.ndim == 4 and data.shape[-1] == 2
+
+    T, H, W, _ = data.shape
+    dx = float(vectorfield.gridInterval[0])
+    dy = float(vectorfield.gridInterval[1])
+    vdt = float(vectorfield.timeInterval if vectorfield.time_steps > 1 else 1.0)
+
+    # 拆分分量并保证连续
+    field_u = np.ascontiguousarray(data[..., 0].astype(np.float32))
+    field_v = np.ascontiguousarray(data[..., 1].astype(np.float32))
+
+    # 相对坐标与时间（kernel 以 [0,(W-1)*dx]×[0,(H-1)*dy]、t_rel=t- tmin 计算）
+    dom_min = vectorfield.domainMinBoundary
+    x0 = np.ascontiguousarray((points[:, 0] - float(dom_min[0])).astype(np.float64))
+    y0 = np.ascontiguousarray((points[:, 1] - float(dom_min[1])).astype(np.float64))
+    t0_rel = np.ascontiguousarray(np.full(points.shape[0], float(t_start - vectorfield.tmin), dtype=np.float64))
+    t_target_rel = float(t_target - vectorfield.tmin)
+
+    # 输出缓冲
+    out_pos = np.zeros((points.shape[0], max_steps , 3), dtype=np.float32)
+    out_valid = np.zeros((points.shape[0],), dtype=np.int32)
+
+    # 编译/加载 kernel
+    module = _get_or_compile_pathline2d_cuda_kernel()
+    kernel = module.get_function("integrate_pathlines_2d_kernel")
+    cuda = importlib.import_module('pycuda.driver')
+
+    # 设备内存
+    u_gpu = cuda.mem_alloc(field_u.nbytes)
+    v_gpu = cuda.mem_alloc(field_v.nbytes)
+    x_gpu = cuda.mem_alloc(x0.nbytes)
+    y_gpu = cuda.mem_alloc(y0.nbytes)
+    t0_gpu = cuda.mem_alloc(t0_rel.nbytes)
+    outP_gpu = cuda.mem_alloc(out_pos.nbytes)
+    outV_gpu = cuda.mem_alloc(out_valid.nbytes)
+
+    cuda.memcpy_htod(u_gpu, field_u)
+    cuda.memcpy_htod(v_gpu, field_v)
+    cuda.memcpy_htod(x_gpu, x0)
+    cuda.memcpy_htod(y_gpu, y0)
+    cuda.memcpy_htod(t0_gpu, t0_rel)
+    cuda.memcpy_htod(outP_gpu, out_pos)
+    cuda.memcpy_htod(outV_gpu, out_valid)
+
+    # 启动配置
+    threads = 256
+    blocks = (points.shape[0] + threads - 1) // threads
+
+    kernel(
+        u_gpu, v_gpu,
+        np.int32(W), np.int32(H), np.int32(T), np.float64(dx), np.float64(dy), np.float64(vdt),
+        x_gpu, y_gpu, t0_gpu,
+        np.float64(t_target_rel),
+        np.float64(float(dt)),
+        np.int32(int(max_steps)),
+        np.int32(int(points.shape[0])),
+        np.float64(float(vectorfield.tmin)),
+        np.float64(float(dom_min[0])), np.float64(float(dom_min[1])),
+        outP_gpu,
+        outV_gpu,
+        np.int32(methodId),
+        block=(threads, 1, 1), grid=(blocks, 1, 1)
+    )
+
+    # 回读
+    cuda.memcpy_dtoh(out_pos, outP_gpu)
+    cuda.memcpy_dtoh(out_valid, outV_gpu)
+
+    # 释放
+    u_gpu.free(); v_gpu.free(); x_gpu.free(); y_gpu.free(); t0_gpu.free(); outP_gpu.free(); outV_gpu.free()
+
+    return out_pos, out_valid
+
+
+def compute_pathline_2D_cuda(args):
+    """
+    单条路径线（前后向拼接）CUDA 实现，接口与 compute_pathline_2D 一致。
+    args = (vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method)
+    返回 [(pos3d, t), ...]
+    """
+    vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method = args
+
+    # 准备单点 seeds
+    seed_xy = np.array([[float(pos3d[0]), float(pos3d[1])]], dtype=np.float64)
+
+    # 前向
+    P_f, V_f = batch_pathline_integration_2D_cuda(
+        points=seed_xy,
+        vectorfield=vector_field,
+        t_start=float(t0),
+        t_target=float(max_time),
+        dt=float(step_size),
+        max_steps=int(max_iteration),
+        method=method
+    )
+    # 反向
+    P_b, V_b = batch_pathline_integration_2D_cuda(
+        points=seed_xy,
+        vectorfield=vector_field,
+        t_start=float(t0),
+        t_target=float(min_time),
+        dt=float(step_size),
+        max_steps=int(max_iteration),
+        method=method
+    )
+
+    def _to_path(P, V):
+        L = int(max(1, int(V[0])))
+        arr = P[0, :L]
+        path = []
+        for i in range(arr.shape[0]):
+            x, y, t = float(arr[i, 0]), float(arr[i, 1]), float(arr[i, 2])
+            path.append((np.array([x, y, 0.0], dtype=np.float32), t))
+        return path
+
+    forward = _to_path(P_f, V_f)
+    backward = _to_path(P_b, V_b)[::-1]
+    full_path = backward + forward[1:]
+    return full_path
+
+# ---------------- Internal: CUDA module cache ----------------
+_PATHLINE2D_CUDA_MODULE = None
+def _get_or_compile_pathline2d_cuda_kernel():
+    global _PATHLINE2D_CUDA_MODULE
+    if _PATHLINE2D_CUDA_MODULE is not None:
+        return _PATHLINE2D_CUDA_MODULE
+    with open("assets/cuda_kernal/PathlineIntegration2D.cu", "r") as f:
+        src = f.read()
+    try:
+        # 惰性导入并初始化上下文
+        importlib.import_module('pycuda.autoinit')
+        SourceModule = importlib.import_module('pycuda.compiler').SourceModule
+        _PATHLINE2D_CUDA_MODULE = SourceModule(src, options=["-O3", "-use_fast_math"])
+        print("✅ PathlineIntegration2D CUDA kernel compiled successfully.")
+    except Exception as e:
+        print(f"❌ Unexpected CUDA error: {e}")
+        raise
+    return _PATHLINE2D_CUDA_MODULE
+
+# ---------------- Backend binder and auto-dispatch ----------------
+USE_CUDA_PATHLINE = None  # None: unknown; True/False: decided
+
+def Bind_Flowline_IntegrationBackend():
+    """
+    绑定路径线积分后端：
+    - 若未安装 pycuda 或编译失败，使用 CPU 实现（现有 compute_pathline/streamline）。
+    - 若编译成功，使用 CUDA 实现（compute_pathline_2D_cuda 与 batch_pathline_integration_2D_cuda）。
+    返回 True/False 表示是否启用 CUDA 后端。
+    """
+    global USE_CUDA_PATHLINE
+    if USE_CUDA_PATHLINE is not None:
+        return USE_CUDA_PATHLINE
+    # 检测 pycuda 包
+    try:
+        importlib.import_module('pycuda.driver')
+        importlib.import_module('pycuda.compiler')
+        importlib.import_module('pycuda.autoinit')  # 初始化上下文（若可用）
+    except Exception:
+        USE_CUDA_PATHLINE = False
+        print("[BindFlowlineBackend] pycuda not available. Fallback to CPU integration.")
+        return USE_CUDA_PATHLINE
+
+    # 尝试编译 kernel
+    try:
+        mod = _get_or_compile_pathline2d_cuda_kernel()
+        USE_CUDA_PATHLINE = (mod is not None)
+    except Exception as e:
+        print(f"[BindFlowlineBackend] CUDA kernel compile failed: {e}. Fallback to CPU.")
+        USE_CUDA_PATHLINE = False
+    return USE_CUDA_PATHLINE
+
+
+def compute_pathline_2D_auto(args):
+    """自动选择 CUDA 或 CPU 的 2D pathline 计算。"""
+    method = args[-1]
+    use_cuda = Bind_Flowline_IntegrationBackend() and method.lower() in ["rk4","euler"]
+    if use_cuda:
+        try:
+            return compute_pathline_2D_cuda(args)
+        except Exception as e:
+            print(f"[compute_pathline_2D_auto] CUDA failed: {e}. Fallback to CPU.")
+    return compute_pathline_2D(args)
+
+
+def batch_pathlineCross_integration_2D_auto(points:np.ndarray,vectorfield:UnsteadyVectorField2D,t_start:float,t_target:float,dt:float,max_steps:int,offsets_size:float,method:str="rk4"):
+    """自动选择 CUDA 或 CPU 的批量路径线积分。
+    - 自动扩展 cross 偏移（中心、左右、上下），总条数 M=N*5。
+    - CPU 回退逐条调用 CPU 实现（性能较差）。
+    返回与 CUDA 版本一致的 (positions[M, S, 3], valid_steps[M])，torch.Tensor。
+    """
+    use_cuda = Bind_Flowline_IntegrationBackend()
+    # 扩展 seeds 为 cross（中心、x±、y±）
+    if points.size == 0:
+        return torch.empty(0, max_steps, 3), torch.empty(0, dtype=torch.int32)
+    offs = np.array([[0.0, 0.0], [offsets_size, 0.0], [-offsets_size, 0.0], [0.0, offsets_size], [0.0, -offsets_size]], dtype=np.float64)
+    seeds = (points[:, None, :] + offs[None, :, :]).reshape(-1, 2)
+
+    if use_cuda and method.lower() in ["rk4", "euler"]:
+        try:
+            pos_np, val_np = batch_pathline_integration_2D_cuda(seeds, vectorfield, t_start, t_target, dt, max_steps, method)
+            return torch.from_numpy(pos_np).float(), torch.from_numpy(val_np).to(torch.int32)
+        except Exception as e:
+            print(f"[batch_pathline_integration_2D_auto] CUDA failed: {e}. Fallback to CPU.")
+
+    # CPU fallback
+    M = seeds.shape[0]
+    out_pos = np.zeros((M, max_steps , 3), dtype=np.float32)
+    out_valid = np.zeros((M,), dtype=np.int32)
+
+    # 逐条 CPU 计算（含前后向拼接）
+    for i in range(M):
+        pos3d = np.array([float(seeds[i,0]), float(seeds[i,1]), 0.0], dtype=np.float32)
+        forward = pathline_integration_one_direction_2D(vectorfield, pos3d, float(t_start), float(t_target), float(dt), int(max_steps), method.upper())
+        backward = pathline_integration_one_direction_2D(vectorfield, pos3d, float(t_start), float(t_start) - (float(t_target) - float(t_start)), float(dt), int(max_steps), method.upper())
+        backward = backward[::-1]
+        full_path = backward + forward[1:]
+
+        L = min(len(full_path), max_steps)
+        for k in range(L):
+            p3, t = full_path[k]
+            out_pos[i, k, 0] = p3[0]
+            out_pos[i, k, 1] = p3[1]
+            out_pos[i, k, 2] = t
+        out_valid[i] = L
+
+    return torch.from_numpy(out_pos).float(), torch.from_numpy(out_valid).to(torch.int32)
+
+
+

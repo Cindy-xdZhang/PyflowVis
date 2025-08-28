@@ -27,9 +27,14 @@ def batched_pathlines(
     dtype  = field_tensor.dtype
 
     # 1) seeds [N*5, 2]
+    # 这段代码的作用是：对于每一个起始点 starts_xy，生成5个偏移点（包括原点和四个方向的偏移），用于后续生成一组交叉路径线（cross pathlines）。
+    # offsets 定义了5个二维偏移量，分别是(0,0)、(+offsets_size,0)、(-offsets_size,0)、(0,+offsets_size)、(0,-offsets_size)，即原点、左右、上下。
     offsets = ((0,0),(+offsets_size,0),(-offsets_size,0),(0,+offsets_size),(0,-offsets_size))
+    # offs 是 shape 为 [5,2] 的张量，存储上述5个偏移量，放在和 field_tensor 相同的设备和数据类型上。
     offs = torch.tensor(offsets, device=device, dtype=dtype)   # [5,2]
+    # N 是起始点的数量
     N = starts_xy.shape[0]
+    # 通过广播 starts_xy[:,None,:] + offs[None,:,:]，对每个起始点加上5个偏移，得到 [N,5,2]，再 reshape 成 [N*5,2]，即每个起始点扩展为5个偏移点
     seeds = (starts_xy[:,None,:] + offs[None,:,:]).reshape(-1,2).to(device)  # [M,2], M=N*5
 
     # 2) time direction

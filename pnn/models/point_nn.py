@@ -13,15 +13,19 @@ class FPS_kNN(nn.Module):
         super().__init__()
         self.group_num = group_num
         self.k_neighbors = k_neighbors
+   
 
     def forward(self, xyz, x):
+        # xyz: (B, N, 3)
+        # x: (B, N, C)
         B, N, _ = xyz.shape
-
-        # FPS
-        fps_idx = pointnet2_utils.furthest_point_sample(xyz, self.group_num).long() 
-        lc_xyz = index_points(xyz, fps_idx)
-        lc_x = index_points(x, fps_idx)
-
+        if self.group_num <N:
+            fps_idx = pointnet2_utils.furthest_point_sample(xyz, self.group_num).long()
+            lc_xyz = index_points(xyz, fps_idx)
+            lc_x = index_points(x, fps_idx)
+        else:
+            lc_xyz = xyz
+            lc_x = x
         # kNN
         knn_idx = knn_point(self.k_neighbors, xyz, lc_xyz)
         knn_xyz = index_points(xyz, knn_idx)
@@ -40,13 +44,15 @@ class LGA(nn.Module):
 
         # Normalize x (features) and xyz (coordinates)
         mean_x = lc_x.unsqueeze(dim=-2)
-        std_x = torch.std(knn_x - mean_x)
+        diff_x = knn_x - mean_x
+        std_x = torch.std(diff_x, dim=2, keepdim=True, unbiased=False)
 
         mean_xyz = lc_xyz.unsqueeze(dim=-2)
-        std_xyz = torch.std(knn_xyz - mean_xyz)
+        diff_xyz = knn_xyz - mean_xyz
+        std_xyz = torch.std(diff_xyz, dim=2, keepdim=True, unbiased=False)
 
-        knn_x = (knn_x - mean_x) / (std_x + 1e-5)
-        knn_xyz = (knn_xyz - mean_xyz) / (std_xyz + 1e-5)
+        knn_x = diff_x / (std_x + 1e-5)
+        knn_xyz = diff_xyz / (std_xyz + 1e-5)
 
         # Feature Expansion
         B, G, K, C = knn_x.shape
@@ -69,7 +75,8 @@ class Pooling(nn.Module):
                 nn.GELU())
 
     def forward(self, knn_x_w):
-        # Feature Aggregation (Pooling)
+        # knn_x_w: (B, out_dim, N, K)
+        # Feature Aggregation (Pooling along the KNN dimension as merge nerighboring information)
         lc_x = knn_x_w.max(-1)[0] + knn_x_w.mean(-1)
         lc_x = self.out_transform(lc_x)
         return lc_x
@@ -84,6 +91,7 @@ class PosE_Initial(nn.Module):
         self.alpha, self.beta = alpha, beta
 
     def forward(self, xyz):
+        # xyz: (B,  3, N)
         B, _, N = xyz.shape    
         feat_dim = self.out_dim // (self.in_dim * 2)
         
@@ -149,6 +157,7 @@ class EncNP(nn.Module):
         # Multi-stage Hierarchy
         for i in range(self.num_stages):
             out_dim = out_dim * 2
+            #disable FPS
             # group_num = group_num // 2
             self.FPS_kNN_list.append(FPS_kNN(group_num, k_neighbors))
             self.LGA_list.append(LGA(out_dim, self.alpha, self.beta))
@@ -156,9 +165,11 @@ class EncNP(nn.Module):
 
 
     def forward(self, xyz, x):
-
+        # xyz: (B,  N=Lstep*Cross_n_neighbors, 3)
+        #x: (B, 3, N)
         # Raw-point Embedding
         x = self.raw_point_embed(x)
+        B, embed_dim, N = x.shape
 
         # Multi-stage Hierarchy
         for i in range(self.num_stages):
@@ -169,9 +180,14 @@ class EncNP(nn.Module):
             # Pooling
             x = self.Pooling_list[i](knn_x_w)
 
-        # Global Pooling
-        x = x.max(-1)[0] + x.mean(-1)
-        return x
+    
+        x = x.view(B, -1,N)
+        # Global Pooling, x: (B, embed_dim, N) -> (B, embed_dim)
+        every_cross_feature = x.max(-1)[0] + x.mean(-1)
+        return every_cross_feature
+
+        
+      
 
 
 # Non-Parametric Network

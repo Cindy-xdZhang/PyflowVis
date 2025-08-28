@@ -256,7 +256,7 @@ class FlowLineObject(Object):
                     for pos3d, t0 in seeds
                 ]
             if vector_field.getDim()==2:
-                self.pathline_cache = list(map(compute_pathline_2D, args_list))
+                self.pathline_cache = list(map(compute_pathline_2D_auto, args_list))
             elif vector_field.getDim()==3:
                 self.pathline_cache = list(map(compute_pathline_3D, args_list))
 
