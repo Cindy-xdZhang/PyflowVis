@@ -245,6 +245,8 @@ class FlowLineObject(Object):
             #call my classical ODE solver
             seeds=self.indicatorObject.getValue("SeedingGroup0") # [(pos3D, time), ...]
             number_of_pathlines = len(seeds)
+            if number_of_pathlines == 0:
+                return
 
             min_time = vector_field.getMinTime()
             max_time = vector_field.getMaxTime()
@@ -255,8 +257,9 @@ class FlowLineObject(Object):
                     (vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method)
                     for pos3d, t0 in seeds
                 ]
+    
             if vector_field.getDim()==2:
-                self.pathline_cache = list(map(compute_pathline_2D_auto, args_list))
+                self.pathline_cache = compute_pathline_2D_auto(args_list)
             elif vector_field.getDim()==3:
                 self.pathline_cache = list(map(compute_pathline_3D, args_list))
 
@@ -282,9 +285,10 @@ class FlowLineObject(Object):
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         gl.glBindVertexArray(0)
 
+    
     def MappingFlowlineAsRenderingVAO(self, pathline_cache, scalar_field_appending=None):
         """
-        pathline_cache: List[List[Tuple[np.ndarray, float]]]
+        pathline_cache: List[np.ndarray, floa]]
             每个元素是一条 pathline，pathline 是 (pos3d, t) 的 list
         scalar_field_appending: 可选，支持 None 或有 get_value(pos, t) 方法的对象
         """
@@ -297,7 +301,6 @@ class FlowLineObject(Object):
         max_time = max(all_times)
         inverse_time_range = 1.0 / (max_time - min_time) if max_time > min_time else 1.0
         
-        ADJACENCY_SIZE = 2
         pathline_offset_indices = []
         pathline_sizes = []
         offset_counter = 0

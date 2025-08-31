@@ -64,8 +64,11 @@ class Indicator(Object):
 
         self.addAction("clear seeding", lambda x: self.clearSeeding())
         self.addAction("dense reseeding", lambda x: self.denseReseeding())
+        self.addAction("random reseeding", lambda x: self.randomReseeding())
 
         # Seeding groups: each is a list of (pos, time)
+        self.create_variable("SeedingCountPerAxis", 10, True)
+
         self.create_variable("keepSeeding", False, True)
         self.create_variable("activeSeedingGroup", 0, True)
         self.create_variable_callback("SeedingGroup0", list([]), notifySeedingChanged,False)
@@ -74,6 +77,30 @@ class Indicator(Object):
         self.last_indicator_time = None
 
         
+    def randomReseeding(self):
+        activeFieldWidget=self.getParentScene().getObject("ActiveField")
+        if activeFieldWidget is None:
+            return
+        activeVectorField=activeFieldWidget.getActiveField()
+        if activeVectorField is None:
+            return
+        seeingCountPerAxis=self.getValue("SeedingCountPerAxis")
+        xrange = activeVectorField.domainMaxBoundary[0] - activeVectorField.domainMinBoundary[0]
+        yrange = activeVectorField.domainMaxBoundary[1] - activeVectorField.domainMinBoundary[1]
+        xmin, ymin, _ = activeVectorField.domainMinBoundary+0.01*np.array([xrange, yrange, 0])
+        xmax, ymax, _ = activeVectorField.domainMaxBoundary-0.01*np.array([xrange, yrange, 0])
+        xrange=xmax-xmin
+        yrange=ymax-ymin
+        rx=np.random.rand(seeingCountPerAxis)
+        ry=np.random.rand(seeingCountPerAxis)
+        xs=xmin+rx*xrange
+        ys=ymin+ry*yrange
+        # 将每个种子点表示为一个np.array3的列表
+        randomSeeds = [np.array([x, y, 0.0], dtype=np.float32) for x, y in zip(xs, ys)]
+
+        time=self.getParentScene().getTime()
+        groupIdtoOperate=self.getValue("activeSeedingGroup")
+        self.SetIndicators(randomSeeds, time, groupIdtoOperate, keep_seeding=self.getValue("keepSeeding"))
 
   
 
@@ -87,9 +114,31 @@ class Indicator(Object):
                     groupIdtoOperate=self.getValue("activeSeedingGroup")
                     keepSeeding=self.getValue("keepSeeding")
                     self.SetIndicator(hit_pos, time, group=groupIdtoOperate, keep_seeding=keepSeeding)
-        # elif event.type == pygame.MOUSEMOTION:
-        #     if event.buttons[0] == 1:  # Left mouse button
-        #         self.SetIndicator(event.pos, time, group=0, keep_seeding=True)
+
+
+    def SetIndicators(self, pos3D, time, group: int = 0, keep_seeding: bool = False):
+        """
+        pos3D: list of pos3d(3)
+        """
+        if group == 0:
+            SeedingGroup0=self.getValue("SeedingGroup0")
+            if keep_seeding:
+                for pos in pos3D:
+                    SeedingGroup0.append((pos, time))
+            else:
+                SeedingGroup0 = [(pos, time) for pos in pos3D]
+            self.setValue("SeedingGroup0", SeedingGroup0)
+        elif group == 1:
+            SeedingGroup1=self.getValue("SeedingGroup1")
+            if keep_seeding:
+                for pos in pos3D:
+                    SeedingGroup1.append((pos, time))
+            else:
+                SeedingGroup1 = [(pos, time) for pos in pos3D]
+            self.setValue("SeedingGroup1", SeedingGroup1)
+        else:
+            raise ValueError("group must be 0 or 1")
+        getEngine().eventRegister.notifyEvent("seeding_changed")
 
     def SetIndicator(self, pos3D, time, group: int = 0, keep_seeding: bool = False):
         """

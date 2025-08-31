@@ -281,21 +281,20 @@ def compute_streamline_2D(args):
     return full_path
 
 
-def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVectorField2D,t_start:float,t_target:float,dt:float,max_steps:int,method:str):
+def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVectorField2D,t_target:float,dt:float,max_steps:int,method:str):
     """
     使用 CUDA 在 2D 非定常场中批量积分路径线（RK4）。
 
     Args:
-        points: np.ndarray, 形状 [N,2]，物理坐标 (x,y)
+        points: np.ndarray, 形状 [N,3]，物理坐标 (x,y,t)
         vectorfield: UnsteadyVectorField2D
-        t_start: 起始物理时间（所有点共享）
-        t_target: 目标物理时间（同向/反向由与 t_start 的相对大小与 dt 符号决定）
+        t_target: 目标物理时间（同向/反向由与 t_start 的相对大小与 dt 符号决定）,t_start is the time of the seeding
         dt: 单步时间间隔（正值，内部根据方向取正/负）
         max_steps: 最大步数（包含 step0 的写入，输出有效长度为 [1..max_steps+1]）
         method: 积分方法，"RK4" 或 "Euler"
 
     Returns:
-        positions: np.ndarray [N, max_steps+1, 3]，(x,y,t)
+        positions: np.ndarray [N, max_steps, 3]，(x,y,t)
         valid_steps: np.ndarray [N]，每条线有效点数（包含 step0）
     """
     methodId=None
@@ -306,7 +305,7 @@ def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVec
     elif method.lower() == "rk4":
         methodId=1
 
-    assert points.ndim == 2 and points.shape[1] == 2, "points must be [N,2]"
+    assert points.ndim == 2 and points.shape[1] == 3, "points must be [N,3]"
     data = vectorfield.getDataAsNumpy()  # (T,H,W,2)
     assert data is not None and data.ndim == 4 and data.shape[-1] == 2
 
@@ -323,7 +322,8 @@ def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVec
     dom_min = vectorfield.domainMinBoundary
     x0 = np.ascontiguousarray((points[:, 0] - float(dom_min[0])).astype(np.float64))
     y0 = np.ascontiguousarray((points[:, 1] - float(dom_min[1])).astype(np.float64))
-    t0_rel = np.ascontiguousarray(np.full(points.shape[0], float(t_start - vectorfield.tmin), dtype=np.float64))
+    t0_rel = np.ascontiguousarray(points[:, 2] - float(vectorfield.tmin), dtype=np.float64)
+
     t_target_rel = float(t_target - vectorfield.tmin)
 
     # 输出缓冲
@@ -353,7 +353,7 @@ def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVec
     cuda.memcpy_htod(outV_gpu, out_valid)
 
     # 启动配置
-    threads = 256
+    threads = 64
     blocks = (points.shape[0] + threads - 1) // threads
 
     kernel(
@@ -382,51 +382,61 @@ def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVec
     return out_pos, out_valid
 
 
-def compute_pathline_2D_cuda(args):
+def compute_pathline_2D_cuda(list_args):
     """
     单条路径线（前后向拼接）CUDA 实现，接口与 compute_pathline_2D 一致。
     args = (vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method)
     返回 [(pos3d, t), ...]
     """
-    vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method = args
+    vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method = list_args[0]
 
-    # 准备单点 seeds
-    seed_xy = np.array([[float(pos3d[0]), float(pos3d[1])]], dtype=np.float64)
-
+    # 生成形状为 (N, 3) 的tensor
+    batch_seeding_point_pos_time = []
+    for arg in list_args:
+        _, pos3d, t0, _, _, _, _, _ = arg
+        batch_seeding_point_pos_time.append([float(pos3d[0]), float(pos3d[1]), float(t0)])
+    batch_seeding_point_pos_time = np.array(batch_seeding_point_pos_time, dtype=np.float64)  # (N, 3)
     # 前向
-    P_f, V_f = batch_pathline_integration_2D_cuda(
-        points=seed_xy,
+    Pathline_f, pathlineLength_f = batch_pathline_integration_2D_cuda(
+        points=batch_seeding_point_pos_time,
         vectorfield=vector_field,
-        t_start=float(t0),
         t_target=float(max_time),
         dt=float(step_size),
         max_steps=int(max_iteration),
         method=method
     )
     # 反向
-    P_b, V_b = batch_pathline_integration_2D_cuda(
-        points=seed_xy,
+    Pathline_b, pathlineLength_b = batch_pathline_integration_2D_cuda(
+        points=batch_seeding_point_pos_time,
         vectorfield=vector_field,
-        t_start=float(t0),
         t_target=float(min_time),
         dt=float(step_size),
         max_steps=int(max_iteration),
         method=method
     )
 
-    def _to_path(P, V):
-        L = int(max(1, int(V[0])))
-        arr = P[0, :L]
-        path = []
-        for i in range(arr.shape[0]):
-            x, y, t = float(arr[i, 0]), float(arr[i, 1]), float(arr[i, 2])
-            path.append((np.array([x, y, 0.0], dtype=np.float32), t))
-        return path
+    # 使用批处理切片处理变长路径线，避免逐点 for 循环
+    B, S, _ = Pathline_f.shape
 
-    forward = _to_path(P_f, V_f)
-    backward = _to_path(P_b, V_b)[::-1]
-    full_path = backward + forward[1:]
-    return full_path
+    def _np_array_to_path(arr: np.ndarray):
+        if arr.size == 0:
+            return []
+        K = arr.shape[0]
+        pos3d = np.zeros((K, 3), dtype=np.float32)
+        pos3d[:, :2] = arr[:, :2].astype(np.float32)
+        t_col = arr[:, 2]
+        return list(zip(pos3d, t_col.tolist()))
+    
+    results = []
+    for line_idx in range(B):
+        kb = int(pathlineLength_b[line_idx])
+        kf = int(pathlineLength_f[line_idx])
+        bwd_arr = Pathline_b[line_idx, :kb, :][::-1]
+        fwd_arr = Pathline_f[line_idx, 1:kf, :] if kf > 1 else Pathline_f[line_idx, 0:0, :]
+        full_arr = np.concatenate([bwd_arr, fwd_arr], axis=0) if bwd_arr.size or fwd_arr.size else Pathline_f[line_idx, 0:0, :]
+        results.append(_np_array_to_path(full_arr))
+
+    return results
 
 # ---------------- Internal: CUDA module cache ----------------
 _PATHLINE2D_CUDA_MODULE = None
@@ -480,16 +490,18 @@ def Bind_Flowline_IntegrationBackend():
     return USE_CUDA_PATHLINE
 
 
-def compute_pathline_2D_auto(args):
+def compute_pathline_2D_auto(list_args):
     """自动选择 CUDA 或 CPU 的 2D pathline 计算。"""
-    method = args[-1]
+    args0 = list_args[0]
+    method = args0[-1]
     use_cuda = Bind_Flowline_IntegrationBackend() and method.lower() in ["rk4","euler"]
     if use_cuda:
         try:
-            return compute_pathline_2D_cuda(args)
+            return compute_pathline_2D_cuda(list_args)
         except Exception as e:
             print(f"[compute_pathline_2D_auto] CUDA failed: {e}. Fallback to CPU.")
-    return compute_pathline_2D(args)
+
+    return list(map(compute_pathline_2D, list_args))
 
 
 def batch_pathlineCross_integration_2D_auto(points:np.ndarray,vectorfield:UnsteadyVectorField2D,t_start:float,t_target:float,dt:float,max_steps:int,offsets_size:float,method:str="rk4"):
@@ -504,10 +516,11 @@ def batch_pathlineCross_integration_2D_auto(points:np.ndarray,vectorfield:Unstea
         return torch.empty(0, max_steps, 3), torch.empty(0, dtype=torch.int32)
     offs = np.array([[0.0, 0.0], [offsets_size, 0.0], [-offsets_size, 0.0], [0.0, offsets_size], [0.0, -offsets_size]], dtype=np.float64)
     seeds = (points[:, None, :] + offs[None, :, :]).reshape(-1, 2)
+    seeds = np.concatenate([seeds, np.ones((seeds.shape[0], 1)) * t_start], axis=1)
 
     if use_cuda and method.lower() in ["rk4", "euler"]:
         try:
-            pos_np, val_np = batch_pathline_integration_2D_cuda(seeds, vectorfield, t_start, t_target, dt, max_steps, method)
+            pos_np, val_np = batch_pathline_integration_2D_cuda(seeds, vectorfield, t_target, dt, max_steps, method)
             return torch.from_numpy(pos_np).float(), torch.from_numpy(val_np).to(torch.int32)
         except Exception as e:
             print(f"[batch_pathline_integration_2D_auto] CUDA failed: {e}. Fallback to CPU.")
@@ -521,9 +534,10 @@ def batch_pathlineCross_integration_2D_auto(points:np.ndarray,vectorfield:Unstea
     for i in range(M):
         pos3d = np.array([float(seeds[i,0]), float(seeds[i,1]), 0.0], dtype=np.float32)
         forward = pathline_integration_one_direction_2D(vectorfield, pos3d, float(t_start), float(t_target), float(dt), int(max_steps), method.upper())
-        backward = pathline_integration_one_direction_2D(vectorfield, pos3d, float(t_start), float(t_start) - (float(t_target) - float(t_start)), float(dt), int(max_steps), method.upper())
-        backward = backward[::-1]
-        full_path = backward + forward[1:]
+        # backward = pathline_integration_one_direction_2D(vectorfield, pos3d, float(t_start), float(t_target), float(dt), int(max_steps), method.upper())
+        # backward = backward[::-1]
+        # full_path = backward + forward[1:]
+        full_path = forward
 
         L = min(len(full_path), max_steps)
         for k in range(L):

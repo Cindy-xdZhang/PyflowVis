@@ -1268,58 +1268,55 @@ def sampleLines(line_sample,sample_nerbors,points):
     points_ori=points_ori.reshape(points_ori.shape[0],-1,points_ori.shape[-1])
     return points_ori
 
+
+
+
 @torch.no_grad()
-def resample_to_fixed_count(points: torch.Tensor,
-                                     valid_steps: torch.Tensor,
+def temporal_downsamplePathlineCrossPrimitive(points: torch.Tensor,
                                      K: int) -> torch.Tensor:
     """
-    points:      [M, Nmax, D]    每条线最多 Nmax 点（超出的为占位）
-    valid_steps: [M]             第 i 条线真实点数 n_i (>=1)
-    K:           目标点数（所有线最终统一为 K 点）
-    return:      [M, K, D]
+    将路径线沿给定时间维度重采样为固定步数 K：保留首尾，中间随机采样。
+    参数:
+      - points: 张量，形状 [groups, lines_per_group, timesteps, ...]
+      - K: 目标采样步数 (>=2)
+
+    返回:
+      - 与 points 相同维度数的张量，但时间维长度变为 K
     """
-    device, dtype = points.device, points.dtype
-    M, Nmax, D = points.shape
-    if K <= 0:
-        raise ValueError("K must be >= 2")
+    if K < 2:
+        raise ValueError("K must be >= 2 to keep both head and tail")
+    if points.dim() < 3:
+        raise ValueError("points must have at least 3 dims: [groups, lines_per_group, timesteps, ...]")
 
-    # 每条线的有效长度 n_i，限制到 [1, Nmax]
-    n = valid_steps.to(torch.long).clamp_min(1)
-    n = torch.minimum(n, torch.full_like(n, Nmax))  # [M]
+    device = points.device
+    T = points.shape[2]
 
-    # 先构造一个“清洗过”的 P：超出 n_i 的位置用最后一个有效点填充
-    idxs = torch.arange(Nmax, device=device).view(1, -1).expand(M, -1)      # [M,Nmax]
-    last_idx = (n - 1).view(-1, 1).expand(-1, Nmax)                          # [M,Nmax]
-    take_idx = torch.where(idxs < n.view(-1, 1), idxs, last_idx)             # [M,Nmax]
-    P = points.gather(1, take_idx.unsqueeze(-1).expand(-1, -1, D))           # [M,Nmax,D]
+    # 统一沿时间维度选取 K 个索引（同一批次、同一组使用相同时间索引）
+    if T <= 0:
+        raise ValueError("timesteps dimension must be > 0")
 
-
-    # 固定保留首尾索引（0 与 n_i-1）
-    start_idx = torch.zeros(M, 1, dtype=torch.long, device=device)          # [M,1]
-    end_idx = (n - 1).view(-1, 1)                                           # [M,1]
-
-    # 中间随机选择 K-2 个 time slice（按行自适应范围 1..n_i-2）
-    num_mid = max(K - 2, 0)
-    if num_mid > 0:
-        mid_range_len = torch.clamp(n - 2, min=0)                           # [M]
-        if mid_range_len.dtype.is_floating_point:
-            mid_range_len = mid_range_len.to(torch.long)
-        # 生成 [0, mid_range_len_i) 的随机整数，再整体 +1 → [1, n_i-2]；
-        # 对于 n_i <= 2，mid_range_len=0，先得到全 0，再与 (n_i-1) 做最小化，安全回落到 0 或 1。
-        r = torch.rand(M, num_mid, device=device)
-        idx_mid = (r * mid_range_len.view(-1, 1).to(r.dtype)).floor().to(torch.long) + 1  # [M,num_mid]
-        max_idx = (n.view(-1, 1) - 1).expand(-1, num_mid)                                  # [M,num_mid]
-        idx_mid = torch.minimum(idx_mid, max_idx)                                           # clamp 到 [0, n_i-1]
-        sel_idx = torch.cat([start_idx, idx_mid, end_idx], dim=1)                           # [M,K]
+    if T == 1:
+        sel_idx = torch.zeros(K, device=device, dtype=torch.long)
     else:
-        sel_idx = torch.cat([start_idx, end_idx], dim=1)                                    # [M,2]
-
-    # 按时间顺序排序
-    sel_idx, _ = torch.sort(sel_idx, dim=1)                                                 # [M,K]
-
-    # 取出对应点
-    out = P.gather(1, sel_idx.unsqueeze(-1).expand(-1, -1, D))                              # [M,K,D]
+        if K == 2:
+            sel_idx = torch.tensor([0, T - 1], device=device, dtype=torch.long)
+        elif T > 2:
+            num_mid = K - 2
+            # 中间从 [1, T-2] 随机采样（全局一致），并按时间排序
+            idx_mid = torch.randint(1, T - 1, (num_mid,), device=device)
+            idx_mid, _ = torch.sort(idx_mid)
+            sel_idx = torch.cat([
+                torch.tensor([0], device=device, dtype=torch.long),
+                idx_mid,
+                torch.tensor([T - 1], device=device, dtype=torch.long)
+            ], dim=0)
+        else:  # T == 2 且 K > 2
+            assert False, "T == 2 and K > 2 is not supported"
+            
+    out = points[:, :, sel_idx, :]
     return out
+
+
 
 
 def LocLines(sample_nerbors,points):
@@ -1336,11 +1333,14 @@ def LocLines(sample_nerbors,points):
     points_ori=points.reshape(points.shape[0],sample_nerbors,-1,points.shape[-1])
     
     # x: [N, sample, step, 3]
-    first_pts = points_ori[:, :, 0, :]            # 取出每条线的第一个点，形状 [N, sample, 3]
-    first_pts = first_pts.unsqueeze(2)   # 在 step 维度上扩展成 [N, sample, 1, 3]
+    first_pts = points_ori[:, 0, 0, :]            # 取出每条线的第一个点，形状 [N, sample, 3]
+    first_pts = first_pts.unsqueeze(1).unsqueeze(2)   # 在 step 维度上扩展成 [N, sample, 1, 3]
+
     x_shifted = points_ori - first_pts            # 自动广播为 [N, sample, step, 3]
-    x_shifted=x_shifted.reshape(points_ori.shape[0],-1,points_ori.shape[-1])
     return x_shifted
+
+
+
 
 def LocLines4Time(sample_nerbors,points):
     """

@@ -5,6 +5,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from .interpolation import bilinear_interpolate
 from numba import njit 
+from typeguard import typechecked
 
 @njit(cache=True)
 def bilinear_interpolate_numpy(field_slice, x, y):
@@ -103,6 +104,7 @@ class IDiscreteField2D(ABC):
         domainMinBoundary (list, optional): [xmin, ymin]. Defaults to [-2.0,-2.0,].
         domainMaxBoundary (list, optional): [xmax, ymax]. Defaults to [2.0,2.0].
     """        
+    @typechecked
     def __init__(self,Xdim:int, Ydim:int,domainMinBoundary:list=[-2.0,-2.0,0.0],domainMaxBoundary:list=[2.0,2.0,2.0],timsteps:int=1):
         self.Xdim= Xdim
         self.Ydim = Ydim

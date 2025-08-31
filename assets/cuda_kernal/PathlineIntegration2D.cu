@@ -44,7 +44,25 @@ __device__ double2 Interpolate2DUnsteadyField_device(float* u, float* v, double2
 }
 
 
+
+__device__ bool valid_space_time_check_device(double2 p_new, double t_new, double t_target, double dt_local, int v_width, int v_height, double v_dx, double v_dy){
+    bool in_bounds = is_inbounds_2D_vertex_device(v_width, v_height, v_dx, v_dy, p_new);
+    bool time_ok = (dt_local > 0.0) ? (t_new <= t_target) : (t_new >= t_target);
+    return in_bounds && time_ok;
+}
+
+
+
 // ----------------------- Batched Pathline Integration Kernel -----------------------
+//no need to pass min_x,min_y:
+//pos_x=minx+idx*dx, pos_x->float_idx: (pos_x-minx)/dx
+//pos_y=miny+idy*dy, pos_y->float_idx: (pos_y-miny)/dy
+//this is equivalent to:
+//pos_x=idx*dx, pos_x->float_idx: pos_x/dx
+//pos_y=idy*dy, pos_y->float_idx: pos_y/dy
+//same in time resolution
+//the input t_i is relative time instead of physical time, i.e. t_i*v_dt+vector_field.tmin is the physical time
+//we don't need to pass min_t or compute physical time, since we can query grid by floorIndex=floor(t_i/dt) ceilIndex=floorIndex+1
 __global__ void integrate_pathlines_2d_kernel(
     float* field_u, float* field_v,
     int v_width, int v_height, int TotalTimeSteps,
@@ -57,8 +75,8 @@ __global__ void integrate_pathlines_2d_kernel(
     int num_seeds,
     double t_min_phys,
     double x_min_phys, double y_min_phys,
-    float* out_positions, // shape [num_seeds, max_steps+1, 3]
-    int* out_valid_steps,
+    float* out_positions, // shape [num_seeds, max_steps, 3]
+    int* out_valid_steps,//shape [num_seeds] the length of the pathline, if the seeding is out of the domain/at critical point, the length is 1(pathline is the seeding itself)
     int methodId//0: Euler, 1: RK4
   ){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -78,14 +96,17 @@ __global__ void integrate_pathlines_2d_kernel(
     out_positions[base + 0] = (float)(p.x + x_min_phys);
     out_positions[base + 1] = (float)(p.y + y_min_phys);
     out_positions[base + 2] = (float)(t + t_min_phys);
-    int last_step = 0;
 
     // Early stop if velocity ~ 0 at start
     double2 v0 = Interpolate2DUnsteadyField_device(field_u, field_v, p, v_width, v_height, TotalTimeSteps, v_dx, v_dy, v_dt, t);
-    if (fabs(v0.x) < 1e-9 && fabs(v0.y) < 1e-9){
+
+    if (fabs(v0.x) < 1e-9 && fabs(v0.y) < 1e-9 || !valid_space_time_check_device(p, t, t_target, dt_local, v_width, v_height, v_dx, v_dy)){
         out_valid_steps[i] = 1;
         return;
     }
+
+    int pathlineLength = 1;
+
     if(methodId==0){
 
      for (int k = 0; k < max_steps-1; ++k){
@@ -95,21 +116,20 @@ __global__ void integrate_pathlines_2d_kernel(
         double2 p_new = d2_add(p, incr);
         double t_new = t + dt_local;
 
+        // Termination checks
+        if (!valid_space_time_check_device(p_new, t_new, t_target, dt_local, v_width, v_height, v_dx, v_dy)){
+            break;
+        }
+
+        //pass the boundary and time termination checks
         // Write step k+1 in physical units
         int out_idx = base + (k+1)*3;
         out_positions[out_idx + 0] = (float)(p_new.x + x_min_phys);
         out_positions[out_idx + 1] = (float)(p_new.y + y_min_phys);
         out_positions[out_idx + 2] = (float)(t_new + t_min_phys);
-        last_step = k + 1;
-
-        // Termination checks
-        bool in_bounds = is_inbounds_2D_vertex_device(v_width, v_height, v_dx, v_dy, p_new);
-        bool time_ok = (dt_local > 0.0) ? (t_new < t_target) : (t_new > t_target);
+        pathlineLength++;
         p = p_new;
         t = t_new;
-        if ((!in_bounds) || (!time_ok)){
-            break;
-        }
     }
     }
     else{
@@ -126,23 +146,28 @@ __global__ void integrate_pathlines_2d_kernel(
         double2 p_new = d2_add(p, incr);
         double t_new = t + dt_local;
 
+        // Termination checks
+        // bool in_bounds = is_inbounds_2D_vertex_device(v_width, v_height, v_dx, v_dy, p_new);
+        // bool time_ok = (dt_local > 0.0) ? (t_new < t_target) : (t_new > t_target);
+        // if ((!in_bounds) || (!time_ok)){
+        //     break;
+        // }
+        if (!valid_space_time_check_device(p_new, t_new, t_target, dt_local, v_width, v_height, v_dx, v_dy)){
+            break;
+        }
+
+
+        //pass the boundary and time termination checks
         // Write step k+1 in physical units
         int out_idx = base + (k+1)*3;
         out_positions[out_idx + 0] = (float)(p_new.x + x_min_phys);
         out_positions[out_idx + 1] = (float)(p_new.y + y_min_phys);
         out_positions[out_idx + 2] = (float)(t_new + t_min_phys);
-        last_step = k + 1;
-
-        // Termination checks
-        bool in_bounds = is_inbounds_2D_vertex_device(v_width, v_height, v_dx, v_dy, p_new);
-        bool time_ok = (dt_local > 0.0) ? (t_new < t_target) : (t_new > t_target);
+        pathlineLength++;
         p = p_new;
         t = t_new;
-        if ((!in_bounds) || (!time_ok)){
-            break;
-        }
     }
     }
 
-    out_valid_steps[i] = last_step + 1; // include step 0
+    out_valid_steps[i] = pathlineLength; // include step 0
 }

@@ -108,7 +108,7 @@ __device__ double FTLE_device(float* u, float* v, int w, int h, int TotalTimeSte
 //pos_x=idx*dx, pos_x->float_idx: pos_x/dx
 //pos_y=idy*dy, pos_y->float_idx: pos_y/dy
 //same in time resolution
-//the input t_i is not physical time, but t_i*v_dt+vector_field.tmin is the physical time
+//the input t_i is relative time instead of physical time, i.e. t_i*v_dt+vector_field.tmin is the physical time
 //we don't need to pass min_t or compute physical time, since we can query grid by floorIndex=floor(t_i/dt) ceilIndex=floorIndex+1
 __global__ void compute_FTLE_image_kernel(float* field_u, float* field_v, int v_width, int v_height, int TotalTimeSteps, double v_dx, double v_dy, double v_dt,
     double* FTLE_field, int FTLE_size_x, int FTLE_size_y, double FTLE_dx, double FTLE_dy, double t_i, double FTLE_dt, int FTLE_steps){

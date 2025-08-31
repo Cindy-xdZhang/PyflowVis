@@ -77,7 +77,7 @@ class AnalyticalFlowCreator:
         self.parameters.update(new_parameters)
 
 
-def constant_rotation(grid_size, timestep, domainBoundaryMin=(-2.0,-2.0,0.0), domainBoundaryMax=(2.0,2.0,2*np.pi), scale=1.0):
+def constant_rotation(grid_size, timestep, domainBoundaryMin=[-2.0,-2.0,0.0], domainBoundaryMax=[2.0,2.0,2*np.pi], scale=1.0):
     """
     Create a constant rotation flow field.
 
@@ -94,7 +94,7 @@ def constant_rotation(grid_size, timestep, domainBoundaryMin=(-2.0,-2.0,0.0), do
         vectorField2d.field *= scale
     return vectorField2d
 
-def rotation_four_center(grid_size, timestep, domainBoundaryMin=(-2.0,-2.0,0.0), domainBoundaryMax=(2.0,2.0,2*np.pi), scale=1.0):
+def rotation_four_center(grid_size, timestep, domainBoundaryMin=[-2.0,-2.0,0.0], domainBoundaryMax=[2.0,2.0,2*np.pi], scale=1.0):
     """
     Create a rotation flow field with four centers.
 
@@ -114,7 +114,7 @@ def rotation_four_center(grid_size, timestep, domainBoundaryMin=(-2.0,-2.0,0.0),
         vectorField2d.field *= scale
     return vectorField2d
 
-def beadsFLow(grid_size, timestep, domainBoundaryMin=(-2.0,-2.0,0.0), domainBoundaryMax=(2.0,2.0,2*np.pi), scale=1.0):
+def beadsFLow(grid_size, timestep, domainBoundaryMin=[-2.0,-2.0,0.0], domainBoundaryMax=[2.0,2.0,2*np.pi], scale=1.0):
     """
     Create a beads flow field based on the beads2d problem.
     
@@ -150,7 +150,7 @@ def double_gyre_2D(grid_size, timestep,Tmax=10,omega=0.2*np.pi):
         return np.cos(pi * f) * np.sin(pi * y) * dfdx * (np.pi * A)
     
     flow_creator = AnalyticalFlowCreator(u_fn, v_fn, parameters={'eps': 0.25, 'A': 0.1, 'omega': omega})
-    vectorField2d = flow_creator.create_flow_field(grid_size, timestep, (0.0, 0.0, 0.0), (2.0, 1.0, Tmax))
+    vectorField2d = flow_creator.create_flow_field(grid_size, timestep, [0.0, 0.0, 0.0], [2.0, 1.0, Tmax])
     return vectorField2d
 
 

@@ -1,12 +1,12 @@
 seed: 9061
-epochs: 2
-bs: 256
+epochs: 80
+train_points_count: 68000
+bs: 512
 print_freq: 200
 
-lr: 0.0008
+lr: 0.0001
 optimizer:
  NAME: 'adam'
- weight_decay: 0.00000001
 loss:
   NAME: MSELoss
 
@@ -31,14 +31,14 @@ pcds:
   line_method: RK4 # RK4 Euler
   dt: 0.01 # flowline integration dt 
 
-  max_iterations: 200 # time step
-  sampled_points_per_line: 20 # samples one the line
+  max_iterations: 100 # time step
+  sampled_points_per_line: 4 # samples one the line
   offset_scale: 0.1 # scale of grid interval
   num_cross_points_per_seeding: 5 
-  interval_scale: 4
+  interval_scale: 2
 
 
-  normalized: True
+  normalized: False
   localized: True
   
   time_slice: None # get the specific time_slice
