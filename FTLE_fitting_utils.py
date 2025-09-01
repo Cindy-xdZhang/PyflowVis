@@ -7,6 +7,9 @@ from FLowUtils.ScalarField2d import ScalarField2D,ScalarFieldManager
 import matplotlib.pyplot as plt
 from pnn.libs.flows import temporal_downsamplePathlineCrossPrimitive, LocLines, normalizeLines
 from FLowUtils.flowlineIntegral import batch_pathlineCross_integration_2D_auto
+from FLowUtils.netCDFLoader import *
+
+
 torch.set_printoptions(precision=4, threshold=10000, linewidth=200, sci_mode=False)
 
 
@@ -30,13 +33,13 @@ def load_FTLE_npz_as_scalar_fields(path: str) -> list[ScalarField2D]:
 
 def check_group_have_same_lengths(valid_steps: torch.Tensor, nerbors: int = 5):
     """
-    valid_steps: [M]，M = N*nerbors，按 (seed0的5条, seed1的5条, ...) 排序
-    返回:
-      same:        [N] whether we have same length
-      bad_groups:  [B] inequal length group index
-      g_min, g_max:[N] min steps and max steps in each group
-    
-    DL: be careful that we only filter whether the grup have the same length, we need to check again whether we have correct length after sampling
+    valid_steps: [M], where M = N*nerbors, ordered as (seed0's 5 lines, seed1's 5 lines, ...)
+    Returns:
+      - same:        [N] whether each group has identical lengths
+      - bad_groups:  [B] indices of groups with unequal lengths
+      - g_min, g_max:[N] min and max steps in each group
+
+    Note: we only check the equality of lengths inside each group here. After temporal sampling, you should check again whether the resulting length meets the target.
     """
     assert valid_steps.numel() % nerbors == 0, "lines count must be multiple of nerbors"
     g = valid_steps.view(-1, nerbors)            # [N, 5]
@@ -48,14 +51,14 @@ def check_group_have_same_lengths(valid_steps: torch.Tensor, nerbors: int = 5):
 
 def select_good_groups(valid_steps: torch.Tensor, nerbors: int, K: int, strict: bool = True):
     """
-    选出满足条件的组：
-      - same == True（组内5条长度相等）
-      - g_min >  K  (strict=True)  或  g_min >= K (strict=False)
+    Select groups that satisfy:
+      - same == True (all 5 lines in a group have identical valid lengths)
+      - g_min > K (strict=True) or g_min >= K (strict=False)
 
-    返回：
-      keep_groups: [N]  组级布尔掩码
-      keep_lines:  [M]  逐线布尔掩码（按组重复 nerbors 次）
-      good_idx:    [G]  满足条件的组索引
+    Returns:
+      - keep_groups: [N]  group-level boolean mask
+      - keep_lines:  [M]  per-line boolean mask (group mask repeated nerbors times)
+      - good_idx:    [G]  indices of valid groups
     """
     same, _, g_min, _ = check_group_have_same_lengths(valid_steps, nerbors)
     cond_len = (g_min > K) if strict else (g_min >= K)
@@ -66,22 +69,18 @@ def select_good_groups(valid_steps: torch.Tensor, nerbors: int, K: int, strict: 
     return keep_groups, keep_lines, good_idx
 
 def computeFTLEFromPathlineCrossPrimitive(points_grouped: torch.Tensor,
-                                          sample_nerbors: int,
-                                          line_steps: int,
-                                          vectorfield: UnsteadyVectorField2D,
-                                          step_idx: int | None = None) -> torch.Tensor:
+                                         vectorfield_dt: float=0.05 ) -> torch.Tensor:
     """
-    传统FTLE算法（基于cross primitive 的5条pathlines）
-    确保time value is in physcial time range not in normalized time range
-    输入：
-      - points_grouped: [N,sample_nerbors,(line_steps), 3]，按 (center, x+, x-, y+, y-) 顺序展开
-      - sample_nerbors: 5（cross）
-      - line_steps:     轨迹步数（K），即每条线点数为 K+1
-      - vectorfield:    用于还原物理时间跨度 ΔT = (t_end - t_start)
-      - step_idx:       取哪个时间步计算流映射，None 表示使用最后一步（K）
+    Classical FTLE estimation based on cross-primitive (5 pathlines).
+    Ensure time values are in physical time range (not normalized time).
+    Inputs:
+      - points_grouped: [N, sample_nerbors, (line_steps), 3], ordered as (center, x+, x-, y+, y-)
+      - sample_nerbors: 5 (cross)
+      - line_steps:     number of integration steps (K), each line has K+1 points
+      - vectorfield_dt: physical time step to validate effective time span
 
-    输出：
-      - ftle: [N] 每组中心采样点的 FTLE 值
+    Output:
+      - ftle: [N] FTLE for the center sample in each group
     """
     assert points_grouped.dim() == 4 and points_grouped.shape[-1] >= 2
     N = int(points_grouped.shape[0])
@@ -89,36 +88,36 @@ def computeFTLEFromPathlineCrossPrimitive(points_grouped: torch.Tensor,
     L=pts.shape[2]
     k = L - 1
 
-    # 初始与最终点（物理坐标）
-    # 邻居顺序约定：0=center, 1=x+, 2=x-, 3=y+, 4=y-
+    # Initial and final positions (physical coordinates)
+    # Neighbor order convention: 0=center, 1=x+, 2=x-, 3=y+, 4=y-
     p0 = pts[:, :, 0, :2]  # [N,5,2]
     pk = pts[:, :, k, :2]  # [N,5,2]
 
-    # 初始偏移（标量，轴对齐）
+    # Initial offsets (scalars, axis-aligned)
     dx0 = (p0[:, 1, 0] - p0[:, 2, 0]).clamp_min(1e-12)  # [N]
     dy0 = (p0[:, 3, 1] - p0[:, 4, 1]).clamp_min(1e-12)  # [N]
 
-    # 流映射雅可比 J = [dPhi/dx0, dPhi/dy0] ，列向量形式
+    # Flow map Jacobian J = [dPhi/dx0, dPhi/dy0] (as column vectors)
     dPhi_dx = (pk[:, 1, :2] - pk[:, 2, :2]) / dx0.unsqueeze(-1)  # [N,2]
     dPhi_dy = (pk[:, 3, :2] - pk[:, 4, :2]) / dy0.unsqueeze(-1)  # [N,2]
     J = torch.stack([dPhi_dx, dPhi_dy], dim=-1)  # [N,2,2]
 
-    # Cauchy–Green 张量 C = J^T J
+    # Cauchy–Green tensor C = J^T J
     JT = J.transpose(1, 2)
     C = torch.bmm(JT, J)  # [N,2,2]
 
-    # 最大特征值（C 对称半正定）
+    # Largest eigenvalue (C is symmetric positive semidefinite)
     eigvals = torch.linalg.eigvalsh(C)  # [N,2], 升序
     lambda_max = eigvals[:, 1].clamp_min(1e-12)
 
-    # 物理时间跨度 ΔT（使用中心线时间）
+    # Physical time span ΔT (use center line time)
     t_norm_start = pts[:, 0, 0, 2]
     t_norm_end   = pts[:, 0, k, 2]
     T_phys = (t_norm_end - t_norm_start).abs() 
 
-    # 如果T_phys小于vectorfield.dt，说明没有得到正确的pathline，ftle值设置为0
+    # If T_phys is too small (< 2*vectorfield_dt), the pathline is invalid → set FTLE to 0
     ftle = 0.5 * torch.log(lambda_max) / T_phys
-    ftle = torch.where(T_phys <2* vectorfield.timeInterval , torch.zeros_like(ftle), ftle)
+    ftle = torch.where(T_phys <2* vectorfield_dt , torch.zeros_like(ftle), ftle)
     return ftle
 
 def sample_random_starts(vectorfield: UnsteadyVectorField2D, count: int) -> torch.Tensor:
@@ -142,41 +141,17 @@ def generate_training_samples(
     t_start: float,
     t_target: float,
     offset_dist: float,
-    nerbors: int = 5,
-    cacheSystem: bool = True
+    nerbors: int = 5
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    在线随机采样起点，生成 cross pathlines，并丢弃所有组内存在长度<max_steps 的样本，
-    反复补采直到收集到 count 组“满长(max_steps)”的 pathlines。
-    若启用 cacheSystem，则根据参数生成唯一 tag 并缓存到 outputs/temp/{tag}.npz，后续相同参数可直接加载。
-    返回：
-      - P_all:       [count,nerbors, max_steps, 3]
-      - valid_all:   [count,nerbors] (恒等于 max_steps)
+    Randomly sample seeds online, generate cross pathlines, and discard groups with any line shorter than max_steps.
+    Re-sample until we collect exactly 'count' groups with full length (max_steps).
+    If cacheSystem is True, build a unique tag by parameters and cache to outputs/temp/{tag}.npz so next time we can directly load.
+    Returns:
+      - P_all:     [count, nerbors, max_steps, 3]
+      - valid_all: [count, nerbors] (equals max_steps everywhere)
     """
-    # 缓存逻辑：构造唯一 tag 并尝试加载
-    if cacheSystem:
-        dom_min = tuple(map(float, vectorfield.domainMinBoundary))
-        dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
-        key_str = (
-            f"cnt={count}|ms={max_steps}|dt={dt:.8g}|ts={t_start:.8g}|tt={t_target:.8g}|"
-            f"off={offset_dist:.8g}|nb={nerbors}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
-            f"domMin={dom_min}|domMax={dom_max}"
-        )
-        tag = "TrainPL_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
-        cache_dir = os.path.join("./outputs", "temp")
-        os.makedirs(cache_dir, exist_ok=True)
-        cache_path = os.path.join(cache_dir, f"{tag}.npz")
 
-        if os.path.exists(cache_path):
-            try:
-                data = np.load(cache_path)
-                P_np = data["P"]
-                V_np = data["V"]
-                P_all = torch.from_numpy(P_np).float()
-                V_all = torch.from_numpy(V_np).to(torch.int32)
-                return P_all, V_all
-            except Exception as e:
-                print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
     collected_groups = 0
     kept_P = []
     kept_V = []
@@ -192,7 +167,7 @@ def generate_training_samples(
             dt=float(dt), max_steps=int(max_steps),
             offsets_size=float(offset_dist), method="rk4"
         )
-        if P_b.numel() == 0:#number of elements in the tensor
+        if P_b.numel() == 0:# number of elements in the tensor
             continue
 
         TotalPathlines, PathlineData, Dimensions = P_b.shape
@@ -218,135 +193,102 @@ def generate_training_samples(
 
     P_all = torch.cat(kept_P, dim=0)
     V_all = torch.cat(kept_V, dim=0)
-    # 只保留前 count 组（防御性切片）
+    # Keep only the first 'count' groups (defensive slicing)
     P_all = P_all[:count * nerbors]
     V_all = V_all[:count * nerbors]
-    # 保存缓存
+   
+    return P_all, V_all
+        
+
+
+def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampling:float,boundary_offset:float=0.05):
+    xmin, ymin, _ = vectorfield.domainMinBoundary
+    xmax, ymax, _ = vectorfield.domainMaxBoundary
+    xmin_grid=xmin+boundary_offset*(xmax-xmin)
+    ymin_grid=ymin+boundary_offset*(ymax-ymin)  
+    xmax_grid=xmax-boundary_offset*(xmax-xmin)
+    ymax_grid=ymax-boundary_offset*(ymax-ymin)
+    assert resolutionUPsampling>0.01
+
+    # Use linspace to specify number of samples instead of step size
+    num_x =int(vectorfield.Xdim*resolutionUPsampling)
+    num_y =int(vectorfield.Ydim*resolutionUPsampling)
+    xs = np.linspace(xmin_grid, xmax_grid, num_x, dtype=np.float32)
+    ys = np.linspace(ymin_grid, ymax_grid, num_y, dtype=np.float32)
+
+    XX, YY = np.meshgrid(xs, ys)
+    starts_xy = np.stack([XX.reshape(-1), YY.reshape(-1)], axis=1)
+    return starts_xy,xs,ys
+
+
+
+def generate_test_points(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:float,target_time:float, cacheSystem: bool = True):
+    nerbors=int(cfg.pcds.num_cross_points_per_seeding)
+    max_steps = int(cfg.pcds.max_iterations)
+    dt = float(cfg.pcds.dt)
+    offset_dist = vectorfield.gridInterval[0] * float(cfg.pcds.offset_scale)
+    localized = bool(cfg.pcds.localized)
+    normalized = bool(cfg.pcds.normalized)
+    FTLE_resolutionUPsampling=float(cfg.FTLE_resolutionUPsampling)
+    starts_xy,xs,ys=generate_seedingGrid_2D(vectorfield,FTLE_resolutionUPsampling)
+    ny, nx = len(ys), len(xs)
+    if cacheSystem:
+        dom_min = tuple(map(float, vectorfield.domainMinBoundary))
+        dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
+        key_str = (
+            f"neighbors={nerbors}|ups={FTLE_resolutionUPsampling}|ms={max_steps}|dt={dt:.8g}|ts={physcial_time:.8g}|tt={target_time:.8g}|"
+            f"off={offset_dist:.8g}|nb={offset_dist}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
+            f"domMin={dom_min}|domMax={dom_max}|localized={localized}|normalized={normalized}"
+        )
+        tag = "TestSlice_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+        cache_dir = os.path.join("./outputs", "temp")
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = os.path.join(cache_dir, f"{tag}.npz")
+        if os.path.exists(cache_path):
+            try:
+                data = np.load(cache_path)
+                P_np = data["P"]
+                V_np = data["V"]
+                Pathline_g = torch.from_numpy(P_np).float()
+                PathlineLength_g = torch.from_numpy(V_np).to(torch.int32)
+                return Pathline_g, PathlineLength_g,nx,ny
+            except Exception as e:
+                print(f"[generate_test_points] cache load failed: {e}. Regenerating...")
+   
+   
+    Pathline_b, PathlineLength_b = batch_pathlineCross_integration_2D_auto(
+                points=starts_xy,
+                vectorfield=vectorfield,
+                t_start=float(physcial_time), t_target=float(target_time),
+                dt=float(dt), max_steps=int(max_steps),
+                offsets_size=float(offset_dist), method="rk4"
+            )
+    Pathline_g = Pathline_b.view(nx*ny, nerbors, max_steps, 3)
+    PathlineLength_g = PathlineLength_b.view(nx*ny, nerbors)
+
+    # Save cache
     if cacheSystem:
         try:
             # 使用同样的 tag 构造路径（若前面加载失败，需重新构造）
             dom_min = tuple(map(float, vectorfield.domainMinBoundary))
             dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
             key_str = (
-                f"cnt={count}|ms={max_steps}|dt={dt:.8g}|ts={t_start:.8g}|tt={t_target:.8g}|"
-                f"off={offset_dist:.8g}|nb={nerbors}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
-                f"domMin={dom_min}|domMax={dom_max}"
+               f"neighbors={nerbors}|ups={FTLE_resolutionUPsampling}|ms={max_steps}|dt={dt:.8g}|ts={physcial_time:.8g}|tt={target_time:.8g}|"
+            f"off={offset_dist:.8g}|nb={offset_dist}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
+            f"domMin={dom_min}|domMax={dom_max}|localized={localized}|normalized={normalized}"
             )
-            tag = "TrainPL_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+            tag = "TestSlice_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
             cache_dir = os.path.join("outputs", "temp")
             os.makedirs(cache_dir, exist_ok=True)
             cache_path = os.path.join(cache_dir, f"{tag}.npz")
             np.savez(cache_path,
-                     P=P_all.detach().cpu().numpy().astype(np.float32),
-                     V=V_all.detach().cpu().numpy().astype(np.int32),
+                     P=Pathline_g.detach().cpu().numpy().astype(np.float32),
+                     V=PathlineLength_g.detach().cpu().numpy().astype(np.int32),
                      meta=key_str)
         except Exception as e:
-            print(f"[generate_training_samples] cache save failed: {e}")
-    return P_all, V_all
-        
-
-
-# Torch Dataset for training samples generated on-the-fly via generate_training_samples
-class FTLETrainDataset(Dataset):
-    def __init__(
-        self,
-        cfg,
-        vectorfield: UnsteadyVectorField2D,
-        count: int,
-        max_steps: int,
-        dt: float,
-        t_start: float,
-        t_target: float,
-        offset_dist: float,
-        nerbors: int,
-        LstepsPerline: int,
-        localized: bool,
-        normalized: bool,
-    ):
-        # 1) 生成样本（跨路径线），只保留满长组
-        P_all, V_all = generate_training_samples(
-            vectorfield=vectorfield,
-            count=int(count),
-            max_steps=int(max_steps),
-            dt=float(dt),
-            t_start=float(t_start),
-            t_target=float(t_target),
-            offset_dist=float(offset_dist),
-            nerbors=int(nerbors),
-            cacheSystem=True,
-        )
-        NGroups,nerborsCrossSize,PathlineLength,Dim=P_all.shape
-        assert NGroups==count
-        assert nerborsCrossSize==nerbors
-        assert PathlineLength==max_steps
-        assert Dim==3
-
-
-        # add test data
-        # test_seeding,_,_ = generate_test_seeds(cfg,vectorfield)
-        # P_test, V_test = batch_pathlineCross_integration_2D_auto(
-        #     points=test_seeding,
-        #     vectorfield=vectorfield,
-        #     t_start=float(t_start), t_target=float(t_target),
-        #     dt=float(dt), max_steps=int(max_steps),
-        #     offsets_size=float(offset_dist), method="rk4"
-        # )
-        #concatenate P_all and P_test
-        # P_all = torch.cat([P_all, P_test], dim=0)
-        # V_all = torch.cat([V_all, V_test], dim=0)
-
-        # 2) 重采样到固定 Kstep, the input tensor must have shape [Group,LInesPerGroup,timesteps,3]
-        P_K = temporal_downsamplePathlineCrossPrimitive(P_all, int(LstepsPerline))  
-
-        # 3) 计算每组的真值 FTLE（标签）
-        y = computeFTLEFromPathlineCrossPrimitive(
-            P_K, sample_nerbors=int(nerbors), line_steps=int(LstepsPerline), vectorfield=vectorfield
-        ).cpu().float()
-        self.ftle_min=y.min()
-        self.ftle_max=y.max()
-        normalized_y=(y-self.ftle_min)/(self.ftle_max-self.ftle_min)
-        normalized_y=normalized_y.clamp(0,1)
-
-        X = preprocess_localization_normalization(
-            P_K, int(nerbors), int(LstepsPerline), bool(localized), bool(normalized), vectorfield
-        ).cpu().float()
-
-        # y_true_unsampled = computeFTLEFromPathlineCrossPrimitive(P_all, sample_nerbors=int(nerbors), line_steps=int(LstepsPerline), vectorfield=vectorfield)
-        # diff=y_true_unsampled-y
-        # #assert temporal downsample does not change the ftle value
-        # print(f"diff: {diff.mean()}, {diff.std()}")
-        # y_localization = computeFTLEFromPathlineCrossPrimitive(
-        #     X , sample_nerbors=int(nerbors), line_steps=int(LstepsPerline), vectorfield=vectorfield
-        # ).cpu().float()
-        # diff=y_localization-y
-        # # I already verified that the y_localization==y
-        # print(f"diff: {diff.mean()}, {diff.std()}")
-
-        X=X.reshape(NGroups,nerbors,LstepsPerline,3)
-        self.points = X   # [N, nerb*K, 3]
-        self.labels = normalized_y       # [N]
-
-    def __len__(self):
-        return self.points.shape[0]
-
-    def __getitem__(self, idx):
-        return self.points[idx], self.labels[idx]
-
-
-
-def generate_test_seeds(cfg,vectorfield: UnsteadyVectorField2D):
-   # 2) 生成均匀采样的起点网格（覆盖全域，步长=interval_scale*gridInterval）
-    xmin, ymin, _ = vectorfield.domainMinBoundary
-    xmax, ymax, _ = vectorfield.domainMaxBoundary
-    gx, gy = vectorfield.gridInterval
-    step_x = float(gx) * float(cfg.pcds.interval_scale)
-    step_y = float(gy) * float(cfg.pcds.interval_scale)
-    boundary_offset = 1e-1
-    xs = np.arange(xmin+boundary_offset, xmax - boundary_offset, step_x, dtype=np.float32)
-    ys = np.arange(ymin+boundary_offset, ymax - boundary_offset, step_y, dtype=np.float32)
-    XX, YY = np.meshgrid(xs, ys)
-    starts_xy = np.stack([XX.reshape(-1), YY.reshape(-1)], axis=1)
-    return starts_xy,xs,ys
+            print(f"[generate_test_points] cache save failed: {e}")
+    return Pathline_g, PathlineLength_g,nx,ny
+    
 
 
 
@@ -366,8 +308,7 @@ def preprocess_localization_normalization(points_grouped: torch.Tensor, sample_n
     return x
 
 
-def visualize_ftle_slice(true_grid: np.ndarray, pred_grid: np.ndarray,psnr: float, vectorfield: UnsteadyVectorField2D,
-                         xs: np.ndarray, ys: np.ndarray, save_path: str | None = None,
+def visualize_ftle_slice(true_grid: np.ndarray, pred_grid: np.ndarray,psnr: float, vectorfield: UnsteadyVectorField2D,save_path: str | None = None,
                          upscale_factor: int = 1, dpi: int = 300):
     # 公共显示范围（稳健地忽略极端值）
     def robust_minmax(a):
@@ -422,4 +363,429 @@ def visualize_ftle_slice(true_grid: np.ndarray, pred_grid: np.ndarray,psnr: floa
         plt.savefig(save_path, dpi=200)
     plt.show(block=True)
     plt.close(fig)
+
+
+
+def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visualize: bool = False):
+    #first generate grid points for this time, then generate pathlines, 
+    # then call computeFTLEFromPathlineCrossPrimitive get correct ftle
+    # then compare the ftle from model and the correct ftle
+    #report the error
+    vectorfield = cfg['vectorfield']
+    nerb = int(cfg.pcds.num_cross_points_per_seeding)
+    LstepsPerline = int(cfg.pcds.sampled_points_per_line)
+    max_steps = int(cfg.pcds.max_iterations)
+    dt = float(cfg.pcds.dt)
+    offset_dist = vectorfield.gridInterval[0] * float(cfg.pcds.offset_scale)
+    localized = bool(cfg.pcds.localized)
+    normalized = bool(cfg.pcds.normalized)
+    starts_chunk = int(cfg.bs)
+
+    # 时间设置：以输入的 physical time 为起始，目标时间与训练保持相同的时间跨度
+    tmin, tmax = float(vectorfield.tmin), float(vectorfield.tmax)
+    base_t_target_ratio = float(0.9)
+    physical_start = float(0.6 * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+    physical_target = float(np.clip(tmin + base_t_target_ratio * (tmax - tmin), tmin, tmax))
+    Pathline_all, PathlineLength_all,nx,ny=generate_test_points(cfg,vectorfield,physical_start,physical_target)
+    true_grid = np.full((ny, nx), 0, dtype=np.float32)
+    pred_grid = np.full((ny, nx), 0, dtype=np.float32)
+    M_all = Pathline_all.shape[0]
+    assert M_all==nx*ny
+
+    total_groups = 0
+    se_sum = 0.0
+    ae_sum = 0.0
+    max_abs_err = 0.0
+    y_global_min = float('inf')
+    y_global_max = float('-inf')
+
+    ftle_min=cfg['ftle_min']
+    ftle_max=cfg['ftle_max']
+
+    with torch.no_grad():
+        model.eval()
+        for s0 in range(0, M_all, max(1, int(starts_chunk))):
+            s1 = min(M_all, s0 + int(starts_chunk))
+            Pathline_batch_group = Pathline_all[s0:s1]
+            PathlineLength_batch_group = PathlineLength_all[s0:s1]
+            assert PathlineLength_batch_group.shape[1] == nerb,  "lines count must be multiple of nerbors"
+            GroupSize_BatchSize = Pathline_batch_group.shape[0]
+            keep_groups_full = (PathlineLength_batch_group == max_steps).all(dim=1)  # [GroupSize_BatchSize]
+
+            # 重采样到 LstepsPerline（对所有组）
+            P_K = temporal_downsamplePathlineCrossPrimitive(Pathline_batch_group, LstepsPerline) #P_K.view(G_b, nerb, LstepsPerline, 3)
+            # 计算真值 FTLE，并将非满长组置零
+            if not (keep_groups_full).any():
+                continue
+            y_true_b = computeFTLEFromPathlineCrossPrimitive(Pathline_batch_group, vectorfield_dt=vectorfield.timeInterval)
+       
+            y_valid = y_true_b[keep_groups_full]
+            y_global_min = min(y_global_min, float(y_valid.min().item()))
+            y_global_max = max(y_global_max, float(y_valid.max().item()))
+            y_valid = y_valid.to(device).float()
+
+
+            # 预处理并分批预测（必要时 pad 到 64 的倍数）
+            P_in = preprocess_localization_normalization(P_K, nerb, LstepsPerline, localized, normalized, vectorfield).to(device).float()
+            P_in = P_in.to(device)
+            B = P_in.shape[0]
+            pad = (-B) % 64
+            if pad > 0:
+                P_in_pad = torch.cat([P_in, P_in[-1:].repeat(pad, 1,1, 1)], dim=0)
+            else:
+                P_in_pad = P_in
+
+            pred_all = model(P_in_pad).to(device).float()
+            pred_b = pred_all[:B]
+            pred_b = pred_b*(ftle_max-ftle_min)+ftle_min
+            valid_pred_b = pred_b[keep_groups_full]
+
+            # 误差累计（仅统计原始 B 条）
+            diff = valid_pred_b- y_valid
+            se_sum += float((diff ** 2).sum().item())
+            ae_sum += float(diff.abs().sum().item())
+            max_abs_err = max(max_abs_err, float(diff.abs().max().item()))
+            total_groups += int(GroupSize_BatchSize)
+
+            # 回填网格（对本批所有组），非满长组真值已置零
+            idx_global = (np.arange(GroupSize_BatchSize) + s0)
+            valid_idx_global = idx_global[keep_groups_full]
+            rows = valid_idx_global // nx
+            cols = valid_idx_global % nx
+            true_grid[rows, cols] = y_valid.detach().cpu().numpy()
+            pred_grid[rows, cols] = valid_pred_b.detach().cpu().numpy()
+
+        if total_groups == 0:
+            print("[test_ftle] No full-length groups found across all chunks.")
+            return
+
+        mse = se_sum / total_groups
+        mae = ae_sum / total_groups
+        maxe = max_abs_err
+        dyn_range = max(abs(y_global_max - y_global_min), 1e-12)
+        psnr = float('inf') if mse <= 1e-20 else 20.0 * np.log10(dyn_range) - 10.0 * np.log10(mse)
+        # print(f"[test_ftle] Ngroups={total_groups}, MSE={mse:.6f}, MAE={mae:.6f}, MaxE={maxe:.6f}, PSNR={psnr:.2f} dB")
+
+        # 可视化 2D 切片
+        if visualize:
+            visualize_ftle_slice(true_grid, pred_grid,psnr, vectorfield)
+
+        return {
+            "mse": mse,
+            "mae": mae,
+            "maxe": maxe,
+            "psnr": psnr,
+            "true_grid": true_grid,
+            "pred_grid": pred_grid
+        }
+
+
+# Torch Dataset for training samples generated on-the-fly via generate_training_samples
+class PointWiseFTLETrainDataset(Dataset):
+    def __init__( self,  config, vectorfield: UnsteadyVectorField2D,cacheSystem: bool = True):
+        nerbors = int(config.pcds.num_cross_points_per_seeding)
+        LstepsPerline = int(config.pcds.sampled_points_per_line)
+        total_points_count =getattr(config, 'train_points_count', 640*80*4)
+        max_steps = int(config.pcds.max_iterations)
+        dt = float(config.pcds.dt)
+        offset_dist = vectorfield.gridInterval[0] * float(config.pcds.offset_scale)
+        dataset_timewindow_start = float(config.pcds.t_start * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+        dataset_timewindow_target = float(config.pcds.t_target * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+        time_slice = int(config.time_slice)
+        ftle_timeslices=np.linspace(dataset_timewindow_start, dataset_timewindow_target, time_slice)
+
+        P_all=[]
+        V_all=[]
+        cacheSuccess=False
+        # Cache logic: build a unique tag and try to load
+        if cacheSystem:
+            dom_min = tuple(map(float, vectorfield.domainMinBoundary))
+            dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
+            key_str = (
+                f"cnt={total_points_count}|ms={max_steps}|dt={dt:.8g}|ts={dataset_timewindow_start:.8g}|tt={dataset_timewindow_target:.8g}|"
+                f"off={offset_dist:.8g}|nb={nerbors}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
+                f"domMin={dom_min}|domMax={dom_max}|time_slice={time_slice}|LstepsPerline={LstepsPerline}|nerbors={nerbors}"
+            )
+            tag = "TrainPL_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+            cache_dir = os.path.join("./outputs", "temp")
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(cache_dir, f"{tag}.npz")
+
+            if os.path.exists(cache_path):
+                try:
+                    data = np.load(cache_path)
+                    P_np = data["P"]
+                    V_np = data["V"]
+                    P_all = torch.from_numpy(P_np).float()
+                    V_all = torch.from_numpy(V_np).float()
+                    cacheSuccess=True
+                except Exception as e:
+                    print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
+        
+        #generate training samples
+        if not cacheSuccess:
+            for physcial_start_time in ftle_timeslices:
+                physical_target_time = physcial_start_time + float(dt*max_steps)
+                P_OneTimewindow, length_OneTimewindow = generate_training_samples(
+                    vectorfield=vectorfield,
+                    count=int(total_points_count),
+                    max_steps=int(max_steps),
+                    dt=float(dt),
+                    t_start=float(physcial_start_time),
+                    t_target=float(physical_target_time),
+                    offset_dist=float(offset_dist),
+                    nerbors=int(nerbors)
+                )
+                NGroups,nerborsCrossSize,PathlineLength,Dim=P_OneTimewindow.shape
+                assert NGroups==total_points_count
+                assert nerborsCrossSize==nerbors
+                assert PathlineLength==max_steps
+                assert Dim==3
+                y_OneTimewindow = computeFTLEFromPathlineCrossPrimitive(P_OneTimewindow, vectorfield.timeInterval)
+                # P_K = temporal_downsamplePathlineCrossPrimitive(P_OneTimewindow, int(LstepsPerline))  
+                # X = preprocess_localization_normalization( P_K, int(nerbors), int(LstepsPerline), bool(localized), bool(normalized), vectorfield ).cpu().float()
+                # y_true_sampled= computeFTLEFromPathlineCrossPrimitive(P_K,  vectorfield.timeInterval).cpu().float()
+                # y_localization = computeFTLEFromPathlineCrossPrimitive(X ,vectorfield.timeInterval)
+                # diff=y_true_sampled-y
+                # #assert temporal downsample does not change the ftle value
+                # print(f"diff0: {diff.mean()}, {diff.std()}")
+                # diff=y_localization-y
+                # # I already verified that the y_localization==y
+                # print(f"diff1: {diff.mean()}, {diff.std()}")
+                P_all.append(P_OneTimewindow)
+                V_all.append(y_OneTimewindow)
+            P_all=torch.cat(P_all, dim=0)
+            V_all=torch.cat(V_all, dim=0)
+        
+        if cacheSystem and not cacheSuccess:
+            try:
+                dom_min = tuple(map(float, vectorfield.domainMinBoundary))
+                dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
+                key_str = (
+                    f"cnt={total_points_count}|ms={max_steps}|dt={dt:.8g}|ts={dataset_timewindow_start:.8g}|tt={dataset_timewindow_target:.8g}|"
+                    f"off={offset_dist:.8g}|nb={nerbors}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
+                    f"domMin={dom_min}|domMax={dom_max}|time_slice={time_slice}|LstepsPerline={LstepsPerline}|nerbors={nerbors}"
+                )
+                tag = "TrainPL_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+                cache_dir = os.path.join("outputs", "temp")
+                os.makedirs(cache_dir, exist_ok=True)
+                cache_path = os.path.join(cache_dir, f"{tag}.npz")
+                np.savez(cache_path,
+                        P=P_all.detach().cpu().numpy().astype(np.float32),
+                        V=V_all.detach().cpu().numpy().astype(np.float32),
+                        meta=key_str)
+            except Exception as e:
+                print(f"[generate_training_samples] cache save failed: {e}")
+
+
+        temporal_sampled_P_all=temporal_downsamplePathlineCrossPrimitive(P_all, int(LstepsPerline))
+        localized=bool(config.pcds.localized)
+        localization=preprocess_localization_normalization(temporal_sampled_P_all, int(nerbors), int(LstepsPerline), bool(localized), False, vectorfield ).cpu().float()
+
+        self.ftle_min = float(V_all.min())
+        self.ftle_max = float(V_all.max())
+        normalized_y=(V_all-self.ftle_min)/(self.ftle_max-self.ftle_min)
+        normalized_y=normalized_y.clamp(0,1)
+        self.points = localization   # [N, nerb*K, 3]
+        self.labels = normalized_y       # [N]
+
+    
+    def __len__(self):
+        return self.points.shape[0]
+
+    def __getitem__(self, idx):
+        return self.points[idx], self.labels[idx]
+
+
+
+
+# Torch Dataset for training samples generated on-the-fly via generate_training_samples
+class FTLEUpsamplingTrainDataset(Dataset):
+    def __init__(self,   config, useCacheSystem: bool = True):
+        UnsteadyVectorFields=[]
+        ftle_resolutionUPsampling=float(config.FTLE_resolutionUPsampling)
+        all_vectorfieldsname=[name for name in config.dataset.names]
+        all_vectorfieldsname_str=",".join(all_vectorfieldsname)
+        timesliceCount=config.ftle.timesliceCount
+        UPsampling=config.ftle.UPsampling
+        low_res_grid_sampling=float(config.ftle.low_res_grid_sampling)
+        max_steps: int=config.pcds.max_iterations
+        flowline_dt: float=config.pcds.dt
+        offset_dist: float =config.pcds.offset_scale
+        localized: bool =bool(config.pcds.localized)
+        normalized: bool =bool(config.pcds.normalized)
+
+        if useCacheSystem:
+            # 更新key_str，包含更多与上采样相关的关键信息
+            key_str = (
+                f"ftle_upsampling|vectorfields={all_vectorfieldsname_str}|"
+                f"timesliceCount={timesliceCount}|UPsampling={UPsampling}|"
+                f"lowResGridIntervalScale={low_res_grid_sampling}|"
+                f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|localized={localized}|normalized={normalized}"
+            )
+            tag = "FTLEUpsamplingTrainingDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+            cache_dir = os.path.join("./outputs", "temp")
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(cache_dir, f"{tag}.npz")
+
+            if os.path.exists(cache_path):
+                try:
+                    data = np.load(cache_path)
+                    P_np = data["P"]
+                    V_np = data["V"]
+                    self.points = torch.from_numpy(P_np).float()
+                    self.labels = torch.from_numpy(V_np).to(torch.int32)
+                    return
+                except Exception as e:
+                    print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
+                         
+        
+
+
+        netCDF = NetCDFLoader()
+        FTLE_fieldsLowRes=[]
+        FTLE_fieldsHighRes=[]
+        for name in config.dataset.names:
+            vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"
+            UnsteadyVectorFields.append(netCDF.load_vector_field2d(vectorfield_datapath))
+    
+        for vectorfield in UnsteadyVectorFields:
+            timeslice=np.linspace(vectorfield.tmin, vectorfield.tmax, timesliceCount)
+            for time_slice in timeslice:
+
+                low_res_starts_xy,low_res_xs,low_res_ys=generate_seedingGrid_2D(vectorfield,low_res_grid_sampling)
+                low_res_flowMap=batch_pathlineCross_integration_2D_auto(low_res_starts_xy,vectorfield,time_slice,time_slice+flowline_dt*max_steps,flowline_dt,max_steps,offset_dist)
+                high_res_starts_xy,high_res_xs,high_res_ys=generate_seedingGrid_2D(vectorfield,UPsampling)
+                high_res_flowMap=batch_pathlineCross_integration_2D_auto(high_res_starts_xy,vectorfield,time_slice,time_slice+flowline_dt*max_steps,flowline_dt,max_steps,offset_dist)
+                low_res_FTLE_field=computeFTLEFromPathlineCrossPrimitive(low_res_flowMap)
+                high_res_FTLE_field=computeFTLEFromPathlineCrossPrimitive(high_res_flowMap)
+                FTLE_fieldsLowRes.append((low_res_FTLE_field,low_res_starts_xy,low_res_xs,low_res_ys))
+                FTLE_fieldsHighRes.append(high_res_FTLE_field)
+
+        self.points = FTLE_fieldsLowRes   
+        self.labels = FTLE_fieldsHighRes       
+
+        if useCacheSystem:
+            try:
+                # 使用同样的 tag 构造路径（若前面加载失败，需重新构造）
+                dom_min = tuple(map(float, vectorfield.domainMinBoundary))
+                dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
+                key_str = (
+                f"ftle_upsampling|vectorfields={all_vectorfieldsname_str}|"
+                f"timesliceCount={timesliceCount}|UPsampling={UPsampling}|"
+                f"lowResGridIntervalScale={low_res_grid_sampling}|"
+                f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|localized={localized}|normalized={normalized}"
+                )
+                tag = "FTLEUpsamplingTrainingDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+                cache_dir = os.path.join("outputs", "temp")
+                os.makedirs(cache_dir, exist_ok=True)
+                cache_path = os.path.join(cache_dir, f"{tag}.npz")
+                np.savez(cache_path,
+                        P=self.points.detach().cpu().numpy().astype(np.float32),
+                        V=self.labels.detach().cpu().numpy().astype(np.int32),
+                        meta=key_str)
+            except Exception as e:
+                print(f"[generate_training_samples] cache save failed: {e}")
+
+    def __len__(self):
+        return self.points.shape[0]
+
+    def __getitem__(self, idx):
+        return self.points[idx], self.labels[idx]
+
+
+# Torch Dataset for training samples generated on-the-fly via generate_training_samples
+class IVDTrainDataset(Dataset):
+    def __init__(self,   config, useCacheSystem: bool = True):
+        UnsteadyVectorFields=[]
+        ftle_resolutionUPsampling=float(config.FTLE_resolutionUPsampling)
+        all_vectorfieldsname=[name for name in config.dataset.names]
+        all_vectorfieldsname_str=",".join(all_vectorfieldsname)
+        timesliceCount=config.ftle.timesliceCount
+        UPsampling=config.ftle.UPsampling
+        low_res_grid_sampling=float(config.ftle.low_res_grid_sampling)
+        max_steps: int=config.pcds.max_iterations
+        flowline_dt: float=config.pcds.dt
+        offset_dist: float =config.pcds.offset_scale
+        localized: bool =bool(config.pcds.localized)
+        normalized: bool =bool(config.pcds.normalized)
+
+        if useCacheSystem:
+            #update key_str, include more key information related to upsampling
+            key_str = (
+                f"ftle_upsampling|vectorfields={all_vectorfieldsname_str}|"
+                f"timesliceCount={timesliceCount}|UPsampling={UPsampling}|"
+                f"lowResGridIntervalScale={low_res_grid_sampling}|"
+                f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|localized={localized}|normalized={normalized}"
+            )
+            tag = "FTLEUpsamplingTrainingDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+            cache_dir = os.path.join("./outputs", "temp")
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_path = os.path.join(cache_dir, f"{tag}.npz")
+
+            if os.path.exists(cache_path):
+                try:
+                    data = np.load(cache_path)
+                    P_np = data["P"]
+                    V_np = data["V"]
+                    self.points = torch.from_numpy(P_np).float()
+                    self.labels = torch.from_numpy(V_np).to(torch.int32)
+                    return
+                except Exception as e:
+                    print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
+                         
+        
+
+
+        netCDF = NetCDFLoader()
+        FTLE_fieldsLowRes=[]
+        FTLE_fieldsHighRes=[]
+        for name in config.dataset.names:
+            vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"
+            UnsteadyVectorFields.append(netCDF.load_vector_field2d(vectorfield_datapath))
+    
+        for vectorfield in UnsteadyVectorFields:
+            timeslice=np.linspace(vectorfield.tmin, vectorfield.tmax, timesliceCount)
+            for time_slice in timeslice:
+
+                low_res_starts_xy,low_res_xs,low_res_ys=generate_seedingGrid_2D(vectorfield,low_res_grid_sampling)
+                low_res_flowMap=batch_pathlineCross_integration_2D_auto(low_res_starts_xy,vectorfield,time_slice,time_slice+flowline_dt*max_steps,flowline_dt,max_steps,offset_dist)
+                high_res_starts_xy,high_res_xs,high_res_ys=generate_seedingGrid_2D(vectorfield,UPsampling)
+                high_res_flowMap=batch_pathlineCross_integration_2D_auto(high_res_starts_xy,vectorfield,time_slice,time_slice+flowline_dt*max_steps,flowline_dt,max_steps,offset_dist)
+                low_res_FTLE_field=computeFTLEFromPathlineCrossPrimitive(low_res_flowMap)
+                high_res_FTLE_field=computeFTLEFromPathlineCrossPrimitive(high_res_flowMap)
+                FTLE_fieldsLowRes.append((low_res_FTLE_field,low_res_starts_xy,low_res_xs,low_res_ys))
+                FTLE_fieldsHighRes.append(high_res_FTLE_field)
+
+        self.points = FTLE_fieldsLowRes   
+        self.labels = FTLE_fieldsHighRes       
+
+        if useCacheSystem:
+            try:
+                # use the same tag to construct the path (if the previous load failed, need to reconstruct)
+                dom_min = tuple(map(float, vectorfield.domainMinBoundary))
+                dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
+                key_str = (
+                f"ftle_upsampling|vectorfields={all_vectorfieldsname_str}|"
+                f"timesliceCount={timesliceCount}|UPsampling={UPsampling}|"
+                f"lowResGridIntervalScale={low_res_grid_sampling}|"
+                f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|localized={localized}|normalized={normalized}"
+                )
+                tag = "FTLEUpsamplingTrainingDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+                cache_dir = os.path.join("outputs", "temp")
+                os.makedirs(cache_dir, exist_ok=True)
+                cache_path = os.path.join(cache_dir, f"{tag}.npz")
+                np.savez(cache_path,
+                        P=self.points.detach().cpu().numpy().astype(np.float32),
+                        V=self.labels.detach().cpu().numpy().astype(np.int32),
+                        meta=key_str)
+            except Exception as e:
+                print(f"[generate_training_samples] cache save failed: {e}")
+
+    def __len__(self):
+        return self.points.shape[0]
+
+    def __getitem__(self, idx):
+        return self.points[idx], self.labels[idx]
+
 

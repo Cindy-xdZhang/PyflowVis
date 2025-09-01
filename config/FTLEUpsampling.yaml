@@ -1,26 +1,37 @@
-seed: 9061
-epochs: 80
-train_points_count: 68000
+seed: 7068
+epochs: 120
+train_points_count: 72000
 bs: 512
 print_freq: 200
 
-lr: 0.0001
+lr: 0.00008
 optimizer:
- NAME: 'adam'
+  NAME: 'adamw'
+  weight_decay: 0.000001
+
 loss:
   NAME: MSELoss
+
+ftle:
+  timesliceCount: 10
+  UPsampling: 4
+  low_res_grid_sampling: 1.0 #low resolution ftle's grid =vectorfield.grid*low_res_grid_sampling 
+
+
 
 pnn:
   split: 3
   points: 1024
-  stages: 1
+  stages: 0
   dim: 36
   k: 6
   alpha: 1000
   beta: 100
+
 dataset:
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
-  name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
+  # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
+  names: [cylinder2d,doublegyre2d]
   extension: nc
 
 
@@ -31,41 +42,16 @@ pcds:
   line_method: RK4 # RK4 Euler
   dt: 0.01 # flowline integration dt 
 
-  max_iterations: 100 # time step
-  sampled_points_per_line: 4 # samples one the line
+  max_iterations: 200 # time step
+  sampled_points_per_line: 2 # samples one the line
   offset_scale: 0.1 # scale of grid interval
   num_cross_points_per_seeding: 5 
-  interval_scale: 2
 
 
   normalized: False
   localized: True
-  
-  time_slice: None # get the specific time_slice
-  #params for s_lines
-  t_start: 0.6 #% for the whole time
-  t_target: 1.0 #
-
 
   max_seg: 50
   start_points: [[0.0,0.0]]
   bbox: [[2.5,0.5],[5.5,1.5]] # [[xmin1,ymin1] [xmax1,ymax1],[xmin2,ymin2],[xmax2,ymax2]]
-
-
-cluster:
-  alg: kmeans #DBSCAN kmeans
-  classes: 2
-
-  #params for DBSCAN
-  eps: 5 # larger for bigger search space
-  min_samples: 3 # 3-10
-
-output:
-  exp: dev
-
-
-
-
-
-
 

@@ -9,7 +9,7 @@ from typeguard import typechecked
 
 @njit(cache=True)
 def bilinear_interpolate_numpy(field_slice, x, y):
-    # field_slice 应该是 numpy 数组
+    # field_slice should be a numpy array
     # Get grid coordinates
     x0 = int(np.floor(x))
     x1 = int(np.ceil(x))
@@ -40,7 +40,7 @@ def bilinear_interpolate_numpy(field_slice, x, y):
     v1 = v01 * (1.0 - wx) + v11 * wx
     return v0 * (1.0 - wy) + v1 * wy
 
-# 可以为 get_vector_at_grid 也创建一个 njit 函数
+# We can also create an njit function for get_vector_at_grid
 @njit(cache=True)
 def _get_vector_unsteady_numba(field_data, x, y, time, Xdim, Ydim, time_steps):
     t0 = int(np.floor(time))

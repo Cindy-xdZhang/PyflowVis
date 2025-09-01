@@ -10,7 +10,7 @@ def heatStreamPlot(vecfield,   timeStepSkip: int = 2, saveFolder: str = "./",
 
     for t in range(0, vecfield.time_steps, timeStepSkip):
 
-        #slice_data shape [y,x,2]
+        # slice_data shape [y,x,2]
         u = vecfield.field[t,:,:, 0]
         v = vecfield.field[t,:,:, 1]
 
@@ -35,7 +35,7 @@ def heatStreamPlot(vecfield,   timeStepSkip: int = 2, saveFolder: str = "./",
                             #   'berlin', 'managua', 'vanimo'
                           # Qualitative: 'Pastel1', 'Pastel2', 'Paired', 'Set1', 'Set2', 'Set3'
                           # Misc: 'flag', 'prism', 'ocean', 'gist_earth', 'terrain', 'gist_stern'
-                          #https://matplotlib.org/stable/users/explain/colors/colormaps.html
+                          # See https://matplotlib.org/stable/users/explain/colors/colormaps.html
                           cmap='coolwarm',  # Change this to any colormap name from above
                           alpha=0.6,
                           vmin=colorBarmin,
@@ -48,7 +48,7 @@ def heatStreamPlot(vecfield,   timeStepSkip: int = 2, saveFolder: str = "./",
                      arrowsize=0.25,  # Reduce arrow size
                      maxlength=1.0)  # Reduce integration length
         current_time = vecfield.getTime(t)
-        if redudant ==True:
+        if redudant == True:
             plt.colorbar(heatmap, ax=ax, label='Velocity Magnitude', 
                     boundaries=np.linspace(colorBarmin,colorBarmax, 100))
             # ax.set_title(f"Velocity Field at t = {current_time:.3f}")

@@ -1,0 +1,47 @@
+seed: 9061
+epochs: 200
+train_points_count: 32000 #number of points of every 2D slice for training
+time_slice: 10
+bs: 256
+print_freq: 400
+lr: 0.00008
+optimizer:
+  NAME: 'adamw'
+  weight_decay: 0.000001
+loss:
+  NAME: MSELoss
+FTLE_resolutionUPsampling: 1
+pnn:
+  split: 3
+  points: 1024
+  stages: 1
+  dim: 36
+  k: 6
+  alpha: 1000
+  beta: 100
+dataset:
+  dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
+  name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
+  extension: nc
+
+# set the params to generate the point clouds
+pcds:
+  sample_area: full #points full areas
+  line_type: p_line # streamline   p_line-> pathline
+  line_method: RK4 # RK4 Euler
+  dt: 0.01 # flowline integration dt 
+  max_iterations: 200 # time step
+  sampled_points_per_line: 2 # samples one the line
+  offset_scale: 0.1 # scale of grid interval
+  num_cross_points_per_seeding: 5 
+
+  normalized: False
+  localized: True
+  #params for s_lines
+  t_start: 0.2 #% for the whole time
+  t_target: 0.8
+
+
+
+test_tasks: test_PointWiseFTLE_model
+

@@ -283,19 +283,19 @@ def compute_streamline_2D(args):
 
 def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVectorField2D,t_target:float,dt:float,max_steps:int,method:str):
     """
-    使用 CUDA 在 2D 非定常场中批量积分路径线（RK4）。
+    Batch integrate pathlines in 2D unsteady field using CUDA (RK4).
 
     Args:
-        points: np.ndarray, 形状 [N,3]，物理坐标 (x,y,t)
+        points: np.ndarray, shape [N,3], physical coordinates (x,y,t)
         vectorfield: UnsteadyVectorField2D
-        t_target: 目标物理时间（同向/反向由与 t_start 的相对大小与 dt 符号决定）,t_start is the time of the seeding
-        dt: 单步时间间隔（正值，内部根据方向取正/负）
-        max_steps: 最大步数（包含 step0 的写入，输出有效长度为 [1..max_steps+1]）
-        method: 积分方法，"RK4" 或 "Euler"
+        t_target: target physical time (direction depends on t_target vs t_start and sign of dt), t_start is the seeding time
+        dt: single-step time interval (positive; direction handled internally)
+        max_steps: maximum number of steps (including step0; output valid length in [1..max_steps])
+        method: integration method, "RK4" or "Euler"
 
     Returns:
-        positions: np.ndarray [N, max_steps, 3]，(x,y,t)
-        valid_steps: np.ndarray [N]，每条线有效点数（包含 step0）
+        positions: np.ndarray [N, max_steps, 3], (x,y,t)
+        valid_steps: np.ndarray [N], valid point count of each line (including step0)
     """
     methodId=None
     if method.lower() not in ["rk4","euler"]:
@@ -314,28 +314,28 @@ def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVec
     dy = float(vectorfield.gridInterval[1])
     vdt = float(vectorfield.timeInterval if vectorfield.time_steps > 1 else 1.0)
 
-    # 拆分分量并保证连续
+    # Split components and ensure contiguous memory
     field_u = np.ascontiguousarray(data[..., 0].astype(np.float32))
     field_v = np.ascontiguousarray(data[..., 1].astype(np.float32))
 
-    # 相对坐标与时间（kernel 以 [0,(W-1)*dx]×[0,(H-1)*dy]、t_rel=t- tmin 计算）
+    # Relative coordinates/time (kernel uses [0,(W-1)*dx]×[0,(H-1)*dy], t_rel=t-tmin)
     dom_min = vectorfield.domainMinBoundary
     x0 = np.ascontiguousarray((points[:, 0] - float(dom_min[0])).astype(np.float64))
     y0 = np.ascontiguousarray((points[:, 1] - float(dom_min[1])).astype(np.float64))
     t0_rel = np.ascontiguousarray(points[:, 2] - float(vectorfield.tmin), dtype=np.float64)
-
+    t_target= np.clip(t_target, float(vectorfield.tmin), float(vectorfield.tmax))
     t_target_rel = float(t_target - vectorfield.tmin)
 
     # 输出缓冲
     out_pos = np.zeros((points.shape[0], max_steps , 3), dtype=np.float32)
     out_valid = np.zeros((points.shape[0],), dtype=np.int32)
 
-    # 编译/加载 kernel
+    # Compile/load kernel
     module = _get_or_compile_pathline2d_cuda_kernel()
     kernel = module.get_function("integrate_pathlines_2d_kernel")
     cuda = importlib.import_module('pycuda.driver')
 
-    # 设备内存
+    # Device buffers
     u_gpu = cuda.mem_alloc(field_u.nbytes)
     v_gpu = cuda.mem_alloc(field_v.nbytes)
     x_gpu = cuda.mem_alloc(x0.nbytes)
@@ -352,7 +352,7 @@ def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVec
     cuda.memcpy_htod(outP_gpu, out_pos)
     cuda.memcpy_htod(outV_gpu, out_valid)
 
-    # 启动配置
+    # Launch configuration
     threads = 64
     blocks = (points.shape[0] + threads - 1) // threads
 
@@ -372,11 +372,11 @@ def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVec
         block=(threads, 1, 1), grid=(blocks, 1, 1)
     )
 
-    # 回读
+    # Copy back results
     cuda.memcpy_dtoh(out_pos, outP_gpu)
     cuda.memcpy_dtoh(out_valid, outV_gpu)
 
-    # 释放
+    # Free buffers
     u_gpu.free(); v_gpu.free(); x_gpu.free(); y_gpu.free(); t0_gpu.free(); outP_gpu.free(); outV_gpu.free()
 
     return out_pos, out_valid
@@ -384,19 +384,19 @@ def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVec
 
 def compute_pathline_2D_cuda(list_args):
     """
-    单条路径线（前后向拼接）CUDA 实现，接口与 compute_pathline_2D 一致。
+    Single pathline (bidirectional concatenation) using CUDA; interface matches compute_pathline_2D.
     args = (vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method)
-    返回 [(pos3d, t), ...]
+    Returns [(pos3d, t), ...]
     """
     vector_field, pos3d, t0, min_time, max_time, step_size, max_iteration, method = list_args[0]
 
-    # 生成形状为 (N, 3) 的tensor
+    # Build (N,3) tensor of seeds
     batch_seeding_point_pos_time = []
     for arg in list_args:
         _, pos3d, t0, _, _, _, _, _ = arg
         batch_seeding_point_pos_time.append([float(pos3d[0]), float(pos3d[1]), float(t0)])
     batch_seeding_point_pos_time = np.array(batch_seeding_point_pos_time, dtype=np.float64)  # (N, 3)
-    # 前向
+    # Forward integration
     Pathline_f, pathlineLength_f = batch_pathline_integration_2D_cuda(
         points=batch_seeding_point_pos_time,
         vectorfield=vector_field,
@@ -405,7 +405,7 @@ def compute_pathline_2D_cuda(list_args):
         max_steps=int(max_iteration),
         method=method
     )
-    # 反向
+    # Backward integration
     Pathline_b, pathlineLength_b = batch_pathline_integration_2D_cuda(
         points=batch_seeding_point_pos_time,
         vectorfield=vector_field,
@@ -415,7 +415,7 @@ def compute_pathline_2D_cuda(list_args):
         method=method
     )
 
-    # 使用批处理切片处理变长路径线，避免逐点 for 循环
+    # Use vectorized slicing to handle variable-length lines
     B, S, _ = Pathline_f.shape
 
     def _np_array_to_path(arr: np.ndarray):
@@ -447,7 +447,7 @@ def _get_or_compile_pathline2d_cuda_kernel():
     with open("assets/cuda_kernal/PathlineIntegration2D.cu", "r") as f:
         src = f.read()
     try:
-        # 惰性导入并初始化上下文
+        # Lazy import and initialize CUDA context
         importlib.import_module('pycuda.autoinit')
         SourceModule = importlib.import_module('pycuda.compiler').SourceModule
         _PATHLINE2D_CUDA_MODULE = SourceModule(src, options=["-O3", "-use_fast_math"])
@@ -462,15 +462,15 @@ USE_CUDA_PATHLINE = None  # None: unknown; True/False: decided
 
 def Bind_Flowline_IntegrationBackend():
     """
-    绑定路径线积分后端：
-    - 若未安装 pycuda 或编译失败，使用 CPU 实现（现有 compute_pathline/streamline）。
-    - 若编译成功，使用 CUDA 实现（compute_pathline_2D_cuda 与 batch_pathline_integration_2D_cuda）。
-    返回 True/False 表示是否启用 CUDA 后端。
+    Bind the backend for pathline integration:
+    - If pycuda is unavailable or compilation fails, use CPU implementation.
+    - If compilation succeeds, use CUDA implementation (compute_pathline_2D_cuda and batch_pathline_integration_2D_cuda).
+    Returns True/False indicating whether CUDA backend is enabled.
     """
     global USE_CUDA_PATHLINE
     if USE_CUDA_PATHLINE is not None:
         return USE_CUDA_PATHLINE
-    # 检测 pycuda 包
+    # Check pycuda modules
     try:
         importlib.import_module('pycuda.driver')
         importlib.import_module('pycuda.compiler')
@@ -480,7 +480,7 @@ def Bind_Flowline_IntegrationBackend():
         print("[BindFlowlineBackend] pycuda not available. Fallback to CPU integration.")
         return USE_CUDA_PATHLINE
 
-    # 尝试编译 kernel
+    # Try compile kernel
     try:
         mod = _get_or_compile_pathline2d_cuda_kernel()
         USE_CUDA_PATHLINE = (mod is not None)
@@ -491,7 +491,7 @@ def Bind_Flowline_IntegrationBackend():
 
 
 def compute_pathline_2D_auto(list_args):
-    """自动选择 CUDA 或 CPU 的 2D pathline 计算。"""
+    """Automatically choose CUDA or CPU 2D pathline computation."""
     args0 = list_args[0]
     method = args0[-1]
     use_cuda = Bind_Flowline_IntegrationBackend() and method.lower() in ["rk4","euler"]
@@ -505,13 +505,14 @@ def compute_pathline_2D_auto(list_args):
 
 
 def batch_pathlineCross_integration_2D_auto(points:np.ndarray,vectorfield:UnsteadyVectorField2D,t_start:float,t_target:float,dt:float,max_steps:int,offsets_size:float,method:str="rk4"):
-    """自动选择 CUDA 或 CPU 的批量路径线积分。
-    - 自动扩展 cross 偏移（中心、左右、上下），总条数 M=N*5。
-    - CPU 回退逐条调用 CPU 实现（性能较差）。
-    返回与 CUDA 版本一致的 (positions[M, S, 3], valid_steps[M])，torch.Tensor。
+    """
+    Automatically choose CUDA or CPU for batch pathline integration.
+    - Expand cross offsets (center, x±, y±), total lines M=N*5.
+    - CPU fallback computes per-line (slower).
+    Return torch.Tensors (positions[M, S, 3], valid_steps[M]) consistent with CUDA version.
     """
     use_cuda = Bind_Flowline_IntegrationBackend()
-    # 扩展 seeds 为 cross（中心、x±、y±）
+    # Expand seeds to cross (center, x±, y±)
     if points.size == 0:
         return torch.empty(0, max_steps, 3), torch.empty(0, dtype=torch.int32)
     offs = np.array([[0.0, 0.0], [offsets_size, 0.0], [-offsets_size, 0.0], [0.0, offsets_size], [0.0, -offsets_size]], dtype=np.float64)
@@ -530,7 +531,7 @@ def batch_pathlineCross_integration_2D_auto(points:np.ndarray,vectorfield:Unstea
     out_pos = np.zeros((M, max_steps , 3), dtype=np.float32)
     out_valid = np.zeros((M,), dtype=np.int32)
 
-    # 逐条 CPU 计算（含前后向拼接）
+    # Per-line CPU computation (forward only here)
     for i in range(M):
         pos3d = np.array([float(seeds[i,0]), float(seeds[i,1]), 0.0], dtype=np.float32)
         forward = pathline_integration_one_direction_2D(vectorfield, pos3d, float(t_start), float(t_target), float(dt), int(max_steps), method.upper())

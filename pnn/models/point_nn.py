@@ -5,6 +5,22 @@ from pointnet2_ops import pointnet2_utils
 
 from .model_utils import *
 
+class kNN(nn.Module):
+    def __init__(self,  k_neighbors):
+        super().__init__()
+        self.k_neighbors = k_neighbors
+    def forward(self, xyz, x):
+        # xyz: (B, N, 3)
+        # x: (B, N, C)
+        B, N, _ = xyz.shape
+        lc_xyz = xyz
+        lc_x = x
+        # kNN
+        knn_idx = knn_point(self.k_neighbors, xyz, lc_xyz)
+        knn_xyz = index_points(xyz, knn_idx)
+        knn_x = index_points(x, knn_idx)
+
+        return lc_xyz, lc_x, knn_xyz, knn_x
 
 
 # FPS + k-NN
@@ -13,25 +29,22 @@ class FPS_kNN(nn.Module):
         super().__init__()
         self.group_num = group_num
         self.k_neighbors = k_neighbors
-   
 
     def forward(self, xyz, x):
-        # xyz: (B, N, 3)
-        # x: (B, N, C)
         B, N, _ = xyz.shape
-        if self.group_num <N:
-            fps_idx = pointnet2_utils.furthest_point_sample(xyz, self.group_num).long()
-            lc_xyz = index_points(xyz, fps_idx)
-            lc_x = index_points(x, fps_idx)
-        else:
-            lc_xyz = xyz
-            lc_x = x
+
+        # FPS
+        fps_idx = pointnet2_utils.furthest_point_sample(xyz, self.group_num).long() 
+        lc_xyz = index_points(xyz, fps_idx)
+        lc_x = index_points(x, fps_idx)
+
         # kNN
         knn_idx = knn_point(self.k_neighbors, xyz, lc_xyz)
         knn_xyz = index_points(xyz, knn_idx)
         knn_x = index_points(x, knn_idx)
 
         return lc_xyz, lc_x, knn_xyz, knn_x
+
 
 
 # Local Geometry Aggregation
@@ -159,7 +172,7 @@ class EncNP(nn.Module):
             out_dim = out_dim * 2
             #disable FPS
             # group_num = group_num // 2
-            self.FPS_kNN_list.append(FPS_kNN(group_num, k_neighbors))
+            self.FPS_kNN_list.append(kNN(k_neighbors))
             self.LGA_list.append(LGA(out_dim, self.alpha, self.beta))
             self.Pooling_list.append(Pooling(out_dim))
 
@@ -170,7 +183,6 @@ class EncNP(nn.Module):
         # Raw-point Embedding
         x = self.raw_point_embed(x)
         B, embed_dim, N = x.shape
-
         # Multi-stage Hierarchy
         for i in range(self.num_stages):
             # FPS, kNN

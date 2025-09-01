@@ -58,9 +58,10 @@ class JHTDB_Lodader:
     def _query_getData(self, dataset_name: str, variable_name: str, times: np.ndarray, temporal_method: str,
                        spatial_method: str, spatial_operator: str, points: np.ndarray,
                        option: Optional[Union[List[float], Dict]] = None,maxQueryOnce:int=4096) -> np.ndarray:
-        """按批次调用 givernylocal.getData（每批不超过 maxQueryOnce），并在每个时间点拼接后按时间维堆叠返回。
+        """Call givernylocal.getData in batches (each batch no larger than maxQueryOnce),
+        concatenate within each time slice, then stack along the time axis.
 
-        返回值：shape 为 (T, N, 3) 的 ndarray，其中 T 为时间步数，N 为点数。
+        Return: ndarray of shape (T, N, 3), where T is number of time steps and N is number of points.
         """
         from givernylocal.turbulence_toolkit import getData
         import time
@@ -74,7 +75,7 @@ class JHTDB_Lodader:
                 end = min(start + int(maxQueryOnce), num_points)
                 print(f"querying time {query_time} from {start} to {end} of {num_points},progress {start/num_points*100}%")
                 chunk_points = points[start:end]
-                # 重试逻辑：getData 偶发失败（例如 HTTP 500 / result was not filled correctly）时重试
+                # Retry logic: getData may fail occasionally (e.g., HTTP 500), retry with backoff
                 max_retries = 8
                 backoff_seconds = 1.0
                 last_err = None
