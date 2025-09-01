@@ -4,11 +4,11 @@ pnn:
   split: 3
   bz: 16
   points: 1024
-  stages: 2
-  dim: 72
-  k: 6
-  alpha: 1000
-  beta: 100
+  stages: 1
+  dim: 144
+  k: 8
+  alpha: 3000
+  beta: 19
 dataset:
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
@@ -19,7 +19,7 @@ dataset:
 pcds:
   line_type: p_line # streamline   p_line-> pathline
   line_method: RK4 # RK4 Euler
-  line_steps: 200 # time step
+  line_steps: 300 # time step
   line_sample: 25 # samples one the line
   sample_area: full #points full areas
   interval_scale: 5
@@ -28,7 +28,7 @@ pcds:
   localized: True
   offset_scale: 0.1 # scale of grid interval
   time_slice: None # get the specific time_slice
-  dt_scale: 0.2 # flowline integration dt will be  dt_scale*vectorfield.dt
+  dt: 0.0015
 
   #params for s_lines
   t_start: 0.6 #% for the whole time

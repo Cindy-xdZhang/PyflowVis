@@ -10,7 +10,10 @@ A simplified Python fluid visualization renderer and GUI based on imgui, possibl
 ### 2D Vector Field Visualization
 - **Vector Glyph**: Visualizes the direction and magnitude of the vector field at sampled grid points using arrows or glyphs.
 - **Indicator (Seeding of Flowline)**: Allows interactive placement of seed points for flowline/pathline integration and visualization.
-- **Flowline/Pathline**: Integrates and visualizes flowlines (streamlines at a fixed time) and pathlines (trajectories over time) from user-defined seeds.
+- **Streamline/Pathline**: Integrates and visualizes flowlines (streamlines at a fixed time) and pathlines (trajectories over time) from user-defined seeds. We support multiple integrators:
+>  + Python based Ruler/Rk4/Rk5 integrator, with numba (njit) accerlated vector value query.
+>  + CUDA based Ruler/Rk4 integrator
+>  + Differentiable ODE solver(torchdiffeq) based integrator: "dopri5","dopri8","bosh3","fehlberg2","adaptive_heun".
 - **Coreline**: coreline (of 2D unsteady field) extraction based on q-crterion/jacobian/velocity critical points.
 - **Scalar Field**: Supports visualization of scalar fields (e.g., magnitude, vorticity) as color maps or overlays.
 - **FTLE**: Computes 2D FTLE using a CUDA kernel. To use this feature, ensure you have a working PyCUDA environment. You can first run [`TestPyCUDA.py`](misc/TestPyCUDA.py) to verify your setup.
@@ -122,24 +125,6 @@ python train.py --config config/classification/vortex_viz.yaml --data_dir "PATH_
 python train.py --config config/segmentation/mvu_net.yaml --data_dir "PATH_TO_DATASET"
 ```
 
-If you use this code, please cite:
-```bibtex
-@inproceedings{zhang2025vortextransformer,
-  title={VortexTransformer: End-to-End Objective Vortex Detection in 2D Unsteady Flow Using Transformers},
-  author={Zhang, Xingdi and Rautek, Peter and Hadwiger, Markus},
-  booktitle={Computer Graphics Forum},
-  pages={e70042},
-  year={2025},
-  organization={Wiley Online Library}
-}
-```
-
-
-
-
-
-
-
 
 
 # Project 2: Exploring 3D Unsteady Flow with 6D Observer-Space Interactions
@@ -167,8 +152,34 @@ Our code relies on VTK-9.4.1.
 ***Note*** : We will gradually migrate these C++ code to PyFlowVis. Once done, you will see specification and links to python files.
 
 
-If you use this code, please cite:
 
+
+---
+
+## License
+This project is licensed under the Apache License, Version 2.0. See the
+[LICENSE](./LICENSE) file for details. Attribution notices are provided in
+[NOTICE](./NOTICE).
+
+## Citation
+If you use PyFlowVis, or its components (including the VortexTransformer and the 3D observer-space interaction algorithms), in your research, please cite one of the following :
+
+- Software:
+  Zhang, Xingdi. PyFlowVis (2024). DOI: not assigned. GitHub repository.
+
+- Paper (VortexTransformer):
+```bibtex
+@inproceedings{zhang2025vortextransformer,
+  title={VortexTransformer: End-to-End Objective Vortex Detection in 2D Unsteady Flow Using Transformers},
+  author={Zhang, Xingdi and Rautek, Peter and Hadwiger, Markus},
+  booktitle={Computer Graphics Forum},
+  pages={e70042},
+  year={2025},
+  organization={Wiley Online Library}
+}
+```
+
+- Paper (Exploring 3D Unsteady Flow using 6D Observer Space Interactions):
 ```bibtex
 @inproceedings{zhang2025Explore3DUnsteadyFlow,
   title={Exploring 3D Unsteady Flow using 6D Observer Space Interactions},

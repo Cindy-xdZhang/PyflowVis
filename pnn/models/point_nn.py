@@ -149,7 +149,7 @@ class PosE_Geo(nn.Module):
 
 
 # Non-Parametric Encoder
-class EncNP(nn.Module):  
+class EncNPNew(nn.Module):  
     def __init__(self, input_points, num_stages, embed_dim, k_neighbors, alpha, beta):
         super().__init__()
         self.input_points = input_points
@@ -199,7 +199,51 @@ class EncNP(nn.Module):
         return every_cross_feature
 
         
-      
+ # Non-Parametric Encoder
+class EncNP(nn.Module):  
+    def __init__(self, input_points, num_stages, embed_dim, k_neighbors, alpha, beta):
+        super().__init__()
+        self.input_points = input_points
+        self.num_stages = num_stages
+        self.embed_dim = embed_dim
+        self.alpha, self.beta = alpha, beta
+
+        # Raw-point Embedding
+        self.raw_point_embed = PosE_Initial(3, self.embed_dim, self.alpha, self.beta)
+
+        self.FPS_kNN_list = nn.ModuleList() # FPS, kNN
+        self.LGA_list = nn.ModuleList() # Local Geometry Aggregation
+        self.Pooling_list = nn.ModuleList() # Pooling
+        
+        out_dim = self.embed_dim
+        group_num = self.input_points
+
+        # Multi-stage Hierarchy
+        for i in range(self.num_stages):
+            out_dim = out_dim * 2
+            group_num = group_num // 2
+            self.FPS_kNN_list.append(FPS_kNN(group_num, k_neighbors))
+            self.LGA_list.append(LGA(out_dim, self.alpha, self.beta))
+            self.Pooling_list.append(Pooling(out_dim))
+
+
+    def forward(self, xyz, x):
+
+        # Raw-point Embedding
+        x = self.raw_point_embed(x)
+
+        # Multi-stage Hierarchy
+        for i in range(self.num_stages):
+            # FPS, kNN
+            xyz, lc_x, knn_xyz, knn_x = self.FPS_kNN_list[i](xyz, x.permute(0, 2, 1))
+            # Local Geometry Aggregation
+            knn_x_w = self.LGA_list[i](xyz, lc_x, knn_xyz, knn_x)
+            # Pooling
+            x = self.Pooling_list[i](knn_x_w)
+
+        # Global Pooling
+        x = x.max(-1)[0] + x.mean(-1)
+        return x 
 
 
 # Non-Parametric Network

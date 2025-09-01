@@ -239,16 +239,11 @@ if __name__ == "__main__":
             # else:
             #     points_tsfm_nor=normalizeLines(sample_nerbors=config.pcds.sample_nerbors,points=points_ori,vectorfield=vectorfield)
         
-        logger.info(f"curvature:{curvature.shape}")
-        
-        logger.info(f"points_ori_rk4:{points_ori_rk4.shape}")
-        
-        logger.info(f"points_tsfm_loc_rk4:{points_tsfm_loc_rk4.shape}")
-        logger.info(f"points_tsfm_t_loc_rk4:{points_tsfm_t_loc_rk4.shape}")
-        
-        logger.info(f"points_tsfm_nor_rk4:{points_tsfm_nor_rk4.shape}")
-        logger.info(f"points_tsfm_t_nor_rk4:{points_tsfm_t_nor_rk4.shape}")
-        
+        points_ori_rk4=points_ori_rk4.reshape([points_ori_rk4.shape[0],-1,points_ori_rk4.shape[-1]])
+        points_tsfm_loc_rk4=points_tsfm_loc_rk4.reshape([points_tsfm_loc_rk4.shape[0],-1,points_tsfm_loc_rk4.shape[-1]])
+        points_tsfm_t_loc_rk4=points_tsfm_t_loc_rk4.reshape([points_tsfm_t_loc_rk4.shape[0],-1,points_tsfm_t_loc_rk4.shape[-1]])
+        points_tsfm_nor_rk4=points_tsfm_nor_rk4.reshape([points_tsfm_nor_rk4.shape[0],-1,points_tsfm_nor_rk4.shape[-1]])
+        points_tsfm_t_nor_rk4=points_tsfm_t_nor_rk4.reshape([points_tsfm_t_nor_rk4.shape[0],-1,points_tsfm_t_nor_rk4.shape[-1]])
         
         
         #abs coords

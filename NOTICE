@@ -1,0 +1,14 @@
+PyFlowVis
+Copyright (c) 2024-2025 Xingdi Zhang
+
+This product includes software developed by Xingdi Zhang and contributors.
+
+Academic use: If you use this repository or its derivatives in academic work, please cite the related papers listed in README and CITATION.cff. Example entries:
+
+- VortexTransformer:
+  Zhang, Xingdi; Rautek, Peter; Hadwiger, Markus. "VortexTransformer: End-to-End Objective Vortex Detection in 2D Unsteady Flow Using Transformers." Computer Graphics Forum, 2025, e70042.
+
+- Exploring 3D Unsteady Flow using 6D Observer Space Interactions:
+  Zhang, Xingdi; Ageeli, Amani; Theußl, Thomas; Hadwiger, Markus; Rautek, Peter. 2025.
+
+This NOTICE file is for attribution purposes only and does not modify the Apache License, Version 2.0.

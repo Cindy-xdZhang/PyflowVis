@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from pnn.libs.flows import temporal_downsamplePathlineCrossPrimitive, LocLines, normalizeLines
 from FLowUtils.flowlineIntegral import batch_pathlineCross_integration_2D_auto
 from FLowUtils.netCDFLoader import *
+from FLowUtils.AnalyticalFlowCreator import *
 
 
 torch.set_printoptions(precision=4, threshold=10000, linewidth=200, sci_mode=False)
@@ -211,8 +212,8 @@ def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampl
     assert resolutionUPsampling>0.01
 
     # Use linspace to specify number of samples instead of step size
-    num_x =int(vectorfield.Xdim*resolutionUPsampling)
-    num_y =int(vectorfield.Ydim*resolutionUPsampling)
+    num_x = int(np.ceil(vectorfield.Xdim * resolutionUPsampling))
+    num_y = int(np.ceil(vectorfield.Ydim * resolutionUPsampling))
     xs = np.linspace(xmin_grid, xmax_grid, num_x, dtype=np.float32)
     ys = np.linspace(ymin_grid, ymax_grid, num_y, dtype=np.float32)
 
@@ -226,17 +227,17 @@ def generate_test_points(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:fl
     nerbors=int(cfg.pcds.num_cross_points_per_seeding)
     max_steps = int(cfg.pcds.max_iterations)
     dt = float(cfg.pcds.dt)
-    offset_dist = vectorfield.gridInterval[0] * float(cfg.pcds.offset_scale)
+    offset_dist = float(cfg.pcds.offset_dist)
     localized = bool(cfg.pcds.localized)
     normalized = bool(cfg.pcds.normalized)
-    FTLE_resolutionUPsampling=float(cfg.FTLE_resolutionUPsampling)
-    starts_xy,xs,ys=generate_seedingGrid_2D(vectorfield,FTLE_resolutionUPsampling)
+    resolutionUPsampling=float(cfg.resolutionUPsampling)
+    starts_xy,xs,ys=generate_seedingGrid_2D(vectorfield,resolutionUPsampling)
     ny, nx = len(ys), len(xs)
     if cacheSystem:
         dom_min = tuple(map(float, vectorfield.domainMinBoundary))
         dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
         key_str = (
-            f"neighbors={nerbors}|ups={FTLE_resolutionUPsampling}|ms={max_steps}|dt={dt:.8g}|ts={physcial_time:.8g}|tt={target_time:.8g}|"
+            f"neighbors={nerbors}|ups={resolutionUPsampling}|ms={max_steps}|dt={dt:.8g}|ts={physcial_time:.8g}|tt={target_time:.8g}|"
             f"off={offset_dist:.8g}|nb={offset_dist}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
             f"domMin={dom_min}|domMax={dom_max}|localized={localized}|normalized={normalized}"
         )
@@ -273,7 +274,7 @@ def generate_test_points(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:fl
             dom_min = tuple(map(float, vectorfield.domainMinBoundary))
             dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
             key_str = (
-               f"neighbors={nerbors}|ups={FTLE_resolutionUPsampling}|ms={max_steps}|dt={dt:.8g}|ts={physcial_time:.8g}|tt={target_time:.8g}|"
+               f"neighbors={nerbors}|ups={resolutionUPsampling}|ms={max_steps}|dt={dt:.8g}|ts={physcial_time:.8g}|tt={target_time:.8g}|"
             f"off={offset_dist:.8g}|nb={offset_dist}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
             f"domMin={dom_min}|domMax={dom_max}|localized={localized}|normalized={normalized}"
             )
@@ -299,12 +300,12 @@ def sample_center_points_from_groups(points_grouped: torch.Tensor, sample_nerbor
     return center
 
 def preprocess_localization_normalization(points_grouped: torch.Tensor, sample_nerbors: int, line_steps: int,
-                               localized: bool, normalized: bool, vectorfield: UnsteadyVectorField2D) -> torch.Tensor:
+                               localized: bool, normalized: bool) -> torch.Tensor:
     x = points_grouped
     if localized:
         x = LocLines(sample_nerbors=sample_nerbors, points=x)
-    if normalized:
-        x = normalizeLines(sample_nerbors=sample_nerbors, points=x, vectorfield=vectorfield)
+    # if normalized:
+    #     x = normalizeLines(sample_nerbors=sample_nerbors, points=x, vectorfield=vectorfield)
     return x
 
 
@@ -366,6 +367,16 @@ def visualize_ftle_slice(true_grid: np.ndarray, pred_grid: np.ndarray,psnr: floa
 
 
 
+def compute_metrics(true_grid:np.ndarray, pred_grid:np.ndarray):
+    y_global_max = true_grid.max()
+    y_global_min = true_grid.min()
+    mse = np.mean((true_grid - pred_grid) ** 2)
+    mae = np.mean(np.abs(true_grid - pred_grid))
+    maxe = np.max(np.abs(true_grid - pred_grid))
+    dyn_range = max(abs(y_global_max - y_global_min), 1e-12)
+    psnr = float('inf') if mse <= 1e-20 else 20.0 * np.log10(dyn_range) - 10.0 * np.log10(mse)
+    return mse, mae, maxe,  psnr
+
 def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visualize: bool = False):
     #first generate grid points for this time, then generate pathlines, 
     # then call computeFTLEFromPathlineCrossPrimitive get correct ftle
@@ -375,8 +386,6 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
     nerb = int(cfg.pcds.num_cross_points_per_seeding)
     LstepsPerline = int(cfg.pcds.sampled_points_per_line)
     max_steps = int(cfg.pcds.max_iterations)
-    dt = float(cfg.pcds.dt)
-    offset_dist = vectorfield.gridInterval[0] * float(cfg.pcds.offset_scale)
     localized = bool(cfg.pcds.localized)
     normalized = bool(cfg.pcds.normalized)
     starts_chunk = int(cfg.bs)
@@ -396,8 +405,7 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
     se_sum = 0.0
     ae_sum = 0.0
     max_abs_err = 0.0
-    y_global_min = float('inf')
-    y_global_max = float('-inf')
+
 
     ftle_min=cfg['ftle_min']
     ftle_max=cfg['ftle_max']
@@ -420,13 +428,11 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
             y_true_b = computeFTLEFromPathlineCrossPrimitive(Pathline_batch_group, vectorfield_dt=vectorfield.timeInterval)
        
             y_valid = y_true_b[keep_groups_full]
-            y_global_min = min(y_global_min, float(y_valid.min().item()))
-            y_global_max = max(y_global_max, float(y_valid.max().item()))
             y_valid = y_valid.to(device).float()
 
 
             # 预处理并分批预测（必要时 pad 到 64 的倍数）
-            P_in = preprocess_localization_normalization(P_K, nerb, LstepsPerline, localized, normalized, vectorfield).to(device).float()
+            P_in = preprocess_localization_normalization(P_K, nerb, LstepsPerline, localized, normalized).to(device).float()
             P_in = P_in.to(device)
             B = P_in.shape[0]
             pad = (-B) % 64
@@ -440,14 +446,8 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
             pred_b = pred_b*(ftle_max-ftle_min)+ftle_min
             valid_pred_b = pred_b[keep_groups_full]
 
-            # 误差累计（仅统计原始 B 条）
-            diff = valid_pred_b- y_valid
-            se_sum += float((diff ** 2).sum().item())
-            ae_sum += float(diff.abs().sum().item())
-            max_abs_err = max(max_abs_err, float(diff.abs().max().item()))
-            total_groups += int(GroupSize_BatchSize)
-
-            # 回填网格（对本批所有组），非满长组真值已置零
+            total_groups+=int(GroupSize_BatchSize)
+            # fill back the grid
             idx_global = (np.arange(GroupSize_BatchSize) + s0)
             valid_idx_global = idx_global[keep_groups_full]
             rows = valid_idx_global // nx
@@ -457,15 +457,18 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
 
         if total_groups == 0:
             print("[test_ftle] No full-length groups found across all chunks.")
-            return
+            return  {
+            "mse": 0,
+            "mae": 0,
+            "maxe": 0,
+            "psnr": 0,
+            "true_grid": true_grid,
+            "pred_grid": pred_grid,
+        }
 
-        mse = se_sum / total_groups
-        mae = ae_sum / total_groups
-        maxe = max_abs_err
-        dyn_range = max(abs(y_global_max - y_global_min), 1e-12)
-        psnr = float('inf') if mse <= 1e-20 else 20.0 * np.log10(dyn_range) - 10.0 * np.log10(mse)
-        # print(f"[test_ftle] Ngroups={total_groups}, MSE={mse:.6f}, MAE={mae:.6f}, MaxE={maxe:.6f}, PSNR={psnr:.2f} dB")
 
+
+        mse, mae, maxe, psnr = compute_metrics(true_grid, pred_grid)
         # 可视化 2D 切片
         if visualize:
             visualize_ftle_slice(true_grid, pred_grid,psnr, vectorfield)
@@ -479,32 +482,47 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
             "pred_grid": pred_grid
         }
 
+def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
+    netCDF = NetCDFLoader()
+    UnsteadyVectorFields=[]
+    for name in config.dataset.names:
+        vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"
+        if name == "beads2d":
+            UnsteadyVectorFields.append(beadsFLow([64,64],32))
+        elif name == "doublegyre2d":
+            UnsteadyVectorFields.append(double_gyre_2D([128,64],64))
+        elif name == "rfc2d":
+            UnsteadyVectorFields.append(rotation_four_center([64,64],32))
+        else:
+            try:
+                UnsteadyVectorFields.append(netCDF.load_vector_field2d(vectorfield_datapath))
+            except Exception as e:
+                print(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {name} failed: {e}. Skip this field.")
+    return UnsteadyVectorFields
+
 
 # Torch Dataset for training samples generated on-the-fly via generate_training_samples
 class PointWiseFTLETrainDataset(Dataset):
-    def __init__( self,  config, vectorfield: UnsteadyVectorField2D,cacheSystem: bool = True):
+    def __init__( self,  config, cacheSystem: bool = True):
         nerbors = int(config.pcds.num_cross_points_per_seeding)
         LstepsPerline = int(config.pcds.sampled_points_per_line)
         total_points_count =getattr(config, 'train_points_count', 640*80*4)
         max_steps = int(config.pcds.max_iterations)
-        dt = float(config.pcds.dt)
-        offset_dist = vectorfield.gridInterval[0] * float(config.pcds.offset_scale)
-        dataset_timewindow_start = float(config.pcds.t_start * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
-        dataset_timewindow_target = float(config.pcds.t_target * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+        flowline_dt = float(config.pcds.dt)
         time_slice = int(config.time_slice)
-        ftle_timeslices=np.linspace(dataset_timewindow_start, dataset_timewindow_target, time_slice)
-
+        offset_dist = float(config.pcds.offset_dist)
+        unsteadyFieldNames=str([name for name in config.dataset.names])
+        time_window_start_ratio=float(config.pcds.t_start)
+        time_window_target_ratio=float(config.pcds.t_target)
         P_all=[]
         V_all=[]
         cacheSuccess=False
         # Cache logic: build a unique tag and try to load
         if cacheSystem:
-            dom_min = tuple(map(float, vectorfield.domainMinBoundary))
-            dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
             key_str = (
-                f"cnt={total_points_count}|ms={max_steps}|dt={dt:.8g}|ts={dataset_timewindow_start:.8g}|tt={dataset_timewindow_target:.8g}|"
-                f"off={offset_dist:.8g}|nb={nerbors}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
-                f"domMin={dom_min}|domMax={dom_max}|time_slice={time_slice}|LstepsPerline={LstepsPerline}|nerbors={nerbors}"
+                f"cnt={total_points_count}|ms={max_steps}|dt={flowline_dt:.8g}|ts={time_window_start_ratio:.8g}|tt={time_window_target_ratio:.8g}|"
+                f"off={offset_dist:.8g}|nb={nerbors}|unsteadyFieldNames={unsteadyFieldNames}|"
+                f"time_slice={time_slice}|LstepsPerline={LstepsPerline}|nerbors={nerbors}"
             )
             tag = "TrainPL_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
             cache_dir = os.path.join("./outputs", "temp")
@@ -524,47 +542,42 @@ class PointWiseFTLETrainDataset(Dataset):
         
         #generate training samples
         if not cacheSuccess:
-            for physcial_start_time in ftle_timeslices:
-                physical_target_time = physcial_start_time + float(dt*max_steps)
-                P_OneTimewindow, length_OneTimewindow = generate_training_samples(
-                    vectorfield=vectorfield,
-                    count=int(total_points_count),
-                    max_steps=int(max_steps),
-                    dt=float(dt),
-                    t_start=float(physcial_start_time),
-                    t_target=float(physical_target_time),
-                    offset_dist=float(offset_dist),
-                    nerbors=int(nerbors)
-                )
-                NGroups,nerborsCrossSize,PathlineLength,Dim=P_OneTimewindow.shape
-                assert NGroups==total_points_count
-                assert nerborsCrossSize==nerbors
-                assert PathlineLength==max_steps
-                assert Dim==3
-                y_OneTimewindow = computeFTLEFromPathlineCrossPrimitive(P_OneTimewindow, vectorfield.timeInterval)
-                # P_K = temporal_downsamplePathlineCrossPrimitive(P_OneTimewindow, int(LstepsPerline))  
-                # X = preprocess_localization_normalization( P_K, int(nerbors), int(LstepsPerline), bool(localized), bool(normalized), vectorfield ).cpu().float()
-                # y_true_sampled= computeFTLEFromPathlineCrossPrimitive(P_K,  vectorfield.timeInterval).cpu().float()
-                # y_localization = computeFTLEFromPathlineCrossPrimitive(X ,vectorfield.timeInterval)
-                # diff=y_true_sampled-y
-                # #assert temporal downsample does not change the ftle value
-                # print(f"diff0: {diff.mean()}, {diff.std()}")
-                # diff=y_localization-y
-                # # I already verified that the y_localization==y
-                # print(f"diff1: {diff.mean()}, {diff.std()}")
-                P_all.append(P_OneTimewindow)
-                V_all.append(y_OneTimewindow)
+            UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config)
+            integration_interval=float(flowline_dt*max_steps)
+            for i,vectorfield in enumerate(UnsteadyVectorFields):
+                print(f"[generate_training_samples] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
+                dataset_timewindow_start = float(config.pcds.t_start * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+                dataset_timewindow_target = float(config.pcds.t_target * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+                #if start integration time is too close to the end of the vector field, we will not generate training samples with same length, 
+                # which will make generate_training_samples failed
+                dataset_timewindow_target=min(dataset_timewindow_target, vectorfield.tmax-integration_interval-flowline_dt)
+                ftle_timeslices=np.linspace(dataset_timewindow_start, dataset_timewindow_target, time_slice)
+                for physcial_start_time in ftle_timeslices:
+                    physical_target_time =min(physcial_start_time + float(flowline_dt*max_steps), vectorfield.tmax)
+                    P_OneTimewindow, length_OneTimewindow = generate_training_samples(
+                        vectorfield=vectorfield,
+                        count=int(total_points_count),
+                        max_steps=int(max_steps),
+                        dt=float(flowline_dt),
+                        t_start=float(physcial_start_time),
+                        t_target=float(physical_target_time),
+                        offset_dist=float(offset_dist),
+                        nerbors=int(nerbors)
+                    )
+                    NGroups,nerborsCrossSize,PathlineLength,Dim=P_OneTimewindow.shape
+                    assert NGroups==total_points_count and nerborsCrossSize==nerbors and PathlineLength==max_steps and Dim==3,"P_OneTimewindow shape is not correct"
+                    y_OneTimewindow = computeFTLEFromPathlineCrossPrimitive(P_OneTimewindow)
+                    P_all.append(P_OneTimewindow)
+                    V_all.append(y_OneTimewindow)
             P_all=torch.cat(P_all, dim=0)
             V_all=torch.cat(V_all, dim=0)
         
         if cacheSystem and not cacheSuccess:
             try:
-                dom_min = tuple(map(float, vectorfield.domainMinBoundary))
-                dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
                 key_str = (
-                    f"cnt={total_points_count}|ms={max_steps}|dt={dt:.8g}|ts={dataset_timewindow_start:.8g}|tt={dataset_timewindow_target:.8g}|"
-                    f"off={offset_dist:.8g}|nb={nerbors}|tmin={float(vectorfield.tmin):.8g}|tmax={float(vectorfield.tmax):.8g}|"
-                    f"domMin={dom_min}|domMax={dom_max}|time_slice={time_slice}|LstepsPerline={LstepsPerline}|nerbors={nerbors}"
+                    f"cnt={total_points_count}|ms={max_steps}|dt={flowline_dt:.8g}|ts={time_window_start_ratio:.8g}|tt={time_window_target_ratio:.8g}|"
+                    f"off={offset_dist:.8g}|nb={nerbors}|unsteadyFieldNames={unsteadyFieldNames}|"
+                    f"time_slice={time_slice}|LstepsPerline={LstepsPerline}|nerbors={nerbors}"
                 )
                 tag = "TrainPL_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
                 cache_dir = os.path.join("outputs", "temp")
@@ -580,7 +593,7 @@ class PointWiseFTLETrainDataset(Dataset):
 
         temporal_sampled_P_all=temporal_downsamplePathlineCrossPrimitive(P_all, int(LstepsPerline))
         localized=bool(config.pcds.localized)
-        localization=preprocess_localization_normalization(temporal_sampled_P_all, int(nerbors), int(LstepsPerline), bool(localized), False, vectorfield ).cpu().float()
+        localization=preprocess_localization_normalization(temporal_sampled_P_all, int(nerbors), int(LstepsPerline), bool(localized), False ).cpu().float()
 
         self.ftle_min = float(V_all.min())
         self.ftle_max = float(V_all.max())
@@ -588,8 +601,7 @@ class PointWiseFTLETrainDataset(Dataset):
         normalized_y=normalized_y.clamp(0,1)
         self.points = localization   # [N, nerb*K, 3]
         self.labels = normalized_y       # [N]
-
-    
+        print(f"[PointWiseFTLETrainDataset] generate {self.points.shape[0]} training samples")
     def __len__(self):
         return self.points.shape[0]
 

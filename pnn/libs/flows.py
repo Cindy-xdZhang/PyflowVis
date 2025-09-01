@@ -1268,6 +1268,41 @@ def sampleLines(line_sample,sample_nerbors,points):
     points_ori=points_ori.reshape(points_ori.shape[0],-1,points_ori.shape[-1])
     return points_ori
 
+@torch.no_grad()
+def resample_to_fixed_count(points: torch.Tensor,
+                                     valid_steps: torch.Tensor,
+                                     K: int) -> torch.Tensor:
+    """
+    points:      [M, Nmax, D]    每条线最多 Nmax 点（超出的为占位）
+    valid_steps: [M]             第 i 条线真实点数 n_i (>=1)
+    K:           目标点数（所有线最终统一为 K 点）
+    return:      [M, K, D]
+    """
+    device, dtype = points.device, points.dtype
+    M, Nmax, D = points.shape
+    n = valid_steps.to(torch.long).clamp_min(1)  # [M]
+
+    # 用最后一个有效点“填充”超出部分，避免脏数据
+    idxs = torch.arange(Nmax, device=device).view(1, -1).expand(M, -1)      # [M,Nmax]
+    last_idx = (n - 1).view(-1, 1).expand(-1, Nmax)                          # [M,Nmax]
+    take_idx = torch.where(idxs < n.view(-1, 1), idxs, last_idx)             # [M,Nmax]
+    P = points.gather(1, take_idx.unsqueeze(-1).expand(-1, -1, D))           # [M,Nmax,D]
+
+    # 在“索引域” [0, n_i-1] 上等分取 K 个位置
+    if K == 1:
+        s = torch.zeros(M, 1, device=device, dtype=dtype)
+    else:
+        s = torch.linspace(0, 1, K, device=device, dtype=dtype).unsqueeze(0) * (n - 1).unsqueeze(1).to(dtype)  # [M,K]
+
+    s0 = s.floor().to(torch.long).clamp_max(Nmax - 1)  # 左索引
+    s1 = (s0 + 1).clamp_max(Nmax - 1)                  # 右索引
+    alpha = (s - s0.to(dtype)).unsqueeze(-1)           # [M,K,1]
+
+    P0 = P.gather(1, s0.unsqueeze(-1).expand(-1, -1, D))  # [M,K,D]
+    P1 = P.gather(1, s1.unsqueeze(-1).expand(-1, -1, D))  # [M,K,D]
+
+    Pk = (1 - alpha) * P0 + alpha * P1                    # 线性插值（按索引）
+    return Pk
 
 
 
@@ -1275,13 +1310,13 @@ def sampleLines(line_sample,sample_nerbors,points):
 def temporal_downsamplePathlineCrossPrimitive(points: torch.Tensor,
                                      K: int) -> torch.Tensor:
     """
-    将路径线沿给定时间维度重采样为固定步数 K：保留首尾，中间随机采样。
-    参数:
-      - points: 张量，形状 [groups, lines_per_group, timesteps, ...]
-      - K: 目标采样步数 (>=2)
+    Resample pathlines along the time dimension to a fixed number of steps K: keep head and tail, randomly sample the middle.
+    Args:
+      - points: tensor, shape [groups, lines_per_group, timesteps, ...]
+      - K: target number of sampled steps (>=2)
 
-    返回:
-      - 与 points 相同维度数的张量，但时间维长度变为 K
+    Returns:
+      - Tensor with the same number of dimensions as points, but the time dimension is K
     """
     if K < 2:
         raise ValueError("K must be >= 2 to keep both head and tail")
@@ -1291,7 +1326,7 @@ def temporal_downsamplePathlineCrossPrimitive(points: torch.Tensor,
     device = points.device
     T = points.shape[2]
 
-    # 统一沿时间维度选取 K 个索引（同一批次、同一组使用相同时间索引）
+    # Select K indices along the time dimension (same indices for all batches and groups)
     if T <= 0:
         raise ValueError("timesteps dimension must be > 0")
 
@@ -1302,7 +1337,7 @@ def temporal_downsamplePathlineCrossPrimitive(points: torch.Tensor,
             sel_idx = torch.tensor([0, T - 1], device=device, dtype=torch.long)
         elif T > 2:
             num_mid = K - 2
-            # 中间从 [1, T-2] 随机采样（全局一致），并按时间排序
+            # Randomly sample the middle indices from [1, T-2] (globally consistent), and sort by time
             idx_mid = torch.randint(1, T - 1, (num_mid,), device=device)
             idx_mid, _ = torch.sort(idx_mid)
             sel_idx = torch.cat([
@@ -1310,13 +1345,74 @@ def temporal_downsamplePathlineCrossPrimitive(points: torch.Tensor,
                 idx_mid,
                 torch.tensor([T - 1], device=device, dtype=torch.long)
             ], dim=0)
-        else:  # T == 2 且 K > 2
+        else:  # T == 2 and K > 2
             assert False, "T == 2 and K > 2 is not supported"
             
     out = points[:, :, sel_idx, :]
     return out
 
+@torch.no_grad()
+def temporal_downsamplePathlineCrossPrimitiveWithValidLength(points: torch.Tensor,valid_length: torch.Tensor,
+                                     K: int) -> torch.Tensor:
+    """
+    Resample along the time dimension to a fixed number of steps K according to the maximum valid length of each group:
+    - Must keep the first point index=0
+    - Must keep the last valid point of each line (given by valid_length)
+    - The remaining K-2 indices are randomly sampled in [1, L_max_group-1) (the same for all lines in the group)
 
+    Args:
+      - points: shape [groups, lines_per_group, timesteps, D]
+      - valid_length: shape [groups, lines_per_group], valid length of each pathline
+      - K: target number of sampled steps (>=2)
+
+    Returns:
+      - Tensor, shape [groups, lines_per_group, K, D]
+    """
+    if K < 2:
+        raise ValueError("K must be >= 2 to keep both head and tail")
+    if points.dim() < 3:
+        raise ValueError("points must have at least 3 dims: [groups, lines_per_group, timesteps, ...]")
+
+    device = points.device
+    dtype = torch.long
+    G, L = valid_length.shape[0], valid_length.shape[1]
+    T = points.shape[2]
+
+    # Clamp valid length to [1, T]
+    vl = valid_length.to(device=device)
+    vl = torch.clamp(vl, min=1, max=T)
+    last_idx_per_line = (vl - 1).to(dtype)
+
+    # Maximum valid length per group (not exceeding T)
+    max_len_per_group = vl.max(dim=1).values  # [G]
+
+    # Construct random middle indices for each group (shape [G, K-2], empty if K<=2)
+    num_mid = max(K - 2, 0)
+    if num_mid > 0:
+        mids_by_group = torch.zeros((G, num_mid), device=device, dtype=dtype)
+        for g in range(G):
+            Lg = int(max_len_per_group[g].item())
+            if Lg > 2:
+                # Randomly sample from [1, Lg-1)
+                idx_mid = torch.randint(1, Lg - 1, (num_mid,), device=device, dtype=dtype)
+                idx_mid, _ = torch.sort(idx_mid)
+                mids_by_group[g] = idx_mid
+            else:
+                # No available middle indices, keep as 0 (allow duplication with head)
+                pass
+    else:
+        mids_by_group = None
+
+    # Assemble selection indices: first column=0; middle columns=group-wise random; last column=last valid point of each line
+    sel_idx = torch.zeros((G, L, K), device=device, dtype=dtype)
+    if num_mid > 0:
+        sel_idx[:, :, 1:-1] = mids_by_group[:, None, :].expand(G, L, num_mid)
+    sel_idx[:, :, -1] = last_idx_per_line
+
+    # Gather along the time dimension
+    expand_sel = sel_idx.unsqueeze(-1).expand(-1, -1, -1, points.shape[-1])
+    out = torch.gather(points, dim=2, index=expand_sel)
+    return out
 
 
 def LocLines(sample_nerbors,points):
@@ -1354,15 +1450,11 @@ def LocLines4Time(sample_nerbors,points):
         points_loc: N,3 # the points convert to local space
     """
     pts = points.reshape(points.shape[0],sample_nerbors,-1,points.shape[-1])
-    # 分离中心线和周围线
+
     center = pts[:, 0:1, :, :]       # [B, 1, step, 3]
     neighbors = pts[:, 1:, :, :]     # [B, 4, step, 3]
-
-    # 对每个时刻，neighbors 减去 center
-    neighbors_loc = neighbors - center  # 自动广播到 [B,4,step,3]
-
-    # 展平成 [B, 4*step, 3]
-    return neighbors_loc.reshape(points.shape[0],-1,points.shape[-1]),center
+    neighbors_loc = neighbors - center  #  [B,4,step,3]
+    return neighbors_loc,center
     
 def normalizeLines(sample_nerbors,points,vectorfield):
     """
@@ -1402,7 +1494,6 @@ def normalizeLines(sample_nerbors,points,vectorfield):
     mins   = mins.view(1, 1, 1, 3)    # [1,1,1,3]
     scales = scales.view(1, 1, 1, 3)  # [1,1,1,3]
     lines_norm = (points_ori - mins) / scales
-    lines_norm=lines_norm.reshape(points_ori.shape[0],-1,points_ori.shape[-1])
     return lines_norm
     
 
@@ -1413,7 +1504,7 @@ def compute_features_in_chunks(points_batch, point_nn, chunk_size=50, desc="Extr
 
     for start in tqdm(range(0, B, chunk_size), desc=desc, total=num_chunks):
         end = min(start + chunk_size, B)
-        chunk = points_batch[start:end].permute(0, 2, 1)  # [B, C, N] → [B, N, C]
+        chunk = points_batch[start:end].permute(0, 2, 1)
         with torch.no_grad():  # 避免记录计算图，节省显存
             features = point_nn(chunk)
         all_features.append(features)

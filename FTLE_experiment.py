@@ -11,7 +11,7 @@ from DeepUtils.loss import build_criterion_from_cfg
 from DeepUtils.optim import build_optimizer_from_cfg
 
 from FLowUtils.VectorField2d import *
-from pnn.models.point_nn import EncNP
+from pnn.models.point_nn import EncNPNew
 from FTLE_fitting_utils import *
 
 torch.backends.cuda.matmul.allow_tf32 = False  
@@ -56,7 +56,7 @@ class PointWiseFTLERegressor(nn.Module):
         #FTLERegressor is a point wise regressor, has no cross primitive, no neighbor information aggregation
         self.cross_neighborsize=cross_neighborsize
         self.pointsPerPrimitive=LStpesPerline*cross_neighborsize
-        self.encoder = EncNP(self.pointsPerPrimitive, num_stages, embed_dim, k_neighbors, alpha, beta)
+        self.encoder = EncNPNew(self.pointsPerPrimitive, num_stages, embed_dim, k_neighbors, alpha, beta)
 
         # self.decoderInputDim=embed_dim * (2 ** (num_stages - 0))+ 3*2*cross_neighborsize
         self.decoderInputDim=embed_dim * (2 ** (num_stages - 0))
@@ -83,7 +83,37 @@ class PointWiseFTLERegressor(nn.Module):
     
 
 
+class PointWiseMLPPegressor(nn.Module):
+    def __init__(self, LStpesPerline,num_stages=2, embed_dim=72, k_neighbors=6, cross_neighborsize=5,beta=100, alpha=1000):
+        super().__init__()
+        #FTLERegressor is a point wise regressor, has no cross primitive, no neighbor information aggregation
+        self.cross_neighborsize=cross_neighborsize
+        self.pointsPerPrimitive=LStpesPerline*cross_neighborsize
+        self.encoder = EncNPNew(self.pointsPerPrimitive, num_stages, embed_dim, k_neighbors, alpha, beta)
 
+        # self.decoderInputDim=embed_dim * (2 ** (num_stages - 0))+ 3*2*cross_neighborsize
+        # self.decoderInputDim=embed_dim * (2 ** (num_stages - 0))
+        self.decoderInputDim=3*2*cross_neighborsize
+        self.decoder = Decoder(in_dim=self.decoderInputDim)
+
+    def forward(self, pts: torch.Tensor):
+        B,CrossSize,LstepsPerline,Dim=pts.shape
+        PointsRaw=pts.reshape(B,CrossSize*LstepsPerline,Dim)
+        points_3N=PointsRaw.permute(0, 2, 1)
+        points_N3=PointsRaw
+        # FMT_feat = self.encoder(points_N3, points_3N)
+
+        # xyz = pts.permute(0, 2, 1)#B,N,3
+        #feat: (B, embed_dim)
+        start_pos=pts[:,:,0,:].reshape(B, -1)
+        end_pos=pts[:,:,-1,:].reshape(B, -1)
+        every_cross_feature=torch.cat([start_pos,end_pos],dim=1)
+
+        #feature dimension is in_dim*K(steps per line)
+        # pred = self.decoder(FMT_feat)
+        pred = self.decoder(every_cross_feature)
+        return pred
+    
 
 
 class FTLEUpsamplingModel(nn.Module):
@@ -171,7 +201,8 @@ def train_model(config, model, dataset, device):
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             epoch_avg_loss += float(loss.item())
-
+            #clean Gpu memory
+            torch.cuda.empty_cache()
             if it % print_freq == 0 and it > 0:
                 print(f"epoch {epoch}, iter {it}: {LOSS_NAME} ={loss.item():.6f}")
 
@@ -221,18 +252,23 @@ if __name__=="__main__":
         config = EasyConfig()
         netCDF = NetCDFLoader()
         config.load("config/PointWiseFTLERegressor.yaml", recursive=False)
-        vectorfield_datapath=f"{config.dataset.dat_dir}\\{config.dataset.name}.{config.dataset.extension}"
+        vectorfield_datapath=f"{config.dataset.dat_dir}\\{config.dataset.test_name}.{config.dataset.extension}"
         vectorfield = netCDF.load_vector_field2d(vectorfield_datapath)
         config['vectorfield']=vectorfield
         nerb = int(config.pcds.num_cross_points_per_seeding)
         L = int(config.pcds.sampled_points_per_line)
         #the input point cloud tensor runing in the network is (B,  N=K*nerb, 3)
-        model = PointWiseFTLERegressor(LStpesPerline=L,num_stages=config.pnn.stages, embed_dim=config.pnn.dim,
+        if config.model.NAME == 'FMT_Regressor':
+            model = PointWiseFTLERegressor(LStpesPerline=L,num_stages=config.pnn.stages, embed_dim=config.pnn.dim,
                               k_neighbors=config.pnn.k, beta=config.pnn.beta, alpha=config.pnn.alpha).to(device)
-
-      
+        elif config.model.NAME == 'MLP_Regressor':
+            model = PointWiseMLPPegressor(LStpesPerline=L,num_stages=config.pnn.stages, embed_dim=config.pnn.dim,
+                              k_neighbors=config.pnn.k, beta=config.pnn.beta, alpha=config.pnn.alpha).to(device)
+        else:
+            raise ValueError(f"Unknown model: {config.model.NAME}")
+    
         # use Dataset + DataLoader (support shuffle / multi-threading etc.)
-        dataset = PointWiseFTLETrainDataset( config=config, vectorfield=vectorfield   )
+        dataset = PointWiseFTLETrainDataset( config=config )
         config['ftle_min']=dataset.ftle_min
         config['ftle_max']=dataset.ftle_max
         train_model(config,model,dataset,device)
