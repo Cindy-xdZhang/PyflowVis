@@ -1,7 +1,7 @@
 seed: 7068
-epochs: 120
+epochs: 42
 train_points_count: 72000
-bs: 512
+bs: 12
 print_freq: 200
 
 lr: 0.00008
@@ -12,10 +12,18 @@ optimizer:
 loss:
   NAME: MSELoss
 
-ftle:
-  timesliceCount: 10
-  UPsampling: 4
-  low_res_grid_sampling: 1.0 #low resolution ftle's grid =vectorfield.grid*low_res_grid_sampling 
+
+dataset:
+  timesliceCount: 400
+  low_res_grid_sampling: 0.5 #low resolution ftle's grid =vectorfield.grid*low_res_grid_sampling 
+  UPsampling: 4 # must be integer
+
+  dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
+  # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
+  names: [cylinder2d]
+  extension: nc
+  t_start: 0.2 #% for the whole time
+  t_target: 0.8
 
 
 
@@ -23,16 +31,11 @@ pnn:
   split: 3
   points: 1024
   stages: 0
-  dim: 36
+  dim: 24
   k: 6
   alpha: 1000
   beta: 100
 
-dataset:
-  dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
-  # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
-  names: [cylinder2d,doublegyre2d]
-  extension: nc
 
 
 # set the params to generate the point clouds
@@ -43,8 +46,8 @@ pcds:
   dt: 0.01 # flowline integration dt 
 
   max_iterations: 200 # time step
-  sampled_points_per_line: 2 # samples one the line
-  offset_scale: 0.1 # scale of grid interval
+  sampled_points_per_line: 4 # samples one the line
+  offset_dist: 0.01 # scale of grid interval
   num_cross_points_per_seeding: 5 
 
 

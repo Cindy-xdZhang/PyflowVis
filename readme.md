@@ -17,6 +17,7 @@ A simplified Python fluid visualization renderer and GUI based on imgui, possibl
 - **Coreline**: coreline (of 2D unsteady field) extraction based on q-crterion/jacobian/velocity critical points.
 - **Scalar Field**: Supports visualization of scalar fields (e.g., magnitude, vorticity) as color maps or overlays.
 - **FTLE**: Computes 2D FTLE using a CUDA kernel. To use this feature, ensure you have a working PyCUDA environment. You can first run [`TestPyCUDA.py`](misc/TestPyCUDA.py) to verify your setup.
+- **Field IO**: NetCDF loader for unsteady 2D/3D vector fields; ['Johns Hopkins Turbulence Databases'](https://turbulence.idies.jhu.edu/database) loader for turbelent flow.
 
 
 ### 3D Vector Field Visualization
@@ -165,7 +166,7 @@ This project is licensed under the Apache License, Version 2.0. See the
 If you use PyFlowVis, or its components (including the VortexTransformer and the 3D observer-space interaction algorithms), in your research, please cite one of the following :
 
 - Software:
-  Zhang, Xingdi. PyFlowVis (2024). DOI: not assigned. GitHub repository.
+  Zhang, Xingdi. PyFlowVis (2024). DOI:  10.5281/zenodo.17045687
 
 - Paper (VortexTransformer):
 ```bibtex

@@ -110,6 +110,8 @@ def compute_ivd_minus_mean_2D(vector_field, **kwargs):
     return ivd_minus_mean
 
 
+
+
 class ScalarField2D(IDiscreteField2D):
     def __init__(self, Xdim, Ydim, time_steps, domainMinBoundary=[-2.0,-2.0,0.0], domainMaxBoundary=[2.0,2.0,2.0], dtype=np.float32):
         """

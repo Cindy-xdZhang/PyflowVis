@@ -6,7 +6,7 @@ import netCDF4 as nc
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 from FLowUtils.VectorField3d import UnsteadyVectorField3D
 
-
+my_api_key="sa.edu.kaust.xingdi.zhang-8a20ecdf"
 
 dataset_meta={
     "channel":{
@@ -32,7 +32,8 @@ dataset_meta={
 
 class JHTDB_Lodader:
 
-    def __init__(self, auth_token: str = 'edu.jhu.pha.turbulence.testing-201406', output_path: str = './jhtdb_data'):
+    # def __init__(self, auth_token: str = 'edu.jhu.pha.turbulence.testing-201406', output_path: str = './jhtdb_data'):
+    def __init__(self, auth_token: str = my_api_key, output_path: str = './jhtdb_data'):
         """Initialize loader using givernylocal (no libJHTDB).
 
         Args:

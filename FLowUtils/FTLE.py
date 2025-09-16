@@ -126,5 +126,3 @@ def compute_FTLE_2D_field_CUDA(vector_field:UnsteadyVectorField2D, step_size:flo
     return result
 
 
-
-

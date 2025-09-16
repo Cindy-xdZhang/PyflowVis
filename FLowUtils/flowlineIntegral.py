@@ -511,6 +511,9 @@ def batch_pathlineCross_integration_2D_auto(points:np.ndarray,vectorfield:Unstea
     - CPU fallback computes per-line (slower).
     Return torch.Tensors (positions[M, S, 3], valid_steps[M]) consistent with CUDA version.
     """
+
+    maxSeedPerGpuCall = 102400
+
     use_cuda = Bind_Flowline_IntegrationBackend()
     # Expand seeds to cross (center, x±, y±)
     if points.size == 0:
@@ -521,10 +524,29 @@ def batch_pathlineCross_integration_2D_auto(points:np.ndarray,vectorfield:Unstea
 
     if use_cuda and method.lower() in ["rk4", "euler"]:
         try:
-            pos_np, val_np = batch_pathline_integration_2D_cuda(seeds, vectorfield, t_target, dt, max_steps, method)
+            total = seeds.shape[0]
+            if total <= maxSeedPerGpuCall:
+                pos_np, val_np = batch_pathline_integration_2D_cuda(seeds, vectorfield, t_target, dt, max_steps, method)
+            else:
+                # chunked CUDA calls
+                pos_chunks = []
+                val_chunks = []
+                for s0 in range(0, total, maxSeedPerGpuCall):
+                    s1 = min(total, s0 + maxSeedPerGpuCall)
+                    pos_part, val_part = batch_pathline_integration_2D_cuda(
+                        seeds[s0:s1], vectorfield, t_target, dt, max_steps, method
+                    )
+                    pos_chunks.append(pos_part)
+                    val_chunks.append(val_part)
+                pos_np = np.concatenate(pos_chunks, axis=0) if len(pos_chunks) > 1 else pos_chunks[0]
+                val_np = np.concatenate(val_chunks, axis=0) if len(val_chunks) > 1 else val_chunks[0]
             return torch.from_numpy(pos_np).float(), torch.from_numpy(val_np).to(torch.int32)
+            
         except Exception as e:
             print(f"[batch_pathline_integration_2D_auto] CUDA failed: {e}. Fallback to CPU.")
+
+
+
 
     # CPU fallback
     M = seeds.shape[0]

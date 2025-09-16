@@ -223,6 +223,37 @@ def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampl
 
 
 
+def generate_FTLE_SLICE(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:float,dt:float,maxIterations:int, resolutionUPsampling:float=1.0):
+    nerbors=5
+    offset_dist = float(cfg.pcds.offset_dist)
+    max_steps = int(cfg.pcds.max_iterations)
+    starts_xy,xs,ys=generate_seedingGrid_2D(vectorfield,resolutionUPsampling)
+    ny, nx = len(ys), len(xs)
+    grid_low=np.zeros((ny,nx),dtype=np.float32)
+    Pathline_b, PathlineLength_b = batch_pathlineCross_integration_2D_auto(
+                points=starts_xy,
+                vectorfield=vectorfield,
+                t_start=float(physcial_time), t_target=float(physcial_time+dt*maxIterations),
+                dt=float(dt), max_steps=int(max_steps),
+                offsets_size=float(offset_dist), method="rk4"
+            )
+    Pathline_g = Pathline_b.view(nx*ny, nerbors, max_steps, 3)
+    PathlineLength_g = PathlineLength_b.view(nx*ny, nerbors)
+    y_all=computeFTLEFromPathlineCrossPrimitive(Pathline_g, vectorfield_dt=vectorfield.timeInterval)
+
+    keep_groups_full = (PathlineLength_g == max_steps).all(dim=1)
+    true_grid = np.full((ny, nx), 0, dtype=np.float32)
+    linear_index=np.arange(nx*ny)
+    valid_index=linear_index[keep_groups_full]
+    rows=valid_index//nx
+    cols=valid_index%nx
+    true_grid[rows, cols] = y_all[valid_index].detach().cpu().numpy()
+    return true_grid,Pathline_g,nx,ny
+
+
+
+
+
 def generate_test_points(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:float,target_time:float, cacheSystem: bool = True):
     nerbors=int(cfg.pcds.num_cross_points_per_seeding)
     max_steps = int(cfg.pcds.max_iterations)
@@ -308,8 +339,45 @@ def preprocess_localization_normalization(points_grouped: torch.Tensor, sample_n
     #     x = normalizeLines(sample_nerbors=sample_nerbors, points=x, vectorfield=vectorfield)
     return x
 
+def visualize_twoftle_slices(true_grid: np.ndarray, pred_grid: np.ndarray, domainMinBoundary,domainMaxBoundary,  dpi: int = 300):
+    def robust_minmax(a):
+        if np.all(np.isnan(a)):
+            return 0.0, 1.0
+        vmin = np.nanpercentile(a, 2)
+        vmax = np.nanpercentile(a, 98)
+        if not np.isfinite(vmin): vmin = np.nanmin(a)
+        if not np.isfinite(vmax): vmax = np.nanmax(a)
+        if vmin == vmax:
+            vmax = vmin + 1e-6
+        return float(vmin), float(vmax)
 
-def visualize_ftle_slice(true_grid: np.ndarray, pred_grid: np.ndarray,psnr: float, vectorfield: UnsteadyVectorField2D,save_path: str | None = None,
+    xmin, ymin, _ = domainMinBoundary
+    xmax, ymax, _ = domainMaxBoundary
+    extent = [xmin, xmax, ymin, ymax]
+    vmin_t, vmax_t = robust_minmax(true_grid)
+    vmin=vmin_t
+    vmax=vmax_t
+
+    fig, axes = plt.subplots(2, 1, figsize=(4, 16), constrained_layout=True, dpi=dpi)
+    ims = []
+    ims.append(axes[0].imshow(true_grid, origin='lower', extent=extent, cmap='coolwarm', vmin=vmin, vmax=vmax, interpolation='bilinear'))
+    axes[0].set_title('FTLE A'); axes[0].set_xlabel('X'); axes[0].set_ylabel('Y'); axes[0].set_aspect('equal')
+    ims.append(axes[1].imshow(pred_grid, origin='lower', extent=extent, cmap='coolwarm', vmin=vmin, vmax=vmax, interpolation='bilinear'))
+    axes[1].set_title(f'FTLE B,'); axes[1].set_xlabel('X'); axes[1].set_ylabel('Y'); axes[1].set_aspect('equal')
+   
+
+    for ax, im in zip(axes, ims):
+        cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cb.formatter.set_powerlimits((0, 0))
+        cb.update_ticks()
+
+
+    plt.show(block=True)
+    plt.close(fig)
+
+
+
+def visualize_ftle_sliceComparison(true_grid: np.ndarray, pred_grid: np.ndarray, domainMinBoundary,domainMaxBoundary,psnr: float=0.0,save_path: str | None = None,
                          upscale_factor: int = 1, dpi: int = 300):
     # 公共显示范围（稳健地忽略极端值）
     def robust_minmax(a):
@@ -323,8 +391,8 @@ def visualize_ftle_slice(true_grid: np.ndarray, pred_grid: np.ndarray,psnr: floa
             vmax = vmin + 1e-6
         return float(vmin), float(vmax)
 
-    xmin, ymin, _ = vectorfield.domainMinBoundary
-    xmax, ymax, _ = vectorfield.domainMaxBoundary
+    xmin, ymin, _ = domainMinBoundary
+    xmax, ymax, _ = domainMaxBoundary
     extent = [xmin, xmax, ymin, ymax]
 
     vmin_t, vmax_t = robust_minmax(true_grid)
@@ -367,7 +435,11 @@ def visualize_ftle_slice(true_grid: np.ndarray, pred_grid: np.ndarray,psnr: floa
 
 
 
-def compute_metrics(true_grid:np.ndarray, pred_grid:np.ndarray):
+def compute_metrics(in_true_grid:np.ndarray, in_pred_grid:np.ndarray):
+
+    true_grid= in_true_grid.cpu().numpy()  if in_true_grid is torch.Tensor else in_true_grid 
+    pred_grid= in_pred_grid.cpu().numpy() if in_pred_grid is torch.Tensor else in_pred_grid 
+
     y_global_max = true_grid.max()
     y_global_min = true_grid.min()
     mse = np.mean((true_grid - pred_grid) ** 2)
@@ -471,7 +543,7 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
         mse, mae, maxe, psnr = compute_metrics(true_grid, pred_grid)
         # 可视化 2D 切片
         if visualize:
-            visualize_ftle_slice(true_grid, pred_grid,psnr, vectorfield)
+            visualize_ftle_sliceComparison(true_grid, pred_grid, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary,psnr)
 
         return {
             "mse": mse,
@@ -615,25 +687,29 @@ class PointWiseFTLETrainDataset(Dataset):
 class FTLEUpsamplingTrainDataset(Dataset):
     def __init__(self,   config, useCacheSystem: bool = True):
         UnsteadyVectorFields=[]
-        ftle_resolutionUPsampling=float(config.FTLE_resolutionUPsampling)
+        ftle_resolutionUPsampling=float(config.dataset.UPsampling)
         all_vectorfieldsname=[name for name in config.dataset.names]
         all_vectorfieldsname_str=",".join(all_vectorfieldsname)
-        timesliceCount=config.ftle.timesliceCount
-        UPsampling=config.ftle.UPsampling
-        low_res_grid_sampling=float(config.ftle.low_res_grid_sampling)
+        timesliceCount=config.dataset.timesliceCount
+        UPsampling=config.dataset.UPsampling
+        low_res_grid_sampling=float(config.dataset.low_res_grid_sampling)
         max_steps: int=config.pcds.max_iterations
         flowline_dt: float=config.pcds.dt
-        offset_dist: float =config.pcds.offset_scale
-        localized: bool =bool(config.pcds.localized)
-        normalized: bool =bool(config.pcds.normalized)
-
+        offset_dist: float =float(config.pcds.offset_dist)
+        time_window_start_ratio=float(config.dataset.t_start)
+        time_window_target_ratio=float(config.dataset.t_target)
+        LstepsPerline=int(config.pcds.sampled_points_per_line)
+        localized=bool(config.pcds.localized)
+        LoadCacheSuccess=False
+       
         if useCacheSystem:
-            # 更新key_str，包含更多与上采样相关的关键信息
             key_str = (
                 f"ftle_upsampling|vectorfields={all_vectorfieldsname_str}|"
                 f"timesliceCount={timesliceCount}|UPsampling={UPsampling}|"
                 f"lowResGridIntervalScale={low_res_grid_sampling}|"
-                f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|localized={localized}|normalized={normalized}"
+                f"time_window_start_ratio={time_window_start_ratio}|time_window_target_ratio={time_window_target_ratio}|"
+                f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|"
+                f"LstepsPerline={LstepsPerline}|localized={localized}"
             )
             tag = "FTLEUpsamplingTrainingDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
             cache_dir = os.path.join("./outputs", "temp")
@@ -643,67 +719,95 @@ class FTLEUpsamplingTrainDataset(Dataset):
             if os.path.exists(cache_path):
                 try:
                     data = np.load(cache_path)
-                    P_np = data["P"]
-                    V_np = data["V"]
-                    self.points = torch.from_numpy(P_np).float()
-                    self.labels = torch.from_numpy(V_np).to(torch.int32)
-                    return
+                    data_np = data["Data"]
+                    labels_np = data["Labels"]
+                    lowResPathlines_np = data["LowResPathlines"]
+                    self.lowResFTLE = torch.from_numpy(data_np).float()
+                    self.lowResPathlines = torch.from_numpy(lowResPathlines_np).float()
+                    self.labels = torch.from_numpy(labels_np).float()
+                    LoadCacheSuccess=True
                 except Exception as e:
                     print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
                          
-        
-
 
         netCDF = NetCDFLoader()
         FTLE_fieldsLowRes=[]
         FTLE_fieldsHighRes=[]
+        lowResPathlinesData=[]
         for name in config.dataset.names:
             vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"
             UnsteadyVectorFields.append(netCDF.load_vector_field2d(vectorfield_datapath))
-    
-        for vectorfield in UnsteadyVectorFields:
-            timeslice=np.linspace(vectorfield.tmin, vectorfield.tmax, timesliceCount)
-            for time_slice in timeslice:
+        config['test_vectorfield']=UnsteadyVectorFields[-1]
 
-                low_res_starts_xy,low_res_xs,low_res_ys=generate_seedingGrid_2D(vectorfield,low_res_grid_sampling)
-                low_res_flowMap=batch_pathlineCross_integration_2D_auto(low_res_starts_xy,vectorfield,time_slice,time_slice+flowline_dt*max_steps,flowline_dt,max_steps,offset_dist)
-                high_res_starts_xy,high_res_xs,high_res_ys=generate_seedingGrid_2D(vectorfield,UPsampling)
-                high_res_flowMap=batch_pathlineCross_integration_2D_auto(high_res_starts_xy,vectorfield,time_slice,time_slice+flowline_dt*max_steps,flowline_dt,max_steps,offset_dist)
-                low_res_FTLE_field=computeFTLEFromPathlineCrossPrimitive(low_res_flowMap)
-                high_res_FTLE_field=computeFTLEFromPathlineCrossPrimitive(high_res_flowMap)
-                FTLE_fieldsLowRes.append((low_res_FTLE_field,low_res_starts_xy,low_res_xs,low_res_ys))
-                FTLE_fieldsHighRes.append(high_res_FTLE_field)
+        if not LoadCacheSuccess:
+            for vectorfield in UnsteadyVectorFields:
+                time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+                time_window_target = float(time_window_target_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+                timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
+                for time_slice in timeslice:
 
-        self.points = FTLE_fieldsLowRes   
-        self.labels = FTLE_fieldsHighRes       
+                    # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
+                    low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,low_res_grid_sampling)  
+
+
+                    high_res_sampling=UPsampling*low_res_grid_sampling
+                    high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,high_res_sampling)
+                    # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
+                    temporal_sampled_P_all=temporal_downsamplePathlineCrossPrimitive(lowResPathlines, int(LstepsPerline))
+                
+                    lowResPathlinesPreprocessed=preprocess_localization_normalization(temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False ).cpu().float()
+
+                    FTLE_fieldsLowRes.append(torch.from_numpy(low_resFTLE_field))
+                    FTLE_fieldsHighRes.append(torch.from_numpy(high_resFTLE_field))
+                    lowResPathlinesData.append(lowResPathlinesPreprocessed)
+            
+            self.lowResFTLE = torch.stack(FTLE_fieldsLowRes)  # [(grid_low, xs_low, ys_low), ...]
+            self.lowResPathlines = torch.stack(lowResPathlinesData)#[nx*ny, nerbors, max_steps, 3]
+            self.labels = torch.stack(FTLE_fieldsHighRes)  # [(grid_hi, xs_hi, ys_hi), ...]
 
         if useCacheSystem:
             try:
-                # 使用同样的 tag 构造路径（若前面加载失败，需重新构造）
-                dom_min = tuple(map(float, vectorfield.domainMinBoundary))
-                dom_max = tuple(map(float, vectorfield.domainMaxBoundary))
+                # use the same tag to construct the path (if the previous load failed, need to reconstruct)
                 key_str = (
                 f"ftle_upsampling|vectorfields={all_vectorfieldsname_str}|"
                 f"timesliceCount={timesliceCount}|UPsampling={UPsampling}|"
                 f"lowResGridIntervalScale={low_res_grid_sampling}|"
-                f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|localized={localized}|normalized={normalized}"
+                f"time_window_start_ratio={time_window_start_ratio}|time_window_target_ratio={time_window_target_ratio}|"
+                f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|"
+                f"LstepsPerline={LstepsPerline}|localized={localized}"
                 )
                 tag = "FTLEUpsamplingTrainingDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
                 cache_dir = os.path.join("outputs", "temp")
                 os.makedirs(cache_dir, exist_ok=True)
                 cache_path = os.path.join(cache_dir, f"{tag}.npz")
                 np.savez(cache_path,
-                        P=self.points.detach().cpu().numpy().astype(np.float32),
-                        V=self.labels.detach().cpu().numpy().astype(np.int32),
+                        Data=self.lowResFTLE.detach().cpu().numpy().astype(np.float32),
+                        Labels=self.labels.detach().cpu().numpy().astype(np.float32),
+                        LowResPathlines=self.lowResPathlines.detach().cpu().numpy().astype(np.float32),
                         meta=key_str)
             except Exception as e:
                 print(f"[generate_training_samples] cache save failed: {e}")
 
+
+          #normalize the ftle
+       
+        #normalize the ftle
+        self.ftle_min = float(self.labels.min())
+        self.ftle_max = float(self.labels.max())
+        self.lowResFTLE = self.lowResFTLE.clamp(self.ftle_min, self.ftle_max)
+        self.lowResFTLE = (self.lowResFTLE-self.ftle_min)/(self.ftle_max-self.ftle_min)
+        normalized_y=(self.labels-self.ftle_min)/(self.ftle_max-self.ftle_min)
+        normalized_y=normalized_y.clamp(0,1)
+        self.labels = normalized_y       # [N]
+
+
+
+
     def __len__(self):
-        return self.points.shape[0]
+        return len(self.lowResFTLE)
 
     def __getitem__(self, idx):
-        return self.points[idx], self.labels[idx]
+        return (self.lowResFTLE[idx], self.lowResPathlines[idx]), self.labels[idx]
 
 
 # Torch Dataset for training samples generated on-the-fly via generate_training_samples
