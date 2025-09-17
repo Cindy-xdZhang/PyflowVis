@@ -121,8 +121,141 @@ def compute_FTLE_2D_field_CUDA(vector_field:UnsteadyVectorField2D, step_size:flo
         print(f"Computing FTLE at time {time_slice},progress {time_slice/time_list[-1]*100}%...")
         resultSlice.append(compute_FTLE_2D_CUDA_oneSlice(vector_field, time_slice, step_size, max_iteration,upSampling))
 
-    result= ScalarField2D(vector_field.Xdim*upSampling, vector_field.Ydim*upSampling, len(time_list), vector_field.domainMinBoundary, vector_field.domainMaxBoundary)
+    result= ScalarField2D(int(vector_field.Xdim*upSampling), int(vector_field.Ydim*upSampling), len(time_list), vector_field.domainMinBoundary, vector_field.domainMaxBoundary)
     result.set_discrete_data(resultSlice)
     return result
 
 
+# extract ftle ridge and valley as mask (1: ridge, -1: valley, 0: background)
+def ridge_extraction(FTLE_field: ScalarField2D,
+                     grad_tol_ratio: float = 0.02,
+                     curv_percentile: float = 70.0,
+                     grad_min_percentile: float = 30.0,
+                     nms_offset_px: float = 1.0) -> np.ndarray:
+    """
+    Extract LCS ridges (maxima) and valleys (minima) from an FTLE scalar field using
+    gradient–Hessian ridge criteria on each time slice.
+
+    For 2D slice s(y,x):
+      - Compute gradient g and Hessian H
+      - Eigendecompose H → (λ_min, v_min), (λ_max, v_max)
+      - Ridge condition (maximal): v_min^T g ≈ 0 and λ_min < 0 and s is local max along v_min
+      - Valley condition (minimal): v_max^T g ≈ 0 and λ_max > 0 and s is local min along v_max
+
+    Args:
+      FTLE_field: ScalarField2D with data shape (T, Y, X)
+      grad_tol_ratio: tolerance factor for |v^T g| relative to median |g|
+      curv_percentile: percentile threshold on |λ| to reject weak curvature noise
+
+    Returns:
+      mask: np.ndarray (T, Y, X) with values {1: ridge, -1: valley, 0: none}
+    """
+    data = FTLE_field.getDataAsNumpy().astype(np.float32)  # (T, Y, X)
+    T, Y, X = data.shape
+    xmin, ymin, _ = FTLE_field.domainMinBoundary
+    xmax, ymax, _ = FTLE_field.domainMaxBoundary
+    dx = (xmax - xmin) / max(1, (X - 1))
+    dy = (ymax - ymin) / max(1, (Y - 1))
+    dx = float(dx if np.isfinite(dx) and dx > 0 else 1.0)
+    dy = float(dy if np.isfinite(dy) and dy > 0 else 1.0)
+
+    out = np.zeros((T, Y, X), dtype=np.int8)
+
+    def bilinear_sample(img: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+        H, W = img.shape
+        x0 = np.floor(xs).astype(np.int32)
+        y0 = np.floor(ys).astype(np.int32)
+        x1 = np.clip(x0 + 1, 0, W - 1)
+        y1 = np.clip(y0 + 1, 0, H - 1)
+        x0 = np.clip(x0, 0, W - 1)
+        y0 = np.clip(y0, 0, H - 1)
+        wx = xs - x0
+        wy = ys - y0
+        v00 = img[y0, x0]
+        v10 = img[y0, x1]
+        v01 = img[y1, x0]
+        v11 = img[y1, x1]
+        v0 = v00 * (1.0 - wx) + v10 * wx
+        v1 = v01 * (1.0 - wx) + v11 * wx
+        return v0 * (1.0 - wy) + v1 * wy
+
+    for t in range(T):
+        s = data[t]
+        # First derivatives
+        gy, gx = np.gradient(s, dy, dx)  # gy: d/dy, gx: d/dx
+        # Second derivatives
+        dyy, dyx = np.gradient(gy, dy, dx)
+        dxy, dxx = np.gradient(gx, dy, dx)
+        # Symmetrize H
+        dxy = 0.5 * (dxy + dyx)
+
+        # Gradient magnitude and tolerance
+        gmag = np.sqrt(gx * gx + gy * gy)
+        med_g = np.median(gmag)
+        tol = float(grad_tol_ratio) * float(med_g + 1e-12)
+        gmin = np.percentile(gmag, grad_min_percentile)
+
+        # Eigen decomposition for 2x2 symmetric Hessian via closed form
+        trace = dxx + dyy
+        det = dxx * dyy - dxy * dxy
+        disc = np.maximum(trace * trace * 0.25 - det, 0.0)
+        root = np.sqrt(disc)
+        lam_min = trace * 0.5 - root
+        lam_max = trace * 0.5 + root
+
+        # Eigenvectors (avoid degeneracy): for λ use vector (dxy, λ - dxx)
+        # min eigenvector
+        vmx = dxy
+        vmy = lam_min - dxx
+        nrm = np.sqrt(vmx * vmx + vmy * vmy) + 1e-20
+        vmx /= nrm; vmy /= nrm
+        # max eigenvector
+        vMx = dxy
+        vMy = lam_max - dxx
+        nrmM = np.sqrt(vMx * vMx + vMy * vMy) + 1e-20
+        vMx /= nrmM; vMy /= nrmM
+
+        # Projection of gradient onto eigenvectors
+        proj_min = vmx * gx + vmy * gy
+        proj_max = vMx * gx + vMy * gy
+
+        # Curvature strength thresholds (percentile of absolute lambda)
+        lam_min_abs = np.abs(lam_min)
+        lam_max_abs = np.abs(lam_max)
+        th_min = np.percentile(lam_min_abs, curv_percentile)
+        th_max = np.percentile(lam_max_abs, curv_percentile)
+
+        # Candidate ridge/valley with stronger constraints
+        ridge_cand = (np.abs(proj_min) <= tol) & (lam_min < -1e-12) & (lam_min_abs >= th_min) & (gmag >= gmin)
+        valley_cand = (np.abs(proj_max) <= tol) & (lam_max > +1e-12) & (lam_max_abs >= th_max) & (gmag >= gmin)
+
+        # Directional NMS along eigen directions using sub-pixel bilinear sampling (±nms_offset_px)
+        yy, xx = np.meshgrid(np.arange(Y, dtype=np.float32), np.arange(X, dtype=np.float32), indexing='ij')
+        # ridge: compare along v_min (normal)
+        xn_p = xx + vmx * nms_offset_px
+        yn_p = yy + vmy * nms_offset_px
+        xn_m = xx - vmx * nms_offset_px
+        yn_m = yy - vmy * nms_offset_px
+        sp = bilinear_sample(s, xn_p, yn_p)
+        sm = bilinear_sample(s, xn_m, yn_m)
+        ridge_keep = (s >= sp) & (s >= sm)
+        # valley: compare along v_max (normal to valley)
+        xv_p = xx + vMx * nms_offset_px
+        yv_p = yy + vMy * nms_offset_px
+        xv_m = xx - vMx * nms_offset_px
+        yv_m = yy - vMy * nms_offset_px
+        spv = bilinear_sample(s, xv_p, yv_p)
+        smv = bilinear_sample(s, xv_m, yv_m)
+        valley_keep = (s <= spv) & (s <= smv)
+
+
+        ridge = ridge_cand & ridge_keep
+        valley = valley_cand & valley_keep
+
+        # Write to output (-1 for valley, 1 for ridge; ridge takes precedence if overlap)
+        mask = np.zeros((Y, X), dtype=np.int8)
+        mask[valley] = -1
+        mask[ridge] = 1
+        out[t] = mask
+
+    return out

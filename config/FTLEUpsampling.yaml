@@ -1,10 +1,10 @@
 seed: 7068
-epochs: 42
+epochs: 100
 train_points_count: 72000
-bs: 12
+batch_size: 72
 print_freq: 200
 
-lr: 0.00008
+lr: 0.0001
 optimizer:
   NAME: 'adamw'
   weight_decay: 0.000001
@@ -12,18 +12,25 @@ optimizer:
 loss:
   NAME: MSELoss
 
+model:
+  # NAME: UpsamplingUnetModel
+  # NAME: FTLEUpsamplingFMT_Unet
+  NAME: FTLEUpsamplingFMT_Vit
 
 dataset:
-  timesliceCount: 400
+  timesliceCount: 10 # total data set is    NumberOfVectorFields*timesliceCount* (VectorFieldGridRes//PatchSize)   
+
   low_res_grid_sampling: 0.5 #low resolution ftle's grid =vectorfield.grid*low_res_grid_sampling 
   UPsampling: 4 # must be integer
 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
-  names: [cylinder2d]
+  names: [cylinder2d,doublegyre2d,beads2d,rfc2d]
   extension: nc
   t_start: 0.2 #% for the whole time
   t_target: 0.8
+  patchSize: 32
+  patchStride: 2
 
 
 
@@ -58,3 +65,5 @@ pcds:
   start_points: [[0.0,0.0]]
   bbox: [[2.5,0.5],[5.5,1.5]] # [[xmin1,ymin1] [xmax1,ymax1],[xmin2,ymin2],[xmax2,ymax2]]
 
+wandb: False 
+test_tasks: test_UpsamplingModel

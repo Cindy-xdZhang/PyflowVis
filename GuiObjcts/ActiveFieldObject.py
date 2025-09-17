@@ -31,18 +31,17 @@ class ActiveField(Object):
         super().__init__("ActiveField")
         self.pause=True
 
-        def dirtyCallBack(obj:ActiveField) -> None:
+        def timedirtyCallBack(obj:ActiveField) -> None:
             vectorGlyph=obj.parentScene.getObject("vectorGlyph")
             if vectorGlyph is not None:
                 vectorGlyph.dirty=True
             flowlineOBj=obj.parentScene.getObject("flowline")
-            if flowlineOBj is not None and flowlineOBj.getValue("pathline_active"):
-                flowlineOBj.pathline_dirty=True
+          
             if flowlineOBj is not None and flowlineOBj.getValue("streamline_active"):
                 flowlineOBj.streamline_dirty=True
 
         def updateActivefieldcb(obj:ActiveField) -> None:
-            dirtyCallBack(obj)
+            timedirtyCallBack(obj)
             activeField=obj.getActiveField()
             if activeField is not None:
                 animationSpeed=0.5*activeField.timeInterval
@@ -55,7 +54,7 @@ class ActiveField(Object):
 
     
 
-        self.create_variable_callback_with_gui_customization("time",0.0,dirtyCallBack,False, {'widget': 'input'})
+        self.create_variable_callback_with_gui_customization("time",0.0,timedirtyCallBack,False, {'widget': 'input'})
         self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
         #list of str is treated specially  as option in my gui implementation, don't need to specify customization, it always render as combo box
         self.create_variable_callback_with_gui_customization("active field",[],updateActivefieldcb,False)
@@ -79,7 +78,19 @@ class ActiveField(Object):
             resultScalarFieldSlice=compute_FTLE_2D_field_CUDA(vector_field, FTLE_dt, MaxIter,upSampling,timeUps)
             FTLE_param_str=f"_dt{_format_float(FTLE_dt)}_MaxIter{MaxIter}_upSampling{_format_float(upSampling)}_timeUps{_format_float(timeUps)}"
 
-            actFieldWidget.insertScalarField(activeFieldName +FTLE_param_str,resultScalarFieldSlice)      
+            actFieldWidget.insertScalarField(activeFieldName +FTLE_param_str,resultScalarFieldSlice)     
+
+            ridge_mask=ridge_extraction(resultScalarFieldSlice)
+            # get meta information from ridge mask
+            RidgeMask_grid_size=ridge_mask.shape#shape is (T,Y,X)
+            RidgeMask_domainMinBoundary=vector_field.domainMinBoundary
+            RidgeMask_domainMaxBoundary=vector_field.domainMaxBoundary
+
+            ridge_maskField=ScalarField2D(RidgeMask_grid_size[2], RidgeMask_grid_size[1], RidgeMask_grid_size[0], RidgeMask_domainMinBoundary, RidgeMask_domainMaxBoundary)
+            ridge_maskField.set_discrete_data(ridge_mask)
+            actFieldWidget.insertScalarField(activeFieldName +FTLE_param_str+"_ridge",ridge_maskField)
+
+
 
         self.addAction("FTLE_2D_CUDA", FTLE_2D_CUDA_action)
 

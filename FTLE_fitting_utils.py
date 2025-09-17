@@ -217,6 +217,10 @@ def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampl
     xs = np.linspace(xmin_grid, xmax_grid, num_x, dtype=np.float32)
     ys = np.linspace(ymin_grid, ymax_grid, num_y, dtype=np.float32)
 
+    #np.meshgrid(xs, ys) uses indexing='xy' by default, 
+    # so both XX and YY have shapes (ny, nx). 
+    # After flattening by C-order, the rows and columns of linear index i are row=i//nx and col=i%nx,
+    #  with X changing rapidly in the column direction and Y changing slowly in the row direction.
     XX, YY = np.meshgrid(xs, ys)
     starts_xy = np.stack([XX.reshape(-1), YY.reshape(-1)], axis=1)
     return starts_xy,xs,ys
@@ -376,6 +380,63 @@ def visualize_twoftle_slices(true_grid: np.ndarray, pred_grid: np.ndarray, domai
     plt.close(fig)
 
 
+def visualize_FTLEUpampling(true_grid: np.ndarray, pred_grid: np.ndarray,low_res_grid: np.ndarray, domainMinBoundary,domainMaxBoundary,save_path: str | None = None,
+                         upscale_factor: int = 1, dpi: int = 300):
+    def robust_minmax(a):
+        if np.all(np.isnan(a)):
+            return 0.0, 1.0
+        vmin = np.nanpercentile(a, 2)
+        vmax = np.nanpercentile(a, 98)
+        if not np.isfinite(vmin): vmin = np.nanmin(a)
+        if not np.isfinite(vmax): vmax = np.nanmax(a)
+        if vmin == vmax:
+            vmax = vmin + 1e-6
+        return float(vmin), float(vmax)
+
+    # extent from physical domain
+    xmin, ymin, _ = domainMinBoundary
+    xmax, ymax, _ = domainMaxBoundary
+    extent = [xmin, xmax, ymin, ymax]
+
+    # display range from true high-res
+    vmin, vmax = robust_minmax(true_grid)
+
+    # bilinear upsample low-res to high-res size
+    Hh, Wh = int(true_grid.shape[0]), int(true_grid.shape[1])
+    with torch.no_grad():
+        lr = torch.from_numpy(low_res_grid)[None, None, ...].float()
+        lr_up = torch.nn.functional.interpolate(lr, size=(Hh, Wh), mode='bilinear', align_corners=False)[0, 0]
+        bilinear_grid = lr_up.cpu().numpy()
+
+    # PSNRs
+    _, _, _, psnr_pred = compute_metrics(true_grid, pred_grid)
+    _, _, _, psnr_bilin = compute_metrics(true_grid, bilinear_grid)
+
+    # plot 2x2 without colorbars
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8), constrained_layout=True, dpi=dpi)
+    ax00, ax01 = axes[0]
+    ax10, ax11 = axes[1]
+
+    im0 = ax00.imshow(true_grid, origin='lower', extent=extent, cmap='coolwarm', vmin=vmin, vmax=vmax, interpolation='bilinear')
+    ax00.set_title('HighRes (GT)')
+    ax00.set_xlabel('X'); ax00.set_ylabel('Y'); ax00.set_aspect('equal')
+
+    im1 = ax01.imshow(pred_grid, origin='lower', extent=extent, cmap='coolwarm', vmin=vmin, vmax=vmax, interpolation='bilinear')
+    ax01.set_title(f'Predict, PSNR={psnr_pred:.2f} dB')
+    ax01.set_xlabel('X'); ax01.set_ylabel('Y'); ax01.set_aspect('equal')
+
+    im2 = ax10.imshow(low_res_grid, origin='lower', extent=extent, cmap='coolwarm', interpolation='nearest')
+    ax10.set_title('LowRes')
+    ax10.set_xlabel('X'); ax10.set_ylabel('Y'); ax10.set_aspect('equal')
+
+    im3 = ax11.imshow(bilinear_grid, origin='lower', extent=extent, cmap='coolwarm', vmin=vmin, vmax=vmax, interpolation='bilinear')
+    ax11.set_title(f'Bilinear, PSNR={psnr_bilin:.2f} dB')
+    ax11.set_xlabel('X'); ax11.set_ylabel('Y'); ax11.set_aspect('equal')
+
+    if save_path is not None:
+        plt.savefig(save_path, dpi=200)
+    plt.show(block=True)
+    plt.close(fig)
 
 def visualize_ftle_sliceComparison(true_grid: np.ndarray, pred_grid: np.ndarray, domainMinBoundary,domainMaxBoundary,psnr: float=0.0,save_path: str | None = None,
                          upscale_factor: int = 1, dpi: int = 300):
@@ -558,7 +619,6 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
     netCDF = NetCDFLoader()
     UnsteadyVectorFields=[]
     for name in config.dataset.names:
-        vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"
         if name == "beads2d":
             UnsteadyVectorFields.append(beadsFLow([64,64],32))
         elif name == "doublegyre2d":
@@ -567,6 +627,7 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
             UnsteadyVectorFields.append(rotation_four_center([64,64],32))
         else:
             try:
+                vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"
                 UnsteadyVectorFields.append(netCDF.load_vector_field2d(vectorfield_datapath))
             except Exception as e:
                 print(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {name} failed: {e}. Skip this field.")
@@ -700,8 +761,21 @@ class FTLEUpsamplingTrainDataset(Dataset):
         time_window_target_ratio=float(config.dataset.t_target)
         LstepsPerline=int(config.pcds.sampled_points_per_line)
         localized=bool(config.pcds.localized)
+        patch_size=int(getattr(config.dataset, 'patchSize', 32))
+        patch_stride=int(getattr(config.dataset, 'patchStride', 2))
         LoadCacheSuccess=False
        
+        # helper: compute starts so that last window touches boundary (may overlap previous)
+        def _tiling_starts(length: int, k: int, stride: int) -> list[int]:
+            if k >= length:
+                return [0]
+            s = max(1, int(stride))
+            starts = list(range(0, length - k + 1, s))
+            last = length - k
+            if starts[-1] != last:
+                starts.append(last)
+            return starts
+
         if useCacheSystem:
             key_str = (
                 f"ftle_upsampling|vectorfields={all_vectorfieldsname_str}|"
@@ -709,7 +783,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
                 f"lowResGridIntervalScale={low_res_grid_sampling}|"
                 f"time_window_start_ratio={time_window_start_ratio}|time_window_target_ratio={time_window_target_ratio}|"
                 f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|"
-                f"LstepsPerline={LstepsPerline}|localized={localized}"
+                f"LstepsPerline={LstepsPerline}|localized={localized}|patchSize={patch_size}|patchStride={patch_stride}"
             )
             tag = "FTLEUpsamplingTrainingDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
             cache_dir = os.path.join("./outputs", "temp")
@@ -730,14 +804,11 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
                          
 
-        netCDF = NetCDFLoader()
-        FTLE_fieldsLowRes=[]
-        FTLE_fieldsHighRes=[]
-        lowResPathlinesData=[]
-        for name in config.dataset.names:
-            vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"
-            UnsteadyVectorFields.append(netCDF.load_vector_field2d(vectorfield_datapath))
-        config['test_vectorfield']=UnsteadyVectorFields[-1]
+        UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config)
+        FTLE_fieldsLowRes=[]      # list[Tensor patch_yx]
+        FTLE_fieldsHighRes=[]     # list[Tensor patch_yx (hi)]
+        lowResPathlinesData=[]    # list[Tensor (patch_hw groups, nerbors, L, 3)]
+        # itemMap2VectorField=[]
 
         if not LoadCacheSuccess:
             for vectorfield in UnsteadyVectorFields:
@@ -748,22 +819,64 @@ class FTLEUpsamplingTrainDataset(Dataset):
 
                     # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
                     low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,low_res_grid_sampling)  
-
-
                     high_res_sampling=UPsampling*low_res_grid_sampling
                     high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,high_res_sampling)
                     # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
                     temporal_sampled_P_all=temporal_downsamplePathlineCrossPrimitive(lowResPathlines, int(LstepsPerline))
-                
                     lowResPathlinesPreprocessed=preprocess_localization_normalization(temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False ).cpu().float()
 
-                    FTLE_fieldsLowRes.append(torch.from_numpy(low_resFTLE_field))
-                    FTLE_fieldsHighRes.append(torch.from_numpy(high_resFTLE_field))
-                    lowResPathlinesData.append(lowResPathlinesPreprocessed)
-            
-            self.lowResFTLE = torch.stack(FTLE_fieldsLowRes)  # [(grid_low, xs_low, ys_low), ...]
-            self.lowResPathlines = torch.stack(lowResPathlinesData)#[nx*ny, nerbors, max_steps, 3]
-            self.labels = torch.stack(FTLE_fieldsHighRes)  # [(grid_hi, xs_hi, ys_hi), ...]
+                    # sliding window tiling into patches that fully cover the 2D plane
+                    ny_low, nx_low = low_resFTLE_field.shape
+                    ny_hi, nx_hi = high_resFTLE_field.shape
+                    ry = float(ny_hi) / float(max(1, ny_low))
+                    rx = float(nx_hi) / float(max(1, nx_low))
+
+                    row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
+                    col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
+
+                    for i0 in row_starts:
+                        i1 = i0 + patch_size
+                        for j0 in col_starts:
+                            j1 = j0 + patch_size
+
+                            # map to high-res indices (align last window to boundary)
+                            hi_h = max(1, int(round((i1 - i0) * ry)))
+                            hi_w = max(1, int(round((j1 - j0) * rx)))
+                            hi_i0 = int(round(i0 * ry))
+                            hi_j0 = int(round(j0 * rx))
+                            if i0 == row_starts[-1]:
+                                hi_i0 = ny_hi - hi_h
+                            if j0 == col_starts[-1]:
+                                hi_j0 = nx_hi - hi_w
+                            hi_i1 = hi_i0 + hi_h
+                            hi_j1 = hi_j0 + hi_w
+
+                            # low-res FTLE patch
+                            lr_patch = torch.from_numpy(low_resFTLE_field[i0:i1, j0:j1]).float()
+
+                            # high-res FTLE patch
+                            hr_patch = torch.from_numpy(high_resFTLE_field[hi_i0:hi_i1, hi_j0:hi_j1]).float()
+
+                            # pathlines patch: select groups that fall inside the low-res window
+                            idx_list = []
+                            for rr in range(i0, i1):
+                                base = rr * nx_low
+                                for cc in range(j0, j1):
+                                    idx_list.append(base + cc)
+                            if len(idx_list) == 0:
+                                continue
+                            idx_tensor = torch.as_tensor(idx_list, dtype=torch.long)
+                            pl_patch = lowResPathlinesPreprocessed[idx_tensor]
+
+                            FTLE_fieldsLowRes.append(lr_patch)
+                            FTLE_fieldsHighRes.append(hr_patch)
+                            lowResPathlinesData.append(pl_patch)
+                            # itemMap2VectorField.append(vectorfield)
+
+
+            self.lowResFTLE = torch.stack(FTLE_fieldsLowRes)
+            self.lowResPathlines = torch.stack(lowResPathlinesData)
+            self.labels = torch.stack(FTLE_fieldsHighRes)
 
         if useCacheSystem:
             try:
@@ -774,7 +887,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
                 f"lowResGridIntervalScale={low_res_grid_sampling}|"
                 f"time_window_start_ratio={time_window_start_ratio}|time_window_target_ratio={time_window_target_ratio}|"
                 f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|"
-                f"LstepsPerline={LstepsPerline}|localized={localized}"
+                f"LstepsPerline={LstepsPerline}|localized={localized}|patchSize={patch_size}|patchStride={patch_stride}"
                 )
                 tag = "FTLEUpsamplingTrainingDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
                 cache_dir = os.path.join("outputs", "temp")

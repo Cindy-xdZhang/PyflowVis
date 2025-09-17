@@ -41,7 +41,7 @@ def collectPyFilesOfAFolder(saveFolder):
     fileList=[os.path.join( saveFolder,f)  for f in os.listdir(saveFolder) if f.endswith(".py") and "__init__" not in f ]            
     return fileList
 
-def CollectFiles4Backup(config,arti_code):
+def CollectFiles4Backup(config,arti_code,local_store=True):
     if "run_name" in  config:
         run_name=getattr(config,"run_name")         
         fileList=[]    
@@ -56,15 +56,17 @@ def CollectFiles4Backup(config,arti_code):
         backup_folder= os.path.join(backup_folder,run_name)
         
         print(f"backup Files {fileList} to:{backup_folder}.." )
-        # Create backup folder if it doesn't exist
-        if not os.path.exists(backup_folder):
-            os.makedirs(backup_folder)
 
-        # Copy the collected files to the backup folder
-        for file in fileList:
-            if file and os.path.exists(file):
-                shutil.copy(file, backup_folder)
-                print(f"Copied {file} to {backup_folder}")
+        if local_store:
+            # Create backup folder if it doesn't exist
+            if not os.path.exists(backup_folder):
+                os.makedirs(backup_folder)
+
+            # Copy the collected files to the backup folder
+            for file in fileList:
+                if file and os.path.exists(file):
+                    shutil.copy(file, backup_folder)
+                    print(f"Copied {file} to {backup_folder}")
                 
         if config["wandb"]:
             for file in fileList:
@@ -190,6 +192,8 @@ def get_git_commit_id():
     except subprocess.CalledProcessError:
         return "Not a git repository"
     
+
+
 # Function to parse command line arguments and update config
 def argParseAndPrepareConfig():
     parser = argparse.ArgumentParser(description="Train pipeline parameters")
@@ -202,6 +206,7 @@ def argParseAndPrepareConfig():
     parser.add_argument("--num_workers", type=int, help="Number of data loading workers")
     parser.add_argument("--data_dir", type=str, default=None,help="path to the dataset")
     parser.add_argument("--model_path", type=str, default=None,help="path to the model")
+    parser.add_argument("--model_name", type=str, default=None,help="name of the model")
     
     args = parser.parse_args()
     cfg = EasyConfig()
@@ -224,6 +229,8 @@ def argParseAndPrepareConfig():
         cfg['dataset']['data_dir'] = args.data_dir
     if args.model_path is not None:
         cfg['model_path'] = args.model_path
+    if args.model_name is not None:
+        cfg['model']['NAME'] = args.model_name
 
     if 'random_seed' not in cfg:
         cfg['random_seed']=np.random.randint(0,5000)

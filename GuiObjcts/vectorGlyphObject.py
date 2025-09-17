@@ -416,7 +416,7 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         # Get parameters
         radius = self.getValue("radius")
         height = self.getValue("height")
-        segments = 3
+        segments = 6
         scale = self.getValue("scale")
         sampling_distance = max(self.getValue("sampling"), 0.0001)
         

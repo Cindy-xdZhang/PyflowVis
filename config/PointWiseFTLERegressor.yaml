@@ -2,7 +2,7 @@ seed: 9061
 epochs: 80
 train_points_count: 6000 #number of points of every 2D slice for training
 time_slice: 10
-bs: 256
+batch_size: 256
 print_freq: 400
 lr: 0.0001
 

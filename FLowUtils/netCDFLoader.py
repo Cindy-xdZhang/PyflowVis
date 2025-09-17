@@ -261,3 +261,80 @@ class NetCDFLoader:
 
         return vector_field
 
+
+class AmiraLoader:
+    """
+    Special loader for Amira Mesh 2.1 (*.am) unsteady 2D vector fields.
+    Works with datasets like: https://www.research-collection.ethz.ch/entities/researchdata/52b7a501-c669-411b-9265-f3f039a28dbe
+
+    Assumptions:
+      - Header line like: 'define Lattice NX NY NT'
+      - Parameters contain: 'BoundingBox xmin xmax ymin ymax tmin tmax'
+      - Lattice declaration: 'Lattice { float[2] Velocity } @<tag>' (two components interleaved)
+      - Binary block starts after a line '@<tag>' and is little-endian float32 in x-fastest order, then y, then t.
+
+    Returns UnsteadyVectorField2D with field shaped [T, Y, X, 2].
+    """
+
+    @staticmethod
+    def _parse_header(lines):
+        import re
+        nx = ny = nt = None
+        bbox = None
+        tag = None
+        comp = 2
+        joined = "\n".join(lines)
+        m = re.search(r"define\s+Lattice\s+(\d+)\s+(\d+)\s+(\d+)", joined, re.IGNORECASE)
+        if m:
+            nx, ny, nt = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        bb = re.search(r"BoundingBox\s+([-+eE0-9\.]+)\s+([-+eE0-9\.]+)\s+([-+eE0-9\.]+)\s+([-+eE0-9\.]+)\s+([-+eE0-9\.]+)\s+([-+eE0-9\.]+)", joined)
+        if bb:
+            bbox = [float(bb.group(i)) for i in range(1, 7)]
+        for ln in lines:
+            s = ln.strip()
+            if s.lower().startswith("lattice {") and "float[" in s:
+                try:
+                    inside = s[s.index("float[") + 6:]
+                    comp = int(inside.split("]")[0])
+                except Exception:
+                    comp = 2
+                if "@" in s:
+                    tag = s.split("@")[-1].strip()
+            if s.startswith("@") and tag is None:
+                tag = s[1:].strip()
+        if nx is None or ny is None or nt is None:
+            raise ValueError("AmiraLoader: cannot parse 'define Lattice NX NY NT'")
+        if bbox is None:
+            bbox = [0.0, float(nx - 1), 0.0, float(ny - 1), 0.0, float(nt - 1)]
+        if comp != 2:
+            raise ValueError(f"AmiraLoader: expected float[2], got float[{comp}]")
+        return nx, ny, nt, bbox, (tag or "1")
+
+    @staticmethod
+    def load_vector_field2d(file_path: str) -> UnsteadyVectorField2D:
+        if not os.path.exists(file_path) or not os.path.isfile(file_path):
+            raise FileNotFoundError(file_path)
+        with open(file_path, 'rb') as f:
+            raw = f.read()
+        # find standalone data marker line like "\n@<tag>\r?\n" using bytes regex
+        import re
+        marker_iter = list(re.finditer(br'\n@(\d+)\r?\n', raw))
+        if not marker_iter:
+            raise RuntimeError("AmiraLoader: missing standalone data marker '@<tag>' line")
+        marker = marker_iter[-1]  # use the last occurrence before binary
+        data_start = marker.end()
+        header_bytes = raw[:marker.start()]
+        header_text = header_bytes.decode('ascii', errors='ignore')
+        lines = header_text.splitlines()
+        nx, ny, nt, bbox, tag = AmiraLoader._parse_header(lines)
+        # read binary payload
+        binary = raw[data_start:]
+        count = int(nx * ny * nt * 2)
+        arr = np.frombuffer(binary, dtype='<f4', count=count)
+        if arr.size != count:
+            raise RuntimeError(f"AmiraLoader: unexpected EOF, need {count}, got {arr.size}")
+        field = arr.reshape(nt, ny, nx, 2).astype(np.float32)
+        xmin, xmax, ymin, ymax, tmin, tmax = bbox
+        vf = UnsteadyVectorField2D(nx, ny, nt, [xmin, ymin, tmin], [xmax, ymax, tmax])
+        vf.field = field
+        return vf
