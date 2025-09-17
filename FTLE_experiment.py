@@ -480,6 +480,98 @@ class UpsamplingUnetModel(nn.Module):
 
 
 
+class FTLEupsamplingFMT_UnetV2(nn.Module):
+    """
+    全局 FMT 特征 + 低分辨率 FTLE → UNet 上采样
+
+    - 将整幅场的所有 cross-primitive 一次性输入 EncNPNew（num_stages=0），得到全局特征向量 [B, D]
+    - 将该全局向量广播为 [B, D, X, Y]，与低分辨率 FTLE 的 1 个通道拼接 → [B, D+1, X, Y]
+    - 通过 UNet 编码解码，并经逐级转置卷积上采样到高分辨率
+
+    输入:
+      lowResFTLE:      [B, X, Y]
+      lowResPathlines: [B, X*Y, 5, L, 3]
+    输出:
+      pred:            [B, X*UP, Y*UP]
+    """
+    def __init__(self, cfg, lowResX: int, lowResY: int, upscale: float, base_ch: int = 32,
+                 embed_dim: int | None = None):
+        super().__init__()
+        self.lowResX = int(lowResX)
+        self.lowResY = int(lowResY)
+        self.upscale = int(upscale)
+
+        # FMT 编码器（全局）：使用 num_stages=0，输出维度固定为 embed_dim
+        k = int(getattr(cfg.pnn, 'k', 6)) if hasattr(cfg, 'pnn') else 6
+        alpha = float(getattr(cfg.pnn, 'alpha', 1000)) if hasattr(cfg, 'pnn') else 1000.0
+        beta = float(getattr(cfg.pnn, 'beta', 100)) if hasattr(cfg, 'pnn') else 100.0
+        nerbors = int(getattr(cfg.pcds, 'num_cross_points_per_seeding', 5)) if hasattr(cfg, 'pcds') else 5
+        LstepsPerline = int(getattr(cfg.pcds, 'sampled_points_per_line', 4)) if hasattr(cfg, 'pcds') else 4
+        self.cross_neighborsize = nerbors
+        self.pointsPerPrimitive = LstepsPerline * nerbors
+        self.embed_dim = int(embed_dim if embed_dim is not None else getattr(cfg.pnn, 'dim', 36))
+        self.encoder = EncNPNew(self.pointsPerPrimitive, 0, self.embed_dim, k, alpha, beta)
+
+        in_channels = self.embed_dim + 1  # 全局 D 通道 + 低分辨率 FTLE 1 通道
+        self.inc = DoubleConv(in_channels, base_ch)
+        self.down1 = Down(base_ch, base_ch * 2)
+        self.down2 = Down(base_ch * 2, base_ch * 4)
+        self.up1 = Up(base_ch * 4, base_ch * 2)
+        self.up2 = Up(base_ch * 2, base_ch)
+        self.out_low = nn.Conv2d(base_ch, base_ch, kernel_size=1)
+
+        n_up = max(0, int(round(math.log2(max(1, self.upscale)))))
+        self.up_blocks = nn.ModuleList()
+        in_ch = base_ch
+        for i in range(n_up):
+            out_ch = base_ch if i < n_up - 1 else base_ch // 2
+            self.up_blocks.append(
+                nn.Sequential(
+                    nn.ConvTranspose2d(in_ch, out_ch, kernel_size=2, stride=2),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1, bias=False),
+                    nn.BatchNorm2d(out_ch),
+                    nn.ReLU(inplace=True),
+                )
+            )
+            in_ch = out_ch
+        self.out_high = nn.Conv2d(in_ch, 1, kernel_size=1)
+
+    def forward(self, lowResFTLE: torch.Tensor, lowResPathlines: torch.Tensor) -> torch.Tensor:
+        B, X, Y = lowResFTLE.shape
+        _, N, nerbors, L, Dim = lowResPathlines.shape
+        assert N == X * Y, "lowResPathlines second dim must be X*Y"
+        assert nerbors == self.cross_neighborsize, "nerbors mismatch with model setting"
+
+        # 将整幅场的所有点拼为一个大点集，输入 EncNPNew 以提取全局特征
+        P = lowResPathlines.reshape(B, N * nerbors * L, Dim).contiguous()  # [B, N*K, 3]
+        points_N3 = P
+        points_3N = P.permute(0, 2, 1).contiguous()
+        global_feat = self.encoder(points_N3, points_3N)  # [B, D]
+
+        # 广播到空间维度并与低分辨率 FTLE 拼接
+        feat_map = global_feat.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, X, Y)  # [B, D, X, Y]
+        ftle_in = lowResFTLE.unsqueeze(1)  # [B, 1, X, Y]
+        x_in = torch.cat([ftle_in, feat_map], dim=1)  # [B, D+1, X, Y]
+
+        # UNet 编解码 + 上采样头
+        x1 = self.inc(x_in)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x = self.up1(x3, x2)
+        x = self.up2(x, x1)
+        x = self.out_low(x)
+        for blk in self.up_blocks:
+            x = blk(x)
+        pred = self.out_high(x).squeeze(1)  # [B, X*UP, Y*UP]
+
+        # 尺寸对齐
+        target_h = int(X * max(1, self.upscale))
+        target_w = int(Y * max(1, self.upscale))
+        if pred.shape[-2] != target_h or pred.shape[-1] != target_w:
+            pred = F.interpolate(pred.unsqueeze(1), size=(target_h, target_w), mode='bilinear', align_corners=False).squeeze(1)
+        return pred
+
 
 
 
@@ -811,7 +903,7 @@ def test_UpsamplingModel(config, model, device,visualize=False):
 
             if visualize and test_i == sample_count-1:
                 visualize_FTLEUpampling(label_y_b, pred_b, low_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
-                
+
             mse_sum += mse
             mae_sum += mae
             maxe_sum += maxe
@@ -971,6 +1063,11 @@ def build_model(config, device):
         lowResX = int(config.lowResX)
         lowResY = int(config.lowResY)
         model = FTLEUpsamplingFMT_Vit(config, lowResX, lowResY,upscale=int(config.dataset.UPsampling)).to(device)
+        return model
+    elif config.model.NAME == 'FTLEUpsamplingFMT_UnetV2':
+        lowResX = int(config.lowResX)
+        lowResY = int(config.lowResY)
+        model = FTLEupsamplingFMT_UnetV2(config, lowResX, lowResY,upscale=int(config.dataset.UPsampling)).to(device)
         return model
     else:   
         raise ValueError(f"Unknown model: {config.model.NAME}")

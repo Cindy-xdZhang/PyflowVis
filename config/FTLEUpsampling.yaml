@@ -15,7 +15,8 @@ loss:
 model:
   # NAME: UpsamplingUnetModel
   # NAME: FTLEUpsamplingFMT_Unet
-  NAME: FTLEUpsamplingFMT_Vit
+  # NAME: FTLEUpsamplingFMT_Vit
+  NAME: FTLEUpsamplingFMT_UnetV2
 
 dataset:
   timesliceCount: 10 # total data set is    NumberOfVectorFields*timesliceCount* (VectorFieldGridRes//PatchSize)   
