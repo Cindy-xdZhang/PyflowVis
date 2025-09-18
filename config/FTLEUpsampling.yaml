@@ -1,7 +1,7 @@
 seed: 7068
 epochs: 5
 train_points_count: 72000
-batch_size: 16
+batch_size: 32
 print_freq: 200
 
 lr: 0.0001
@@ -13,9 +13,9 @@ loss:
   NAME: MSELoss
 
 model:
-  NAME: UpsamplingUnetModel
+  # NAME: UpsamplingUnetModel
   # NAME: FTLEUpsamplingFMT_Unet
-  # NAME: FTLEUpsamplingFMT_Vit
+  NAME: FTLEUpsamplingFMT_Vit
   # NAME: FTLEUpsamplingFMT_UnetV2
 
 wandb: False 
@@ -28,7 +28,7 @@ dataset:
 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
-  names: [doublegyre2d,beads2d,rfc2d, GerrisFlowSolverData/*.am]
+  names: [doublegyre2d,beads2d,rfc2d, GerrisFLowSolverData/*.am]
   extension: nc
   t_start: 0.2 #% for the whole time
   t_target: 0.8

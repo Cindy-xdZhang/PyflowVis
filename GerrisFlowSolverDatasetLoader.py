@@ -150,23 +150,61 @@ def temp_resample_amira_dataset():
     if not os.path.exists(resampled_amira_folder):
         os.makedirs(resampled_amira_folder)
 
-    for id in range(103,104):
-        #four digit id
-        id_str=f"{id:04d}"
-        dest_file = os.path.join(temp_amira_folder,f"{id_str}.am")
-        dest_nc_file = os.path.join(resampled_amira_folder,f"{id_str}.am")
+    import time
+
+    max_retries = 5
+    retry_delay = 10  # 秒
+
+    for id in range(40, 200):
+        id_str = f"{id:04d}"
+        dest_file = os.path.join(temp_amira_folder, f"{id_str}.am")
+        dest_nc_file = os.path.join(resampled_amira_folder, f"{id_str}.am")
         if os.path.exists(dest_nc_file):
             continue
-        if not os.path.exists(dest_file):
-            #wget amira data
-            url=f"https://libdrive.ethz.ch/index.php/s/lv7dV40oYlkWJiC/download?path=%2F&files={id_str}.am"
-            download_with_progress(url, dest_file, resume=True, chunk_size=8*1024*1024, timeout=60, retries=10)
 
-        vectorField2d=AmiraLoader.load_vector_field2d(dest_file)
-        vectorField2d.resample2UnsteadyField((int(vectorField2d.Xdim*resample_ratio_Spatial),int(vectorField2d.Ydim*resample_ratio_Spatial),int(vectorField2d.time_steps*resample_ratio_Time)))
-        #after resampling, save the dataset and delete the original amira file
-        AmiraLoader.save_vector_field2d(dest_nc_file,vectorField2d)
-        # os.remove(os.path.join(temp_amira_folder,f"{id_str}.am"))
+        # 下载部分加重试和异常处理
+        if not os.path.exists(dest_file):
+            url = f"https://libdrive.ethz.ch/index.php/s/lv7dV40oYlkWJiC/download?path=%2F&files={id_str}.am"
+            for attempt in range(max_retries):
+                try:
+                    download_with_progress(
+                        url, dest_file, resume=True, chunk_size=8 * 1024 * 1024, timeout=60, retries=10
+                    )
+                    break
+                except Exception as e:
+                    print(f"[{id_str}] 下载失败: {e}，第 {attempt+1}/{max_retries} 次重试")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                    else:
+                        print(f"[{id_str}] 多次重试后仍然下载失败，跳过该文件。")
+                        continue  # 跳到下一个id
+            if not os.path.exists(dest_file):
+                print(f"[{id_str}] 文件依然不存在，跳过。")
+                continue
+
+        # 加载、重采样、保存部分加异常处理和重试
+        for attempt in range(max_retries):
+            try:
+                vectorField2d = AmiraLoader.load_vector_field2d(dest_file)
+                if vectorField2d is None:
+                    raise RuntimeError(f"[{id_str}] 加载Amira文件失败: {dest_file}")
+                vectorField2d.resample2UnsteadyField((
+                    int(vectorField2d.Xdim * resample_ratio_Spatial),
+                    int(vectorField2d.Ydim * resample_ratio_Spatial),
+                    int(vectorField2d.time_steps * resample_ratio_Time)
+                ))
+                AmiraLoader.save_vector_field2d(dest_nc_file, vectorField2d)
+                # os.remove(os.path.join(temp_amira_folder, f"{id_str}.am"))
+                break
+            except Exception as e:
+                print(f"[{id_str}] 处理/保存失败: {e}，第 {attempt+1}/{max_retries} 次重试")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    print(f"[{id_str}] 多次重试后依然失败，跳过该文件。")
+
+        if os.path.exists(dest_file) and os.path.exists(dest_nc_file):
+            os.remove(dest_file)
 
 
 

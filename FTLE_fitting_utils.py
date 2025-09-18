@@ -626,16 +626,23 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
             UnsteadyVectorFields.append(double_gyre_2D([128,64],64))
         elif name == "rfc2d":
             UnsteadyVectorFields.append(rotation_four_center([64,64],32))
-        elif "GerrisFlowSolverData/*.am" in name:
+        elif "GerrisFlowSolverDataTemp/*.am" in name:
             #laod amira fiels from the folder
-            amira_folder=f"{config.dataset.dat_dir}\\GerrisFlowSolverData"
+            amira_folder=os.path.join(config.dataset.dat_dir, "GerrisFlowSolverDataTemp")
             for file in os.listdir(amira_folder):
                 if file.endswith(".am"):
-                    UnsteadyVectorFields.append(amiraLoader.load_vector_field2d(f"{amira_folder}\\{file}"))
+                    am_file_path=os.path.join(amira_folder, file)
+                    load_vector_field2d=amiraLoader.load_vector_field2d(am_file_path)
+                    if load_vector_field2d is None:
+                        print(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {file} failed. Skip this field.")
+                        continue
+                    UnsteadyVectorFields.append(load_vector_field2d)
         else:
             try:
-                vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"
-                UnsteadyVectorFields.append(netCDF.load_vector_field2d(vectorfield_datapath))
+                vectorfield_datapath=os.path.join(config.dataset.dat_dir, f"{name}.{config.dataset.extension}")
+                load_vector_field2d=netCDF.load_vector_field2d(vectorfield_datapath)
+                if load_vector_field2d is None:
+                    UnsteadyVectorFields.append(load_vector_field2d)
             except Exception as e:
                 print(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {name} failed: {e}. Skip this field.")
     return UnsteadyVectorFields
@@ -818,12 +825,12 @@ class FTLEUpsamplingTrainDataset(Dataset):
         # itemMap2VectorField=[]
 
         if not LoadCacheSuccess:
-            for vectorfield in UnsteadyVectorFields:
+            for i,vectorfield in enumerate(UnsteadyVectorFields):
+                print(f"[generate_training_samples] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
                 time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 time_window_target = float(time_window_target_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
                 for time_slice in timeslice:
-
                     # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
                     low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,low_res_grid_sampling)  
                     high_res_sampling=UPsampling*low_res_grid_sampling
@@ -977,7 +984,7 @@ class IVDTrainDataset(Dataset):
         FTLE_fieldsLowRes=[]
         FTLE_fieldsHighRes=[]
         for name in config.dataset.names:
-            vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"
+            vectorfield_datapath= os.path.join(config.dataset.dat_dir, f"{name}.{config.dataset.extension}")
             UnsteadyVectorFields.append(netCDF.load_vector_field2d(vectorfield_datapath))
     
         for vectorfield in UnsteadyVectorFields:

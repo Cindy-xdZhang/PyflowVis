@@ -15,7 +15,7 @@ from DeepUtils.loss import build_criterion_from_cfg
 from DeepUtils.optim import build_optimizer_from_cfg
 
 from FLowUtils.VectorField2d import *
-from pnn.models.point_nn import EncNPNew,EncNP
+from pnn.models.point_nn import EncNPNew
 from FTLE_fitting_utils import *
 from DeepUtils.MiscFunctions import *
 
@@ -711,7 +711,7 @@ def build_test_dataset(config):
     # 参数收集
     netCDF = NetCDFLoader()
     test_vectorfield_name = config['test_vectorfield'] if 'test_vectorfield' in config else config.dataset.names[0]
-    vectorfield_datapath = f"{config.dataset.dat_dir}\\{test_vectorfield_name}.{config.dataset.extension}"
+    vectorfield_datapath = os.path.join(config.dataset.dat_dir, f"{test_vectorfield_name}.{config.dataset.extension}")
     vectorfield = netCDF.load_vector_field2d(vectorfield_datapath)
 
     tmin, tmax = float(vectorfield.tmin), float(vectorfield.tmax)
@@ -1084,6 +1084,16 @@ def runNameTagGenerator_fmt(config,mode)->Tuple[str, List[str]]:
     runTags= [tagGen0,tagGen1]
     return runName,runTags
 
+def relocate_flow2d_dataset_folder(config):
+    import platform
+    if platform.system() == "Windows":
+        config.dataset.dat_dir=" C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d"
+    elif platform.system() == "Linux":
+        config.dataset.dat_dir="/home/zhanx0o/DeepVortex/FlowDataFolder"
+    else:
+        raise ValueError(f"Unknown system: {platform.system()}")
+    
+
 if __name__=="__main__":
     print("PyTorch version:", torch.__version__)
     print("torch.cuda.is_available():",torch.cuda.is_available())  # Should return True
@@ -1094,6 +1104,7 @@ if __name__=="__main__":
 
     cfg=argParseAndPrepareConfig()
     cfg["gitInfo"]=get_git_commit_id()
+    relocate_flow2d_dataset_folder(cfg)
     run_Name,runTags=runNameTagGenerator_fmt(cfg,mode)
     cfg['run_name']=run_Name
     logging.info(f"run name: {run_Name}, run tags: {runTags}")
@@ -1111,7 +1122,7 @@ if __name__=="__main__":
         config = EasyConfig()
         netCDF = NetCDFLoader()
         config.load("config/PointWiseFTLERegressor.yaml", recursive=False)
-        vectorfield_datapath=f"{config.dataset.dat_dir}\\{config.dataset.test_name}.{config.dataset.extension}"
+        vectorfield_datapath=os.path.join(config.dataset.dat_dir, f"{config.dataset.test_name}.{config.dataset.extension}")
         vectorfield = netCDF.load_vector_field2d(vectorfield_datapath)
         config['vectorfield']=vectorfield
    
