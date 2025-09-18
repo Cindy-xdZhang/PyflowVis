@@ -1,7 +1,7 @@
 seed: 7068
 epochs: 100
 train_points_count: 72000
-batch_size: 72
+batch_size: 16
 print_freq: 200
 
 lr: 0.0001
@@ -26,12 +26,12 @@ dataset:
 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
-  names: [cylinder2d,doublegyre2d,beads2d,rfc2d]
+  names: [doublegyre2d,beads2d,rfc2d, GerrisFlowSolverData/0001,GerrisFlowSolverData/0002,GerrisFlowSolverData/0000,GerrisFlowSolverData/0064,GerrisFlowSolverData/0071,GerrisFlowSolverData/0633,GerrisFlowSolverData/0444,GerrisFlowSolverData/0130,GerrisFlowSolverData/0081]
   extension: nc
   t_start: 0.2 #% for the whole time
   t_target: 0.8
   patchSize: 32
-  patchStride: 2
+  patchStride: 4
 
 
 

@@ -502,6 +502,7 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
         self.upscale = int(upscale)
 
         # FMT 编码器（全局）：使用 num_stages=0，输出维度固定为 embed_dim
+        num_stages=2
         k = int(getattr(cfg.pnn, 'k', 6)) if hasattr(cfg, 'pnn') else 6
         alpha = float(getattr(cfg.pnn, 'alpha', 1000)) if hasattr(cfg, 'pnn') else 1000.0
         beta = float(getattr(cfg.pnn, 'beta', 100)) if hasattr(cfg, 'pnn') else 100.0
@@ -510,9 +511,10 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
         self.cross_neighborsize = nerbors
         self.pointsPerPrimitive = LstepsPerline * nerbors
         self.embed_dim = int(embed_dim if embed_dim is not None else getattr(cfg.pnn, 'dim', 36))
-        self.encoder = EncNPNew(self.pointsPerPrimitive, 0, self.embed_dim, k, alpha, beta)
+        self.encoder = EncNPNew(self.pointsPerPrimitive, num_stages, self.embed_dim, k, alpha, beta)
+        self.fmt_feature_dim= self.embed_dim* (2 ** (num_stages - 0))
 
-        in_channels = self.embed_dim + 1  # 全局 D 通道 + 低分辨率 FTLE 1 通道
+        in_channels = self.fmt_feature_dim+ 1  # 全局 D 通道 + 低分辨率 FTLE 1 通道
         self.inc = DoubleConv(in_channels, base_ch)
         self.down1 = Down(base_ch, base_ch * 2)
         self.down2 = Down(base_ch * 2, base_ch * 4)

@@ -617,6 +617,7 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
 
 def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
     netCDF = NetCDFLoader()
+    amiraLoader=AmiraLoader()
     UnsteadyVectorFields=[]
     for name in config.dataset.names:
         if name == "beads2d":
@@ -625,6 +626,8 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
             UnsteadyVectorFields.append(double_gyre_2D([128,64],64))
         elif name == "rfc2d":
             UnsteadyVectorFields.append(rotation_four_center([64,64],32))
+        elif "GerrisFlowSolverData/" in name:
+            UnsteadyVectorFields.append(amiraLoader.load_vector_field2d(f"{config.dataset.dat_dir}\\{name}.am"))
         else:
             try:
                 vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"

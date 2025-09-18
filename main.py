@@ -116,13 +116,16 @@ def main():
     engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
     # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
 
-    #exmaple loading amria file
-    # amira_loader=AmiraLoader()
-    # vectorField2d=amira_loader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData\\0071.am")
-    # actFieldWidget.insertField("double_gyre",vectorField2d)
+    
 
-    vectorField2d= double_gyre_2D((250,125),64,Tmax=20)
-    actFieldWidget.insertField("double_gyre",vectorField2d)
+    #exmaple loading amria file
+    # vectorField2d=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData\\0071.am")
+    # actFieldWidget.insertField("resampled",vectorField2d)
+
+    # vectorField2d2=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverDataTemp\\0071.am")
+    # actFieldWidget.insertField("original",vectorField2d2)
+    # vectorField2d= double_gyre_2D((250,125),64,Tmax=20)
+    # actFieldWidget.insertField("double_gyre",vectorField2d)
 
     # flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
     # cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
@@ -163,6 +166,11 @@ def main():
 
     engine.MainLoop()
     
+
+
+
+
+
 
 if __name__ == "__main__":
     main()

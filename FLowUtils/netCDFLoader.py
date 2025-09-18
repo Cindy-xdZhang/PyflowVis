@@ -3,6 +3,7 @@ import netCDF4 as nc
 from .VectorField2d import UnsteadyVectorField2D, SteadyVectorField2D
 from .VectorField3d import *
 import os,time,logging
+import re
 
 def measure_execution_time(func):
     def wrapper(*args, **kwargs):
@@ -276,6 +277,7 @@ class AmiraLoader:
     Returns UnsteadyVectorField2D with field shaped [T, Y, X, 2].
     """
 
+  
     @staticmethod
     def _parse_header(lines):
         import re
@@ -316,21 +318,18 @@ class AmiraLoader:
             raise FileNotFoundError(file_path)
         with open(file_path, 'rb') as f:
             raw = f.read()
-        # find standalone data marker line like "\n@<tag>\r?\n" using bytes regex
-        import re
-        marker_iter = list(re.finditer(br'\n@(\d+)\r?\n', raw))
-        if not marker_iter:
-            raise RuntimeError("AmiraLoader: missing standalone data marker '@<tag>' line")
-        marker = marker_iter[-1]  # use the last occurrence before binary
-        data_start = marker.end()
+
+        marker = re.search(br'(?m)^#\s*Data section follows\r?\n?', raw)
+        if not marker:
+            raise ValueError(b'No "Data section follows" marker found')
         header_bytes = raw[:marker.start()]
+        data_binary   = raw[marker.end():]
         header_text = header_bytes.decode('ascii', errors='ignore')
         lines = header_text.splitlines()
         nx, ny, nt, bbox, tag = AmiraLoader._parse_header(lines)
         # read binary payload
-        binary = raw[data_start:]
         count = int(nx * ny * nt * 2)
-        arr = np.frombuffer(binary, dtype='<f4', count=count)
+        arr = np.frombuffer(data_binary, dtype='<f4', count=count)
         if arr.size != count:
             raise RuntimeError(f"AmiraLoader: unexpected EOF, need {count}, got {arr.size}")
         field = arr.reshape(nt, ny, nx, 2).astype(np.float32)
@@ -338,3 +337,40 @@ class AmiraLoader:
         vf = UnsteadyVectorField2D(nx, ny, nt, [xmin, ymin, tmin], [xmax, ymax, tmax])
         vf.field = field
         return vf
+        
+    @staticmethod
+    def save_vector_field2d(file_path: str,vector_field: UnsteadyVectorField2D):
+        if not isinstance(vector_field, UnsteadyVectorField2D):
+            raise TypeError("Expected UnsteadyVectorField2D instance.")
+
+        # Extract dims and bbox
+        nx = int(vector_field.Xdim)
+        ny = int(vector_field.Ydim)
+        nt = int(vector_field.time_steps)
+        xmin, ymin, tmin = [float(x) for x in vector_field.domainMinBoundary]
+        xmax, ymax, tmax = [float(x) for x in vector_field.domainMaxBoundary]
+
+        # Prepare data as numpy float32 shaped [T, Y, X, 2]
+        field = vector_field.getDataAsNumpy().astype(np.float32, copy=False)
+        if field.ndim != 4 or field.shape[-1] != 2:
+            raise ValueError("Expected field shape [T, Y, X, 2]")
+        if field.shape[0] != nt or field.shape[1] != ny or field.shape[2] != nx:
+            raise ValueError("Field shape does not match vector field dimensions")
+
+        # Compose minimal AmiraMesh-like header compatible with our loader
+        tag = "1"
+        header_lines = [
+            f"define Lattice {nx} {ny} {nt}",
+            f"BoundingBox {xmin:.8g} {xmax:.8g} {ymin:.8g} {ymax:.8g} {tmin:.8g} {tmax:.8g}",
+            f"Lattice {{ float[2] Velocity }} @{tag}",
+            f"@{tag}",
+        ]
+        header = ("\n".join(header_lines) + "\n").encode("ascii")
+
+        # Binary payload: little-endian float32, order x-fastest, then y, then t
+        payload = field.astype('<f4', copy=False).tobytes(order='C')
+
+        # Write file
+        with open(file_path, 'wb') as f:
+            f.write(header)
+            f.write(payload)

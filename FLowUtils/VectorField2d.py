@@ -4,7 +4,7 @@ import numpy as np
 # abstract base class work
 from abc import ABC, abstractmethod
 from .interpolation import bilinear_interpolate
-from numba import njit 
+from numba import njit, prange 
 from typeguard import typechecked
 
 @njit(cache=True)
@@ -93,6 +93,80 @@ def _get_vector_unsteady_numba(field_data, x, y, time, Xdim, Ydim, time_steps):
 
 
 
+
+@njit(parallel=True, fastmath=True, cache=True)
+def _resample_unsteady_linear_time_numba(field_data, newT, newY, newX):
+    """
+    Numba-accelerated resampling for unsteady 2D vector field with linear interpolation in time
+    and bilinear interpolation in space.
+
+    Args:
+        field_data: np.ndarray [T, Y, X, 2]
+        newT, newY, newX: target sizes
+
+    Returns:
+        out: np.ndarray [newT, newY, newX, 2]
+    """
+    T, Ydim, Xdim, C = field_data.shape
+    out = np.empty((newT, newY, newX, C), dtype=field_data.dtype)
+
+    # scale factors to map target grid indices to source grid float indices
+    x_scale = (Xdim - 1.0) / max(1, newX - 1)
+    y_scale = (Ydim - 1.0) / max(1, newY - 1)
+    t_scale = (T - 1.0) / max(1, newT - 1)
+
+    for t_out in prange(newT):
+        t_src = t_out * t_scale
+        t0 = int(np.floor(t_src))
+        t1 = t0 + 1
+        if t1 >= T:
+            t1 = T - 1
+        wt = t_src - t0
+
+        for i in range(newY):
+            y = i * y_scale
+            y0 = int(np.floor(y))
+            y1 = y0 + 1
+            if y1 >= Ydim:
+                y1 = Ydim - 1
+            ty = y - y0
+
+            for j in range(newX):
+                x = j * x_scale
+                x0 = int(np.floor(x))
+                x1 = x0 + 1
+                if x1 >= Xdim:
+                    x1 = Xdim - 1
+                tx = x - x0
+
+                # t0 slice bilinear
+                v000 = field_data[t0, y0, x0]
+                v010 = field_data[t0, y0, x1]
+                v100 = field_data[t0, y1, x0]
+                v110 = field_data[t0, y1, x1]
+                a0x = v000[0] * (1.0 - tx) + v010[0] * tx
+                a0y = v000[1] * (1.0 - tx) + v010[1] * tx
+                b0x = v100[0] * (1.0 - tx) + v110[0] * tx
+                b0y = v100[1] * (1.0 - tx) + v110[1] * tx
+                s0x = a0x * (1.0 - ty) + b0x * ty
+                s0y = a0y * (1.0 - ty) + b0y * ty
+
+                # t1 slice bilinear
+                v001 = field_data[t1, y0, x0]
+                v011 = field_data[t1, y0, x1]
+                v101 = field_data[t1, y1, x0]
+                v111 = field_data[t1, y1, x1]
+                a1x = v001[0] * (1.0 - tx) + v011[0] * tx
+                a1y = v001[1] * (1.0 - tx) + v011[1] * tx
+                b1x = v101[0] * (1.0 - tx) + v111[0] * tx
+                b1y = v101[1] * (1.0 - tx) + v111[1] * tx
+                s1x = a1x * (1.0 - ty) + b1x * ty
+                s1y = a1y * (1.0 - ty) + b1y * ty
+
+                out[t_out, i, j, 0] = s0x * (1.0 - wt) + s1x * wt
+                out[t_out, i, j, 1] = s0y * (1.0 - wt) + s1y * wt
+
+    return out
 
 class IDiscreteField2D(ABC):
     """IDiscreteField2D is an abstract base class for 2D vector/scalar fields with grid discretization, it provideds necessary api and grid information.
@@ -352,6 +426,30 @@ class UnsteadyVectorField2D(IDiscreteField2D):
         """Convert field data from torch tensor to numpy array for the field parameter.
         """
         self.field = self.field.detach().cpu().numpy()
+
+    def resample2UnsteadyField(self,new_grid_size:tuple):
+        newT_dim, new_Xdim, new_Ydim = new_grid_size
+        # Ensure numpy data for Numba
+        if isinstance(self.field, torch.Tensor) or isinstance(self.field, nn.Parameter):
+            src = self.field.detach().cpu().numpy().astype(np.float32)
+        else:
+            src = self.field.astype(np.float32, copy=False)
+
+        # Numba-accelerated resampling (linear in time, bilinear in space)
+        new_field = _resample_unsteady_linear_time_numba(src, int(newT_dim), int(new_Ydim), int(new_Xdim))
+
+        # Update field and metadata
+        self.field = new_field
+        self.Xdim = int(new_Xdim)
+        self.Ydim = int(new_Ydim)
+        self.time_steps = int(newT_dim)
+        # Update grid/time intervals to remain consistent with domain
+        self.gridInterval = [
+            (self.domainMaxBoundary[0]-self.domainMinBoundary[0]) / max(1, self.Xdim - 1),
+            (self.domainMaxBoundary[1]-self.domainMinBoundary[1]) / max(1, self.Ydim - 1)
+        ]
+        self.timeInterval = (self.tmax - self.tmin) / max(1, self.time_steps - 1)
+       
         
 
 

@@ -10,6 +10,7 @@
             "request": "launch",
             // "program": "${workspaceFolder}/pnn/run_synthetic.py",
             // "program": "${workspaceFolder}/main.py",
+            // "program": "${workspaceFolder}/GerrisFlowSolverDatasetLoader.py",
             "program": "${workspaceFolder}/FTLE_experiment.py",
             // "program": "${workspaceFolder}/train.py",
             // "program": "${workspaceFolder}/test.py",
