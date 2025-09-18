@@ -321,7 +321,16 @@ class AmiraLoader:
 
         marker = re.search(br'(?m)^#\s*Data section follows\r?\n?', raw)
         if not marker:
-            raise ValueError(b'No "Data section follows" marker found')
+            #privous I write bug code generated  file with this header:
+            # header_lines = [
+            #     f"define Lattice {nx} {ny} {nt}",
+            #     f"BoundingBox {xmin:.8g} {xmax:.8g} {ymin:.8g} {ymax:.8g} {tmin:.8g} {tmax:.8g}",
+            #     f"Lattice {{ float[2] Velocity }} @1\n@1\n"
+            # ]
+            marker = re.search(br'@1\n@1\n', raw)
+            if not marker:
+                raise ValueError(b'No "Data section follows" marker found')
+
         header_bytes = raw[:marker.start()]
         data_binary   = raw[marker.end():]
         header_text = header_bytes.decode('ascii', errors='ignore')

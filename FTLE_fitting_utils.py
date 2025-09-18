@@ -626,8 +626,12 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
             UnsteadyVectorFields.append(double_gyre_2D([128,64],64))
         elif name == "rfc2d":
             UnsteadyVectorFields.append(rotation_four_center([64,64],32))
-        elif "GerrisFlowSolverData/" in name:
-            UnsteadyVectorFields.append(amiraLoader.load_vector_field2d(f"{config.dataset.dat_dir}\\{name}.am"))
+        elif "GerrisFlowSolverData/*.am" in name:
+            #laod amira fiels from the folder
+            amira_folder=f"{config.dataset.dat_dir}\\GerrisFlowSolverData"
+            for file in os.listdir(amira_folder):
+                if file.endswith(".am"):
+                    UnsteadyVectorFields.append(amiraLoader.load_vector_field2d(f"{amira_folder}\\{file}"))
         else:
             try:
                 vectorfield_datapath=f"{config.dataset.dat_dir}\\{name}.{config.dataset.extension}"

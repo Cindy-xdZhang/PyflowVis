@@ -1,5 +1,5 @@
 seed: 7068
-epochs: 100
+epochs: 5
 train_points_count: 72000
 batch_size: 16
 print_freq: 200
@@ -13,10 +13,12 @@ loss:
   NAME: MSELoss
 
 model:
-  # NAME: UpsamplingUnetModel
+  NAME: UpsamplingUnetModel
   # NAME: FTLEUpsamplingFMT_Unet
   # NAME: FTLEUpsamplingFMT_Vit
-  NAME: FTLEUpsamplingFMT_UnetV2
+  # NAME: FTLEUpsamplingFMT_UnetV2
+
+wandb: False 
 
 dataset:
   timesliceCount: 10 # total data set is    NumberOfVectorFields*timesliceCount* (VectorFieldGridRes//PatchSize)   
@@ -26,12 +28,16 @@ dataset:
 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d
-  names: [doublegyre2d,beads2d,rfc2d, GerrisFlowSolverData/0001,GerrisFlowSolverData/0002,GerrisFlowSolverData/0000,GerrisFlowSolverData/0064,GerrisFlowSolverData/0071,GerrisFlowSolverData/0633,GerrisFlowSolverData/0444,GerrisFlowSolverData/0130,GerrisFlowSolverData/0081]
+  names: [doublegyre2d,beads2d,rfc2d, GerrisFlowSolverData/*.am]
   extension: nc
   t_start: 0.2 #% for the whole time
   t_target: 0.8
   patchSize: 32
   patchStride: 4
+  
+test_tasks: test_UpsamplingModel
+test_vectorfield: cylinder2d
+
 
 
 
@@ -66,5 +72,3 @@ pcds:
   start_points: [[0.0,0.0]]
   bbox: [[2.5,0.5],[5.5,1.5]] # [[xmin1,ymin1] [xmax1,ymax1],[xmin2,ymin2],[xmax2,ymax2]]
 
-wandb: False 
-test_tasks: test_UpsamplingModel
