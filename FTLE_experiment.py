@@ -813,6 +813,7 @@ def build_test_dataset(config):
             lowResPathlines_np = data["LowResPathlines"]
             # Convert back to torch; subsequent tests index pathlines using torch tensors
             lowResPathlines_all = torch.from_numpy(lowResPathlines_np).float()
+            logging.info(f"[build_test_dataset] loaded {lowResFTLE_all.shape[0]} samples from cache {cache_path}")
             return lowResFTLE_all, lowResPathlines_all, highResFTLE_all, vectorfield
         except Exception as e:
             logging.info(f"[build_test_dataset] cache load failed: {e}. Regenerating...")
@@ -853,6 +854,7 @@ def build_test_dataset(config):
             HighResFTLE=highResFTLE_all_t.detach().cpu().numpy().astype(np.float32),
             LowResPathlines=lowResPathlines_all.detach().cpu().numpy().astype(np.float32),
         )
+        logging.info(f"[build_test_dataset] saved {lowResFTLE_all_t.shape[0]} samples to cache {cache_path}")
     except Exception as e:
         logging.info(f"[build_test_dataset] cache save failed: {e}")
 
@@ -1142,7 +1144,7 @@ def runNameTagGenerator_fmt(config,mode)->Tuple[str, List[str]]:
 def relocate_flow2d_dataset_folder(config):
     import platform
     if platform.system() == "Windows":
-        config.dataset.dat_dir=" C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d"
+        config.dataset.dat_dir="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d"
     elif platform.system() == "Linux":
         config.dataset.dat_dir="/home/zhanx0o/DeepVortex/FLowDataFolder/"
     else:
@@ -1192,6 +1194,7 @@ if __name__=="__main__":
         # future mode: low resolution pathlines + low resolution FTLE -> high resolution FTLE
         dataset = FTLEUpsamplingTrainDataset(cfg, useCacheSystem=True)
         build_test_dataset(cfg)
+        logging.info(f"build_dataset done, train dataset lenth: {dataset.lowResFTLE.shape[0]}")
         lowResX,lowResY=dataset.lowResFTLE[0].shape[0],dataset.lowResFTLE[0].shape[1]
         cfg['lowResX']=lowResX
         cfg['lowResY']=lowResY

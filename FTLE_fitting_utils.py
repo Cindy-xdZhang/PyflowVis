@@ -838,6 +838,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     self.lowResPathlines = torch.from_numpy(lowResPathlines_np).float()
                     self.labels = torch.from_numpy(labels_np).float()
                     LoadCacheSuccess=True
+                    logging.info(f"[FTLEUpsamplingTrainDataset] loaded {self.lowResFTLE.shape[0]} samples from cache {cache_path}")
                 except Exception as e:
                     print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
                          
@@ -943,6 +944,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
                         Data=self.lowResFTLE.detach().cpu().numpy().astype(np.float32),
                         Labels=self.labels.detach().cpu().numpy().astype(np.float32),
                         LowResPathlines=self.lowResPathlines.detach().cpu().numpy().astype(np.float32))
+                logging.info(f"[FTLEUpsamplingTrainDataset] saved {self.lowResFTLE.shape[0]} samples to cache {cache_path}")
             except Exception as e:
                 print(f"[generate_training_samples] cache save failed: {e}")
 
