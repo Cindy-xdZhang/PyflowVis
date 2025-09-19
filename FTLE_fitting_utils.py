@@ -693,14 +693,14 @@ class PointWiseFTLETrainDataset(Dataset):
                     V_all = torch.from_numpy(V_np).float()
                     cacheSuccess=True
                 except Exception as e:
-                    print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
+                    logging.error(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
         
         #generate training samples
         if not cacheSuccess:
             UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config)
             integration_interval=float(flowline_dt*max_steps)
             for i,vectorfield in enumerate(UnsteadyVectorFields):
-                print(f"[generate_training_samples] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
+                logging.info(f"[generate_training_samples] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
                 dataset_timewindow_start = float(config.pcds.t_start * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 dataset_timewindow_target = float(config.pcds.t_target * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 #if start integration time is too close to the end of the vector field, we will not generate training samples with same length, 
@@ -851,7 +851,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
 
         if not LoadCacheSuccess:
             for i,vectorfield in enumerate(UnsteadyVectorFields):
-                print(f"[FTLEUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
+                logging.info(f"[FTLEUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
                 time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 time_window_target = float(time_window_target_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
