@@ -865,7 +865,7 @@ def build_test_dataset(config):
         highResFTLE_all_t.detach().cpu().numpy().astype(np.float32),
         vectorfield,
     )
-def test_UpsamplingModel(config, model, device,visualize=False):
+def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
     with torch.no_grad():
         model.to(device).eval()
 
@@ -881,7 +881,10 @@ def test_UpsamplingModel(config, model, device,visualize=False):
             return starts
 
         # Use cached dataset
-        lowResFTLE_all, lowResPathlines_all, highResFTLE_all, vectorfield = build_test_dataset(config)
+        if test_dataset is None:
+            lowResFTLE_all, lowResPathlines_all, highResFTLE_all, vectorfield = build_test_dataset(config)
+        else:
+            lowResFTLE_all, lowResPathlines_all, highResFTLE_all, vectorfield = test_dataset
 
         if lowResFTLE_all is not None and lowResPathlines_all is not None and highResFTLE_all is not None and vectorfield is not None:
             patch_size = int(getattr(config.dataset, 'patchSize', 32))
@@ -979,7 +982,7 @@ def test_UpsamplingModel(config, model, device,visualize=False):
      
 
 
-def train_model(config, model, dataset, device):
+def train_model(config, model, dataset, device,test_dataset=None):
     optimizer = build_optimizer_from_cfg(model, lr=config.lr, **config.optimizer)
     loss_fn = build_criterion_from_cfg(config.loss)
     batch_size = int(config.batch_size)
@@ -1068,7 +1071,7 @@ def train_model(config, model, dataset, device):
                 # to avoid multiple triggers, clear loss_history, only keep the latest one
                 loss_history = [loss_history[-1]]
         if task_init_fn is not None and callable(task_init_fn):
-            Res = task_init_fn(config, model, device=str(device)) 
+            Res = task_init_fn(config, model,test_dataset, device=str(device)) 
             cur_psnr = float(Res['psnr'])
             if cur_psnr > best_psnr:
                 best_psnr = cur_psnr
@@ -1086,7 +1089,7 @@ def train_model(config, model, dataset, device):
     if best_state_dict is not None:
         model.load_state_dict(best_state_dict)
         logging.info(f"[final] loaded best checkpoint with best psnr={best_psnr:.2f} dB")
-        test_result= task_init_fn(config, model, device=str(device), visualize=True) if task_init_fn is not None and callable(task_init_fn) else None
+        test_result= task_init_fn(config, model,test_dataset, device=str(device), visualize=True) if task_init_fn is not None and callable(task_init_fn) else None
         if config['wandb'] and test_result is not None and isinstance(test_result,dict):            
             wandb.summary.update({"best_test_mse": test_result['mse'],"best_test_psnr": test_result['psnr']})
             for key, value in test_result.items():
@@ -1195,7 +1198,7 @@ if __name__=="__main__":
     elif mode == 'upsampling':
         # future mode: low resolution pathlines + low resolution FTLE -> high resolution FTLE
         dataset = FTLEUpsamplingTrainDataset(cfg, useCacheSystem=True)
-        build_test_dataset(cfg)
+        test_dataset=build_test_dataset(cfg)
         logging.info(f"build_dataset done, train dataset lenth: {dataset.lowResFTLE.shape[0]}")
         lowResX,lowResY=dataset.lowResFTLE[0].shape[0],dataset.lowResFTLE[0].shape[1]
         cfg['lowResX']=lowResX
@@ -1203,7 +1206,7 @@ if __name__=="__main__":
         cfg['ftle_min']=dataset.ftle_min
         cfg['ftle_max']=dataset.ftle_max
         model = build_model(cfg, device)
-        train_model(cfg,model,dataset,device)
+        train_model(cfg,model,dataset,device,test_dataset)
 
     else:
         raise ValueError(f"Unknown mode: {mode}")

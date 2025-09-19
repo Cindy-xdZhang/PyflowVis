@@ -5,12 +5,12 @@
 #SBATCH -o slurm_logs/%x.%3a.%A.out
 #SBATCH -e slurm_logs/%x.%3a.%A.err
 
-#SBATCH --time=36:00:00
+#SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=6
-#SBATCH  --constraint=[a100]
-##SBATCH --mem=30G
+#SBATCH  --constraint=[a100|v100]
+#SBATCH --mem=128G
 
 
 
@@ -35,4 +35,6 @@ echo $NUM_GPU_AVAILABLE
 # cfg=$1
 # PY_ARGS=${@:2}
 # python train.py --cfg $cfg ${PY_ARGS}
-python train.py --config config/segmentation/pathline_transformer.yaml
+# python train.py --config config/segmentation/pathline_transformer.yaml
+
+python FTLE_experiment.py --config config/FTLEUpsampling.yaml  

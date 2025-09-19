@@ -28,7 +28,7 @@ dataset:
 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d  GerrisFlowSolverData/*.am
-  names: [doublegyre2d,beads2d,rfc2d,GerrisFlowSolverData/*.am]
+  names: [doublegyre2d,beads2d,rfc2d]
   extension: nc
   t_start: 0.2 #% for the whole time
   t_target: 0.8

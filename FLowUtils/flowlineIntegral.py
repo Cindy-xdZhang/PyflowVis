@@ -3,6 +3,8 @@ import torch
 from .VectorField2d import UnsteadyVectorField2D
 from .VectorField3d import UnsteadyVectorField3D
 import importlib
+import logging
+from contextlib import contextmanager
 
 
 def pathline_integration_one_direction_2D(
@@ -331,53 +333,56 @@ def batch_pathline_integration_2D_cuda(points:np.ndarray,vectorfield:UnsteadyVec
     out_valid = np.zeros((points.shape[0],), dtype=np.int32)
 
     # Compile/load kernel
-    module = _get_or_compile_pathline2d_cuda_kernel()
+    device_index = int(torch.cuda.current_device()) if torch.cuda.is_available() else 0
+    module = _get_or_compile_pathline2d_cuda_kernel(device_index)
     kernel = module.get_function("integrate_pathlines_2d_kernel")
     cuda = importlib.import_module('pycuda.driver')
 
-    # Device buffers
-    u_gpu = cuda.mem_alloc(field_u.nbytes)
-    v_gpu = cuda.mem_alloc(field_v.nbytes)
-    x_gpu = cuda.mem_alloc(x0.nbytes)
-    y_gpu = cuda.mem_alloc(y0.nbytes)
-    t0_gpu = cuda.mem_alloc(t0_rel.nbytes)
-    outP_gpu = cuda.mem_alloc(out_pos.nbytes)
-    outV_gpu = cuda.mem_alloc(out_valid.nbytes)
+    with _torch_compatible_cuda_context(device_index):
+        # Device buffers
+        u_gpu = cuda.mem_alloc(field_u.nbytes)
+        v_gpu = cuda.mem_alloc(field_v.nbytes)
+        x_gpu = cuda.mem_alloc(x0.nbytes)
+        y_gpu = cuda.mem_alloc(y0.nbytes)
+        t0_gpu = cuda.mem_alloc(t0_rel.nbytes)
+        outP_gpu = cuda.mem_alloc(out_pos.nbytes)
+        outV_gpu = cuda.mem_alloc(out_valid.nbytes)
 
-    cuda.memcpy_htod(u_gpu, field_u)
-    cuda.memcpy_htod(v_gpu, field_v)
-    cuda.memcpy_htod(x_gpu, x0)
-    cuda.memcpy_htod(y_gpu, y0)
-    cuda.memcpy_htod(t0_gpu, t0_rel)
-    cuda.memcpy_htod(outP_gpu, out_pos)
-    cuda.memcpy_htod(outV_gpu, out_valid)
+        cuda.memcpy_htod(u_gpu, field_u)
+        cuda.memcpy_htod(v_gpu, field_v)
+        cuda.memcpy_htod(x_gpu, x0)
+        cuda.memcpy_htod(y_gpu, y0)
+        cuda.memcpy_htod(t0_gpu, t0_rel)
+        cuda.memcpy_htod(outP_gpu, out_pos)
+        cuda.memcpy_htod(outV_gpu, out_valid)
 
-    # Launch configuration
-    threads = 64
-    blocks = (points.shape[0] + threads - 1) // threads
+        # Launch configuration
+        threads = 64
+        blocks = (points.shape[0] + threads - 1) // threads
 
-    kernel(
-        u_gpu, v_gpu,
-        np.int32(W), np.int32(H), np.int32(T), np.float64(dx), np.float64(dy), np.float64(vdt),
-        x_gpu, y_gpu, t0_gpu,
-        np.float64(t_target_rel),
-        np.float64(float(dt)),
-        np.int32(int(max_steps)),
-        np.int32(int(points.shape[0])),
-        np.float64(float(vectorfield.tmin)),
-        np.float64(float(dom_min[0])), np.float64(float(dom_min[1])),
-        outP_gpu,
-        outV_gpu,
-        np.int32(methodId),
-        block=(threads, 1, 1), grid=(blocks, 1, 1)
-    )
+        kernel(
+            u_gpu, v_gpu,
+            np.int32(W), np.int32(H), np.int32(T), np.float64(dx), np.float64(dy), np.float64(vdt),
+            x_gpu, y_gpu, t0_gpu,
+            np.float64(t_target_rel),
+            np.float64(float(dt)),
+            np.int32(int(max_steps)),
+            np.int32(int(points.shape[0])),
+            np.float64(float(vectorfield.tmin)),
+            np.float64(float(dom_min[0])), np.float64(float(dom_min[1])),
+            outP_gpu,
+            outV_gpu,
+            np.int32(methodId),
+            block=(threads, 1, 1), grid=(blocks, 1, 1)
+        )
 
-    # Copy back results
-    cuda.memcpy_dtoh(out_pos, outP_gpu)
-    cuda.memcpy_dtoh(out_valid, outV_gpu)
+        # Copy back results
+        cuda.Context.synchronize()
+        cuda.memcpy_dtoh(out_pos, outP_gpu)
+        cuda.memcpy_dtoh(out_valid, outV_gpu)
 
-    # Free buffers
-    u_gpu.free(); v_gpu.free(); x_gpu.free(); y_gpu.free(); t0_gpu.free(); outP_gpu.free(); outV_gpu.free()
+        # Free buffers
+        u_gpu.free(); v_gpu.free(); x_gpu.free(); y_gpu.free(); t0_gpu.free(); outP_gpu.free(); outV_gpu.free()
 
     return out_pos, out_valid
 
@@ -439,23 +444,46 @@ def compute_pathline_2D_cuda(list_args):
     return results
 
 # ---------------- Internal: CUDA module cache ----------------
-_PATHLINE2D_CUDA_MODULE = None
-def _get_or_compile_pathline2d_cuda_kernel():
-    global _PATHLINE2D_CUDA_MODULE
-    if _PATHLINE2D_CUDA_MODULE is not None:
-        return _PATHLINE2D_CUDA_MODULE
+_PATHLINE2D_CUDA_MODULES = {}
+
+@contextmanager
+def _torch_compatible_cuda_context(device_index: int | None = None):
+    cuda = importlib.import_module('pycuda.driver')
+    cuda.init()
+    if device_index is None:
+        device_index = int(torch.cuda.current_device()) if torch.cuda.is_available() else 0
+    dev = cuda.Device(int(device_index))
+    ctx = dev.retain_primary_context()
+    ctx.push()
+    try:
+        yield ctx
+    finally:
+        try:
+            cuda.Context.synchronize()
+        except Exception:
+            pass
+        ctx.pop()
+
+def _get_or_compile_pathline2d_cuda_kernel(device_index: int | None = None):
+    global _PATHLINE2D_CUDA_MODULES
+    if device_index is None:
+        device_index = int(torch.cuda.current_device()) if torch.cuda.is_available() else 0
+    if device_index in _PATHLINE2D_CUDA_MODULES:
+        return _PATHLINE2D_CUDA_MODULES[device_index]
     with open("assets/cuda_kernal/PathlineIntegration2D.cu", "r") as f:
         src = f.read()
     try:
-        # Lazy import and initialize CUDA context
-        importlib.import_module('pycuda.autoinit')
-        SourceModule = importlib.import_module('pycuda.compiler').SourceModule
-        _PATHLINE2D_CUDA_MODULE = SourceModule(src, options=["-O3", "-use_fast_math"])
-        print("✅ PathlineIntegration2D CUDA kernel compiled successfully.")
+        cuda = importlib.import_module('pycuda.driver')
+        compiler = importlib.import_module('pycuda.compiler')
+        with _torch_compatible_cuda_context(device_index):
+            SourceModule = compiler.SourceModule
+            module = SourceModule(src, options=["-O3", "-use_fast_math"])
+        _PATHLINE2D_CUDA_MODULES[device_index] = module
+        logging.info("[flowlineIntegral] CUDA kernel compiled successfully for device %d", device_index)
+        return module
     except Exception as e:
-        print(f"❌ Unexpected CUDA error: {e}")
+        logging.error("[flowlineIntegral] CUDA kernel compile failed: %s", e)
         raise
-    return _PATHLINE2D_CUDA_MODULE
 
 # ---------------- Backend binder and auto-dispatch ----------------
 USE_CUDA_PATHLINE = None  # None: unknown; True/False: decided
@@ -474,18 +502,18 @@ def Bind_Flowline_IntegrationBackend():
     try:
         importlib.import_module('pycuda.driver')
         importlib.import_module('pycuda.compiler')
-        importlib.import_module('pycuda.autoinit')  # 初始化上下文（若可用）
     except Exception:
         USE_CUDA_PATHLINE = False
-        print("[BindFlowlineBackend] pycuda not available. Fallback to CPU integration.")
+        logging.info("[BindFlowlineBackend] pycuda not available. Fallback to CPU integration.")
         return USE_CUDA_PATHLINE
 
     # Try compile kernel
     try:
-        mod = _get_or_compile_pathline2d_cuda_kernel()
+        dev_idx = int(torch.cuda.current_device()) if torch.cuda.is_available() else 0
+        mod = _get_or_compile_pathline2d_cuda_kernel(dev_idx)
         USE_CUDA_PATHLINE = (mod is not None)
     except Exception as e:
-        print(f"[BindFlowlineBackend] CUDA kernel compile failed: {e}. Fallback to CPU.")
+        logging.info(f"[BindFlowlineBackend] CUDA kernel compile failed: {e}. Fallback to CPU.")
         USE_CUDA_PATHLINE = False
     return USE_CUDA_PATHLINE
 
@@ -499,7 +527,7 @@ def compute_pathline_2D_auto(list_args):
         try:
             return compute_pathline_2D_cuda(list_args)
         except Exception as e:
-            print(f"[compute_pathline_2D_auto] CUDA failed: {e}. Fallback to CPU.")
+            logging.info(f"[compute_pathline_2D_auto] CUDA failed: {e}. Fallback to CPU.")
 
     return list(map(compute_pathline_2D, list_args))
 
@@ -543,7 +571,7 @@ def batch_pathlineCross_integration_2D_auto(points:np.ndarray,vectorfield:Unstea
             return torch.from_numpy(pos_np).float(), torch.from_numpy(val_np).to(torch.int32)
             
         except Exception as e:
-            print(f"[batch_pathline_integration_2D_auto] CUDA failed: {e}. Fallback to CPU.")
+            logging.info(f"[batch_pathline_integration_2D_auto] CUDA failed: {e}. Fallback to CPU.")
 
 
 
