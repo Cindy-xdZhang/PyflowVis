@@ -1,5 +1,6 @@
 #step 1: load FTLE dataset
 import os,random
+import logging
 import hashlib
 import copy
 import numpy as np
@@ -24,6 +25,9 @@ import wandb
 GLOBAL_WANDB_PROJECT_NAME="FlowMapTokenizer"
 
 torch.backends.cuda.matmul.allow_tf32 = False  
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
 def calculate_model_parm_size(model: nn.Module):
     """
@@ -434,10 +438,10 @@ class UpsamplingUnetModel(nn.Module):
         self.up1 = Up(base_ch * 4, base_ch * 2)
         self.up2 = Up(base_ch * 2, base_ch)
 
-        # 低分辨率特征输出（与输入相同尺寸）
+        # Low-resolution feature output (same spatial size as input)
         self.out_low = nn.Conv2d(base_ch, base_ch, kernel_size=1)
 
-        # 逐级上采样头（根据 2 的幂次构建）
+        # Progressive upsampling head (constructed by powers of 2)
         import math
         n_up = max(0, int(round(math.log2(max(1, self.upscale)))))
         self.up_blocks = nn.ModuleList()
@@ -472,7 +476,7 @@ class UpsamplingUnetModel(nn.Module):
 
         pred = self.out_high(x).squeeze(1)  # [B, X*UP, Y*UP]
 
-        # 对齐到期望尺寸（防止奇偶尺寸导致 1 像素偏差）
+        # Align to expected size (avoid 1-pixel misalignment due to odd/even sizes)
         target_h = int(X * max(1, self.upscale))
         target_w = int(Y * max(1, self.upscale))
         if pred.shape[-2] != target_h or pred.shape[-1] != target_w:
@@ -483,18 +487,21 @@ class UpsamplingUnetModel(nn.Module):
 
 class FTLEupsamplingFMT_UnetV2(nn.Module):
     """
-    局部滑窗 FMT 特征 + 低分辨率 FTLE → UNet 上采样
+    Local sliding-window FMT features + low-resolution FTLE → UNet upsampling
 
-    - 使用 2D 滑窗（窗口大小 = self.FMT_focus_area，如 8x8，步长同窗口）在低分辨率网格上提取局部 patch
-    - 每个局部 patch 内将其所有 cross-primitive 拼为点云，送入 EncNPNew 得到局部特征向量 f ∈ R^D
-    - 将得到的局部特征排列为粗分辨率特征图 [B, D, Hc, Wc]（Hc、Wc 为滑窗中心网格尺寸）
-    - 对该特征图做双线性插值至 [B, D, X, Y]，再与低分辨率 FTLE 的 1 个通道拼接 → [B, D+1, X, Y]
-    - 通过 UNet 编码解码，并经逐级转置卷积上采样到高分辨率
+    - Use a 2D sliding window (window size = self.FMT_focus_area, e.g., 8x8; stride equals window)
+      on the low-resolution grid to extract local patches
+    - Within each patch, concatenate all cross-primitives into a point cloud and feed into EncNPNew
+      to obtain a local feature vector f ∈ R^D
+    - Arrange the local features into a coarse feature map [B, D, Hc, Wc] (Hc/Wc are window centers)
+    - Bilinearly upsample this feature map to [B, D, X, Y], then concatenate with the 1-channel
+      low-resolution FTLE → [B, D+1, X, Y]
+    - Apply UNet encode-decode, followed by transposed-convolution upsampling to high resolution
 
-    输入:
+    Inputs:
       lowResFTLE:      [B, X, Y]
       lowResPathlines: [B, X*Y, 5, L, 3]
-    输出:
+    Output:
       pred:            [B, X*UP, Y*UP]
     """
     def __init__(self, cfg, lowResX: int, lowResY: int, upscale: float, base_ch: int = 32,
@@ -504,7 +511,7 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
         self.lowResY = int(lowResY)
         self.upscale = int(upscale)
 
-        # FMT 编码器（全局）：使用 num_stages=0，输出维度固定为 embed_dim
+        # FMT encoder (global): use small num_stages; output dimension fixed by embed_dim
         num_stages=1
         self.FMT_focus_area=8# if this is too large, too many points will make knn too slow
 
@@ -521,7 +528,7 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
 
         self.fmt_feature_dim= self.embed_dim* (2 ** (num_stages - 0))
 
-        in_channels = self.fmt_feature_dim+ 1  # 全局 D 通道 + 低分辨率 FTLE 1 通道
+        in_channels = self.fmt_feature_dim+ 1  # Global D channels + 1 channel of low-res FTLE
         self.inc = DoubleConv(in_channels, base_ch)
         self.down1 = Down(base_ch, base_ch * 2)
         self.down2 = Down(base_ch * 2, base_ch * 4)
@@ -562,7 +569,7 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
         assert N == X * Y, "lowResPathlines second dim must be X*Y"
         assert nerbors == self.cross_neighborsize, "nerbors mismatch with model setting"
 
-        # 1) 局部滑窗提取局部点云特征，得到粗分辨率特征图 [B, D, Hc, Wc]
+        # 1) Extract local point-cloud features via sliding window to get coarse feature map [B, D, Hc, Wc]
         k = int(self.FMT_focus_area)
         row_starts = self._tiling_starts(int(X), k)
         col_starts = self._tiling_starts(int(Y), k)
@@ -573,7 +580,7 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
             i1 = min(i0 + k, int(X))
             for ci, j0 in enumerate(col_starts):
                 j1 = min(j0 + k, int(Y))
-                # 收集该窗口内的线性索引
+                # Collect linear indices within this window
                 idx_list = []
                 for rr in range(i0, i1):
                     base = rr * int(Y)
@@ -581,7 +588,7 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
                 if len(idx_list) == 0:
                     continue
                 idx_tensor = torch.as_tensor(idx_list, dtype=torch.long, device=lowResFTLE.device)
-                # 选择该窗口内的 pathlines，并拼为点云
+                # Select pathlines within the window and build the point cloud
                 pl_win = lowResPathlines[:, idx_tensor, ...]  # [B, M, nerbors, L, Dim]
                 B2, M, _, _, _ = pl_win.shape
                 P = pl_win.reshape(B2, M * nerbors * L, Dim).contiguous()  # [B, M*K, 3]
@@ -590,13 +597,13 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
                 feat_win = self.encoder(points_N3, points_3N)  # [B, D]
                 feat_coarse[:, :, ri, ci] = feat_win
 
-        # 2) 将粗网格特征双线性插值到 [X, Y]
+        # 2) Bilinear upsample the coarse feature map to [X, Y]
         feat_map = F.interpolate(feat_coarse, size=(int(X), int(Y)), mode='bilinear', align_corners=False)
-        # 3) 与低分辨率 FTLE 拼接
+        # 3) Concatenate with low-resolution FTLE
         ftle_in = lowResFTLE.unsqueeze(1)  # [B, 1, X, Y]
         x_in = torch.cat([ftle_in, feat_map], dim=1)  # [B, D+1, X, Y]
 
-        # UNet 编解码 + 上采样头
+        # UNet encode-decode + upsampling head
         x1 = self.inc(x_in)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
@@ -607,7 +614,7 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
             x = blk(x)
         pred = self.out_high(x).squeeze(1)  # [B, X*UP, Y*UP]
 
-        # 尺寸对齐
+        # Size alignment
         target_h = int(X * max(1, self.upscale))
         target_w = int(Y * max(1, self.upscale))
         if pred.shape[-2] != target_h or pred.shape[-1] != target_w:
@@ -740,21 +747,22 @@ class FTLEUpsamplingFMT_Vit(nn.Module):
 
 def build_test_dataset(config):
     """
-    生成测试所需的低分辨率/高分辨率 FTLE 切片与预处理后的低分辨率流线数据，并加入缓存机制。
+    Generate low/high-resolution FTLE slices and preprocessed low-resolution pathlines for testing,
+    with a simple caching mechanism.
 
-    返回:
+    Returns:
         lowResFTLE_all: np.ndarray [T, X_low, Y_low]
         lowResPathlines_all: torch.FloatTensor [T, X_low*Y_low, nerbors, L, 3]
         highResFTLE_all: np.ndarray [T, X_high, Y_high]
-        vectorfield: UnsteadyVectorField2D 对象（仅用于可视化/边界信息）
+        vectorfield: UnsteadyVectorField2D object (for visualization/boundary info)
     """
-    # 参数收集
+    # Parameter collection
     netCDF = NetCDFLoader()
     test_vectorfield_name = config['test_vectorfield'] if 'test_vectorfield' in config else config.dataset.names[0]
     vectorfield_datapath = os.path.join(config.dataset.dat_dir, f"{test_vectorfield_name}.{config.dataset.extension}")
     vectorfield = netCDF.load_vector_field2d(vectorfield_datapath)
     if vectorfield is None:
-        print(f"[build_test_dataset] load {test_vectorfield_name} failed. Skip this field.")
+        logging.info(f"[build_test_dataset] load {test_vectorfield_name} failed. Skip this field.")
         return None, None, None, None
     tmin, tmax = float(vectorfield.tmin), float(vectorfield.tmax)
     time_window_start_ratio = float(config.dataset.t_start)
@@ -772,7 +780,7 @@ def build_test_dataset(config):
     LstepsPerline = int(config.pcds.sampled_points_per_line)
     localized = bool(config.pcds.localized)
 
-    # 缓存键
+    # Cache key
     key_obj = {
         "name": "ftle_upsampling_test",
         "vectorfield": str(test_vectorfield_name),
@@ -796,34 +804,34 @@ def build_test_dataset(config):
     highResFTLE_list = []
     lowResPathlines_list = []
 
-    # 先尝试加载缓存
+    # Try loading cache first
     if os.path.exists(cache_path):
         try:
             data = np.load(cache_path)
             lowResFTLE_all = data["LowResFTLE"]
             highResFTLE_all = data["HighResFTLE"]
             lowResPathlines_np = data["LowResPathlines"]
-            # 转回 torch，后续测试流程对 pathlines 以 torch 进行索引
+            # Convert back to torch; subsequent tests index pathlines using torch tensors
             lowResPathlines_all = torch.from_numpy(lowResPathlines_np).float()
             return lowResFTLE_all, lowResPathlines_all, highResFTLE_all, vectorfield
         except Exception as e:
-            print(f"[build_test_dataset] cache load failed: {e}. Regenerating...")
+            logging.info(f"[build_test_dataset] cache load failed: {e}. Regenerating...")
 
-    # 生成数据
+    # Generate data
     for time_slice in sample_times:
-        # 低分辨率切片与对应流线
+        # Low-resolution slice and corresponding pathlines
         low_resFTLE_field, lowResPathlines, low_res_xs, low_res_ys = generate_FTLE_SLICE(
             config, vectorfield, float(time_slice), flowline_dt, max_steps, low_res_grid_sampling
         )
-        # 高分辨率（作为 GT）
+        # High-resolution (as ground truth)
         high_res_sampling = up * low_res_grid_sampling
         high_resFTLE_field, _, high_res_xs, high_res_ys = generate_FTLE_SLICE(
             config, vectorfield, float(time_slice), flowline_dt, max_steps, high_res_sampling
         )
 
-        # 与训练一致的预处理：时间下采样与归一化（不做 FTLE 归一化）
+        # Preprocessing consistent with training: temporal downsampling and normalization (no FTLE normalization)
         temporal_sampled_P_all = temporal_downsamplePathlineCrossPrimitive(lowResPathlines, int(LstepsPerline))
-        # 训练集中此处使用了常量 5 作为 cross neighborsize，这里保持一致
+        # The training set used constant 5 as cross neighborsize; keep consistent here
         lowResPathlinesPreprocessed = preprocess_localization_normalization(
             temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False
         ).cpu().float()
@@ -832,12 +840,12 @@ def build_test_dataset(config):
         highResFTLE_list.append(torch.from_numpy(high_resFTLE_field).float())
         lowResPathlines_list.append(lowResPathlinesPreprocessed)
 
-    # 堆叠
+    # Stack
     lowResFTLE_all_t = torch.stack(lowResFTLE_list, dim=0)
     highResFTLE_all_t = torch.stack(highResFTLE_list, dim=0)
     lowResPathlines_all = torch.stack(lowResPathlines_list, dim=0)
 
-    # 保存缓存（使用 float32）
+    # Save cache (use float32)
     try:
         np.savez(
             cache_path,
@@ -846,9 +854,9 @@ def build_test_dataset(config):
             LowResPathlines=lowResPathlines_all.detach().cpu().numpy().astype(np.float32),
         )
     except Exception as e:
-        print(f"[build_test_dataset] cache save failed: {e}")
+        logging.info(f"[build_test_dataset] cache save failed: {e}")
 
-    # 返回 numpy（FTLE）+ torch（Pathlines），与测试流程使用方式一致
+    # Return numpy (FTLE) + torch (Pathlines), consistent with test usage
     return (
         lowResFTLE_all_t.detach().cpu().numpy().astype(np.float32),
         lowResPathlines_all,
@@ -870,7 +878,7 @@ def test_UpsamplingModel(config, model, device,visualize=False):
                 starts.append(last)
             return starts
 
-        # 使用带缓存的数据集
+        # Use cached dataset
         lowResFTLE_all, lowResPathlines_all, highResFTLE_all, vectorfield = build_test_dataset(config)
 
         if lowResFTLE_all is not None and lowResPathlines_all is not None and highResFTLE_all is not None and vectorfield is not None:
@@ -889,7 +897,7 @@ def test_UpsamplingModel(config, model, device,visualize=False):
                 high_resFTLE_field = highResFTLE_all[test_i]
                 lowResPathlinesPreprocessed = lowResPathlines_all[test_i]
 
-                # normalization like training（以训练集统计量归一化低分辨率输入）
+                # Normalization as in training (normalize low-res input using train-set statistics)
                 ftle_min = float(config.ftle_min)
                 ftle_max = float(config.ftle_max)
                 low_resFTLE_field_clip = np.clip(low_resFTLE_field, ftle_min, ftle_max)
@@ -963,7 +971,7 @@ def test_UpsamplingModel(config, model, device,visualize=False):
             mae = mae_sum / sample_count
             maxe = maxe_sum / sample_count
             psnr = psnr_sum / sample_count
-            print(f"test average: mse={mse:.6f}, mae={mae:.6f}, maxe={maxe:.6f}, psnr={psnr:.6f}")
+            logging.info(f"test average: mse={mse:.6f}, mae={mae:.6f}, maxe={maxe:.6f}, psnr={psnr:.6f}")
             return {"mse": mse, "mae": mae, "maxe": maxe, "psnr": psnr}
 
      
@@ -1016,7 +1024,7 @@ def train_model(config, model, dataset, device):
                 pred = model(input1).to(device).float()
 
             if torch.isnan(pred).any() or torch.isinf(pred).any():
-                print(f"Warning: nan or inf in pred at epoch {epoch}, iter {it}")
+                logging.info(f"Warning: nan or inf in pred at epoch {epoch}, iter {it}")
                 pred = torch.nan_to_num(pred, nan=0.0, posinf=1.0, neginf=0.0)
 
             loss = loss_fn(pred, label_y)
@@ -1030,7 +1038,7 @@ def train_model(config, model, dataset, device):
             torch.cuda.empty_cache()
             total_iterations += 1
             if it % print_freq == 0 or it == 0:
-                print(f"epoch {epoch}, iter {it}: {LOSS_NAME} ={loss.item():.6f}, total_iterations: {total_iterations}")
+                logging.info(f"epoch {epoch}, iter {it}: {LOSS_NAME} ={loss.item():.6f}, total_iterations: {total_iterations}")
                 if config['wandb']:
                     wandb.log({"epoch": epoch,  "train_loss": loss.item(), "total_iterations": total_iterations})
 
@@ -1049,11 +1057,11 @@ def train_model(config, model, dataset, device):
             if is_stable:
                 new_lr = last_lr * 0.5
                 if new_lr <1e-7:
-                    print(f"[lr scheduler] epoch {epoch}: lr is too small, stop training")
+                    logging.info(f"[lr scheduler] epoch {epoch}: lr is too small, stop training")
                     break
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = new_lr
-                print(f"[lr scheduler] epoch {epoch}: loss does not decrease for {patience} epochs, learning rate adjusted to {new_lr:.6g}")
+                logging.info(f"[lr scheduler] epoch {epoch}: loss does not decrease for {patience} epochs, learning rate adjusted to {new_lr:.6g}")
                 last_lr = new_lr
                 # to avoid multiple triggers, clear loss_history, only keep the latest one
                 loss_history = [loss_history[-1]]
@@ -1063,20 +1071,19 @@ def train_model(config, model, dataset, device):
             if cur_psnr > best_psnr:
                 best_psnr = cur_psnr
                 best_state_dict = copy.deepcopy(model.state_dict())
-                print(f"[best] epoch {epoch}: psnr={best_psnr:.2f} dB (checkpoint updated)")
-            print(f"epoch {epoch}: {LOSS_NAME} ={epoch_avg_loss:.6f}. Test:mse={Res['mse']:.6f}, \
-            mae={Res['mae']:.6f}, maxe={Res['maxe']:.6f}, psnr={cur_psnr:.2f} dB") if Res is not None else print(f"epoch {epoch}: {LOSS_NAME} ={epoch_avg_loss:.6f}")
+                logging.info(f"[best] epoch {epoch}: psnr={best_psnr:.2f} dB (checkpoint updated)")
+            logging.info(f"epoch {epoch}: {LOSS_NAME} ={epoch_avg_loss:.6f}. Test:mse={Res['mse']:.6f}, mae={Res['mae']:.6f}, maxe={Res['maxe']:.6f}, psnr={cur_psnr:.2f} dB") if Res is not None else logging.info(f"epoch {epoch}: {LOSS_NAME} ={epoch_avg_loss:.6f}")
             if config['wandb']:
                 wandb.log({"epoch": epoch,  "epoch_Loss": epoch_avg_loss, "test_mse": Res['mse'], "test_mae": Res['mae'], "test_maxe": Res['maxe'], "test_psnr": cur_psnr})
         else:
-            print(f"epoch {epoch}: {LOSS_NAME} ={epoch_avg_loss:.6f}")
+            logging.info(f"epoch {epoch}: {LOSS_NAME} ={epoch_avg_loss:.6f}")
             if config['wandb']:
                     wandb.log({"epoch": epoch,  "epoch_Loss": epoch_avg_loss, "total_iterations": total_iterations})
 
 
     if best_state_dict is not None:
         model.load_state_dict(best_state_dict)
-        print(f"[final] loaded best checkpoint with best psnr={best_psnr:.2f} dB")
+        logging.info(f"[final] loaded best checkpoint with best psnr={best_psnr:.2f} dB")
         test_result= task_init_fn(config, model, device=str(device), visualize=True) if task_init_fn is not None and callable(task_init_fn) else None
         if config['wandb'] and test_result is not None and isinstance(test_result,dict):            
             wandb.summary.update({"best_test_mse": test_result['mse'],"best_test_psnr": test_result['psnr']})
@@ -1144,9 +1151,9 @@ def relocate_flow2d_dataset_folder(config):
 
     
 if __name__=="__main__":
-    print("PyTorch version:", torch.__version__)
-    print("torch.cuda.is_available():",torch.cuda.is_available())  # Should return True
-    print("torch.version.cuda:",torch.version.cuda)         # Should print the CUDA version PyTorch was built with
+    logging.info(f"PyTorch version: {torch.__version__}")
+    logging.info(f"torch.cuda.is_available(): {torch.cuda.is_available()}")  # Should return True
+    logging.info(f"torch.version.cuda: {torch.version.cuda}")         # Should print the CUDA version PyTorch was built with
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # mode = 'point_FTLE_regression'
     mode = 'upsampling'
@@ -1184,6 +1191,7 @@ if __name__=="__main__":
     elif mode == 'upsampling':
         # future mode: low resolution pathlines + low resolution FTLE -> high resolution FTLE
         dataset = FTLEUpsamplingTrainDataset(cfg, useCacheSystem=True)
+        build_test_dataset(cfg)
         lowResX,lowResY=dataset.lowResFTLE[0].shape[0],dataset.lowResFTLE[0].shape[1]
         cfg['lowResX']=lowResX
         cfg['lowResY']=lowResY
