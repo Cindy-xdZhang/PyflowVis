@@ -917,7 +917,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
             self.lowResPathlines = torch.stack(lowResPathlinesData)
             self.labels = torch.stack(FTLE_fieldsHighRes)
 
-        if useCacheSystem:
+        if useCacheSystem and not LoadCacheSuccess:
             try:
                 # use the same tag to construct the path (if the previous load failed, need to reconstruct)
                 key_obj = {
