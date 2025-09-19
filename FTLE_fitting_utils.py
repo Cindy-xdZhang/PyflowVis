@@ -824,7 +824,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
                 "patchStride": int(patch_stride),
             }
             tag = stable_hash(key_obj, prefix="FTLEUpsamplingTrainingDataset_")
-            cache_dir = os.path.join("./outputs", "temp")
+            cache_dir = os.path.join(config.cache_dir, "temp")
             os.makedirs(cache_dir, exist_ok=True)
             cache_path = os.path.join(cache_dir, f"{tag}.npz")
 
@@ -937,7 +937,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     "patchStride": int(patch_stride),
                 }
                 tag = stable_hash(key_obj, prefix="FTLEUpsamplingTrainingDataset_")
-                cache_dir = os.path.join("outputs", "temp")
+                cache_dir = os.path.join(config.cache_dir, "temp")
                 os.makedirs(cache_dir, exist_ok=True)
                 cache_path = os.path.join(cache_dir, f"{tag}.npz")
                 np.savez(cache_path,

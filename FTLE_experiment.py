@@ -796,7 +796,7 @@ def build_test_dataset(config):
         "localized": bool(localized),
     }
     tag = stable_hash(key_obj, prefix="FTLEUpsamplingTestDataset_")
-    cache_dir = os.path.join("./outputs", "temp")
+    cache_dir = os.path.join(config.cache_dir, "temp")
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, f"{tag}.npz")
 
@@ -1145,8 +1145,10 @@ def relocate_flow2d_dataset_folder(config):
     import platform
     if platform.system() == "Windows":
         config.dataset.dat_dir="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d"
+        config.cache_dir="./outputs/"
     elif platform.system() == "Linux":
-        config.dataset.dat_dir="/home/zhanx0o/DeepVortex/FLowDataFolder/"
+        config.dataset.dat_dir="/ibex/user/zhanx0o/FLowDataFolder/"
+        config.cache_dir="/ibex/user/zhanx0o/outputs/"
     else:
         raise ValueError(f"Unknown system: {platform.system()}")
 
