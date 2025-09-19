@@ -155,7 +155,7 @@ def temp_resample_amira_dataset():
     max_retries = 5
     retry_delay = 10  # 秒
 
-    for id in range(40, 200):
+    for id in range(100, 4000,10):
         id_str = f"{id:04d}"
         dest_file = os.path.join(temp_amira_folder, f"{id_str}.am")
         dest_nc_file = os.path.join(resampled_amira_folder, f"{id_str}.am")

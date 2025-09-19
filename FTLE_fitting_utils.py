@@ -3,6 +3,7 @@ from FLowUtils.VectorField2d import UnsteadyVectorField2D
 import torch,os
 import numpy as np
 import hashlib
+from DeepUtils.utils.stable_hash import stable_hash
 from FLowUtils.ScalarField2d import ScalarField2D,ScalarFieldManager
 import matplotlib.pyplot as plt
 from pnn.libs.flows import temporal_downsamplePathlineCrossPrimitive, LocLines, normalizeLines
@@ -626,9 +627,9 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
             UnsteadyVectorFields.append(double_gyre_2D([128,64],64))
         elif name == "rfc2d":
             UnsteadyVectorFields.append(rotation_four_center([64,64],32))
-        elif "GerrisFlowSolverDataTemp/*.am" in name:
-            #laod amira fiels from the folder
-            amira_folder=os.path.join(config.dataset.dat_dir, "GerrisFlowSolverDataTemp")
+        elif "GerrisFlowSolverData/*.am" in name:
+            #laod amira fiels from the folder GerrisFlowSolverData
+            amira_folder=os.path.join(config.dataset.dat_dir, "GerrisFlowSolverData")
             for file in os.listdir(amira_folder):
                 if file.endswith(".am"):
                     am_file_path=os.path.join(amira_folder, file)
@@ -641,12 +642,11 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
             try:
                 vectorfield_datapath=os.path.join(config.dataset.dat_dir, f"{name}.{config.dataset.extension}")
                 load_vector_field2d=netCDF.load_vector_field2d(vectorfield_datapath)
-                if load_vector_field2d is None:
+                if load_vector_field2d is not None:
                     UnsteadyVectorFields.append(load_vector_field2d)
             except Exception as e:
                 print(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {name} failed: {e}. Skip this field.")
     return UnsteadyVectorFields
-
 
 # Torch Dataset for training samples generated on-the-fly via generate_training_samples
 class PointWiseFTLETrainDataset(Dataset):
@@ -666,12 +666,20 @@ class PointWiseFTLETrainDataset(Dataset):
         cacheSuccess=False
         # Cache logic: build a unique tag and try to load
         if cacheSystem:
-            key_str = (
-                f"cnt={total_points_count}|ms={max_steps}|dt={flowline_dt:.8g}|ts={time_window_start_ratio:.8g}|tt={time_window_target_ratio:.8g}|"
-                f"off={offset_dist:.8g}|nb={nerbors}|unsteadyFieldNames={unsteadyFieldNames}|"
-                f"time_slice={time_slice}|LstepsPerline={LstepsPerline}|nerbors={nerbors}"
-            )
-            tag = "TrainPL_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+            key_obj = {
+                "name": "pointwise_ftle_train",
+                "cnt": int(total_points_count),
+                "ms": int(max_steps),
+                "dt": float(flowline_dt),
+                "ts": float(time_window_start_ratio),
+                "tt": float(time_window_target_ratio),
+                "off": float(offset_dist),
+                "nb": int(nerbors),
+                "unsteadyFieldNames": list(name for name in [name for name in config.dataset.names]),
+                "time_slice": int(time_slice),
+                "LstepsPerline": int(LstepsPerline),
+            }
+            tag = stable_hash(key_obj, prefix="TrainPL_")
             cache_dir = os.path.join("./outputs", "temp")
             os.makedirs(cache_dir, exist_ok=True)
             cache_path = os.path.join(cache_dir, f"{tag}.npz")
@@ -721,19 +729,27 @@ class PointWiseFTLETrainDataset(Dataset):
         
         if cacheSystem and not cacheSuccess:
             try:
-                key_str = (
-                    f"cnt={total_points_count}|ms={max_steps}|dt={flowline_dt:.8g}|ts={time_window_start_ratio:.8g}|tt={time_window_target_ratio:.8g}|"
-                    f"off={offset_dist:.8g}|nb={nerbors}|unsteadyFieldNames={unsteadyFieldNames}|"
-                    f"time_slice={time_slice}|LstepsPerline={LstepsPerline}|nerbors={nerbors}"
-                )
-                tag = "TrainPL_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+                key_obj = {
+                    "name": "pointwise_ftle_train",
+                    "cnt": int(total_points_count),
+                    "ms": int(max_steps),
+                    "dt": float(flowline_dt),
+                    "ts": float(time_window_start_ratio),
+                    "tt": float(time_window_target_ratio),
+                    "off": float(offset_dist),
+                    "nb": int(nerbors),
+                    "unsteadyFieldNames": list(name for name in [name for name in config.dataset.names]),
+                    "time_slice": int(time_slice),
+                    "LstepsPerline": int(LstepsPerline),
+                }
+                tag = stable_hash(key_obj, prefix="TrainPL_")
                 cache_dir = os.path.join("outputs", "temp")
                 os.makedirs(cache_dir, exist_ok=True)
                 cache_path = os.path.join(cache_dir, f"{tag}.npz")
                 np.savez(cache_path,
                         P=P_all.detach().cpu().numpy().astype(np.float32),
                         V=V_all.detach().cpu().numpy().astype(np.float32),
-                        meta=key_str)
+                        meta=str(key_obj))
             except Exception as e:
                 print(f"[generate_training_samples] cache save failed: {e}")
 
@@ -791,15 +807,23 @@ class FTLEUpsamplingTrainDataset(Dataset):
             return starts
 
         if useCacheSystem:
-            key_str = (
-                f"ftle_upsampling|vectorfields={all_vectorfieldsname_str}|"
-                f"timesliceCount={timesliceCount}|UPsampling={UPsampling}|"
-                f"lowResGridIntervalScale={low_res_grid_sampling}|"
-                f"time_window_start_ratio={time_window_start_ratio}|time_window_target_ratio={time_window_target_ratio}|"
-                f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|"
-                f"LstepsPerline={LstepsPerline}|localized={localized}|patchSize={patch_size}|patchStride={patch_stride}"
-            )
-            tag = "FTLEUpsamplingTrainingDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+            key_obj = {
+                "name": "ftle_upsampling_train",
+                "vectorfields": list(all_vectorfieldsname),
+                "timesliceCount": int(timesliceCount),
+                "UPsampling": int(UPsampling),
+                "lowResGridIntervalScale": float(low_res_grid_sampling),
+                "time_window_start_ratio": float(time_window_start_ratio),
+                "time_window_target_ratio": float(time_window_target_ratio),
+                "max_steps": int(max_steps),
+                "dt": float(flowline_dt),
+                "offset_dist": float(offset_dist),
+                "LstepsPerline": int(LstepsPerline),
+                "localized": bool(localized),
+                "patchSize": int(patch_size),
+                "patchStride": int(patch_stride),
+            }
+            tag = stable_hash(key_obj, prefix="FTLEUpsamplingTrainingDataset_")
             cache_dir = os.path.join("./outputs", "temp")
             os.makedirs(cache_dir, exist_ok=True)
             cache_path = os.path.join(cache_dir, f"{tag}.npz")
@@ -826,7 +850,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
 
         if not LoadCacheSuccess:
             for i,vectorfield in enumerate(UnsteadyVectorFields):
-                print(f"[generate_training_samples] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
+                print(f"[FTLEUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
                 time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 time_window_target = float(time_window_target_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
@@ -895,23 +919,30 @@ class FTLEUpsamplingTrainDataset(Dataset):
         if useCacheSystem:
             try:
                 # use the same tag to construct the path (if the previous load failed, need to reconstruct)
-                key_str = (
-                f"ftle_upsampling|vectorfields={all_vectorfieldsname_str}|"
-                f"timesliceCount={timesliceCount}|UPsampling={UPsampling}|"
-                f"lowResGridIntervalScale={low_res_grid_sampling}|"
-                f"time_window_start_ratio={time_window_start_ratio}|time_window_target_ratio={time_window_target_ratio}|"
-                f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|"
-                f"LstepsPerline={LstepsPerline}|localized={localized}|patchSize={patch_size}|patchStride={patch_stride}"
-                )
-                tag = "FTLEUpsamplingTrainingDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+                key_obj = {
+                    "name": "ftle_upsampling_train",
+                    "vectorfields": list(all_vectorfieldsname),
+                    "timesliceCount": int(timesliceCount),
+                    "UPsampling": int(UPsampling),
+                    "lowResGridIntervalScale": float(low_res_grid_sampling),
+                    "time_window_start_ratio": float(time_window_start_ratio),
+                    "time_window_target_ratio": float(time_window_target_ratio),
+                    "max_steps": int(max_steps),
+                    "dt": float(flowline_dt),
+                    "offset_dist": float(offset_dist),
+                    "LstepsPerline": int(LstepsPerline),
+                    "localized": bool(localized),
+                    "patchSize": int(patch_size),
+                    "patchStride": int(patch_stride),
+                }
+                tag = stable_hash(key_obj, prefix="FTLEUpsamplingTrainingDataset_")
                 cache_dir = os.path.join("outputs", "temp")
                 os.makedirs(cache_dir, exist_ok=True)
                 cache_path = os.path.join(cache_dir, f"{tag}.npz")
                 np.savez(cache_path,
                         Data=self.lowResFTLE.detach().cpu().numpy().astype(np.float32),
                         Labels=self.labels.detach().cpu().numpy().astype(np.float32),
-                        LowResPathlines=self.lowResPathlines.detach().cpu().numpy().astype(np.float32),
-                        meta=key_str)
+                        LowResPathlines=self.lowResPathlines.detach().cpu().numpy().astype(np.float32))
             except Exception as e:
                 print(f"[generate_training_samples] cache save failed: {e}")
 

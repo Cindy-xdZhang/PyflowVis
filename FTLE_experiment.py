@@ -15,6 +15,7 @@ from DeepUtils.loss import build_criterion_from_cfg
 from DeepUtils.optim import build_optimizer_from_cfg
 
 from FLowUtils.VectorField2d import *
+from DeepUtils.utils.stable_hash import stable_hash
 from pnn.models.point_nn import EncNPNew
 from FTLE_fitting_utils import *
 from DeepUtils.MiscFunctions import *
@@ -424,7 +425,7 @@ class UpsamplingUnetModel(nn.Module):
     """
     UNet for upsampling FTLE from lowRes to highRes
     """
-    def __init__(self, cfg, lowResX: int, lowResY: int, upscale:float,base_ch: int = 32):
+    def __init__(self, cfg, lowResX: int, lowResY: int, upscale:float,base_ch: int = 24):
         super().__init__()
         self.upscale = int(upscale)
         self.inc = DoubleConv(1, base_ch)
@@ -482,10 +483,12 @@ class UpsamplingUnetModel(nn.Module):
 
 class FTLEupsamplingFMT_UnetV2(nn.Module):
     """
-    全局 FMT 特征 + 低分辨率 FTLE → UNet 上采样
+    局部滑窗 FMT 特征 + 低分辨率 FTLE → UNet 上采样
 
-    - 将整幅场的所有 cross-primitive 一次性输入 EncNPNew（num_stages=0），得到全局特征向量 [B, D]
-    - 将该全局向量广播为 [B, D, X, Y]，与低分辨率 FTLE 的 1 个通道拼接 → [B, D+1, X, Y]
+    - 使用 2D 滑窗（窗口大小 = self.FMT_focus_area，如 8x8，步长同窗口）在低分辨率网格上提取局部 patch
+    - 每个局部 patch 内将其所有 cross-primitive 拼为点云，送入 EncNPNew 得到局部特征向量 f ∈ R^D
+    - 将得到的局部特征排列为粗分辨率特征图 [B, D, Hc, Wc]（Hc、Wc 为滑窗中心网格尺寸）
+    - 对该特征图做双线性插值至 [B, D, X, Y]，再与低分辨率 FTLE 的 1 个通道拼接 → [B, D+1, X, Y]
     - 通过 UNet 编码解码，并经逐级转置卷积上采样到高分辨率
 
     输入:
@@ -502,7 +505,9 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
         self.upscale = int(upscale)
 
         # FMT 编码器（全局）：使用 num_stages=0，输出维度固定为 embed_dim
-        num_stages=2
+        num_stages=1
+        self.FMT_focus_area=8# if this is too large, too many points will make knn too slow
+
         k = int(getattr(cfg.pnn, 'k', 6)) if hasattr(cfg, 'pnn') else 6
         alpha = float(getattr(cfg.pnn, 'alpha', 1000)) if hasattr(cfg, 'pnn') else 1000.0
         beta = float(getattr(cfg.pnn, 'beta', 100)) if hasattr(cfg, 'pnn') else 100.0
@@ -511,7 +516,9 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
         self.cross_neighborsize = nerbors
         self.pointsPerPrimitive = LstepsPerline * nerbors
         self.embed_dim = int(embed_dim if embed_dim is not None else getattr(cfg.pnn, 'dim', 36))
+
         self.encoder = EncNPNew(self.pointsPerPrimitive, num_stages, self.embed_dim, k, alpha, beta)
+
         self.fmt_feature_dim= self.embed_dim* (2 ** (num_stages - 0))
 
         in_channels = self.fmt_feature_dim+ 1  # 全局 D 通道 + 低分辨率 FTLE 1 通道
@@ -539,20 +546,53 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
             in_ch = out_ch
         self.out_high = nn.Conv2d(in_ch, 1, kernel_size=1)
 
+    def _tiling_starts(self, length: int, k: int):
+        if k >= length:
+            return [0]
+        s = int(k)
+        starts = list(range(0, length - k + 1, s))
+        last = length - k
+        if starts[-1] != last:
+            starts.append(last)
+        return starts
+
     def forward(self, lowResFTLE: torch.Tensor, lowResPathlines: torch.Tensor) -> torch.Tensor:
         B, X, Y = lowResFTLE.shape
         _, N, nerbors, L, Dim = lowResPathlines.shape
         assert N == X * Y, "lowResPathlines second dim must be X*Y"
         assert nerbors == self.cross_neighborsize, "nerbors mismatch with model setting"
 
-        # 将整幅场的所有点拼为一个大点集，输入 EncNPNew 以提取全局特征
-        P = lowResPathlines.reshape(B, N * nerbors * L, Dim).contiguous()  # [B, N*K, 3]
-        points_N3 = P
-        points_3N = P.permute(0, 2, 1).contiguous()
-        global_feat = self.encoder(points_N3, points_3N)  # [B, D]
+        # 1) 局部滑窗提取局部点云特征，得到粗分辨率特征图 [B, D, Hc, Wc]
+        k = int(self.FMT_focus_area)
+        row_starts = self._tiling_starts(int(X), k)
+        col_starts = self._tiling_starts(int(Y), k)
+        Hc, Wc = len(row_starts), len(col_starts)
 
-        # 广播到空间维度并与低分辨率 FTLE 拼接
-        feat_map = global_feat.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, X, Y)  # [B, D, X, Y]
+        feat_coarse = lowResFTLE.new_zeros((B, self.fmt_feature_dim, Hc, Wc))
+        for ri, i0 in enumerate(row_starts):
+            i1 = min(i0 + k, int(X))
+            for ci, j0 in enumerate(col_starts):
+                j1 = min(j0 + k, int(Y))
+                # 收集该窗口内的线性索引
+                idx_list = []
+                for rr in range(i0, i1):
+                    base = rr * int(Y)
+                    idx_list.extend(range(base + j0, base + j1))
+                if len(idx_list) == 0:
+                    continue
+                idx_tensor = torch.as_tensor(idx_list, dtype=torch.long, device=lowResFTLE.device)
+                # 选择该窗口内的 pathlines，并拼为点云
+                pl_win = lowResPathlines[:, idx_tensor, ...]  # [B, M, nerbors, L, Dim]
+                B2, M, _, _, _ = pl_win.shape
+                P = pl_win.reshape(B2, M * nerbors * L, Dim).contiguous()  # [B, M*K, 3]
+                points_N3 = P
+                points_3N = P.permute(0, 2, 1).contiguous()
+                feat_win = self.encoder(points_N3, points_3N)  # [B, D]
+                feat_coarse[:, :, ri, ci] = feat_win
+
+        # 2) 将粗网格特征双线性插值到 [X, Y]
+        feat_map = F.interpolate(feat_coarse, size=(int(X), int(Y)), mode='bilinear', align_corners=False)
+        # 3) 与低分辨率 FTLE 拼接
         ftle_in = lowResFTLE.unsqueeze(1)  # [B, 1, X, Y]
         x_in = torch.cat([ftle_in, feat_map], dim=1)  # [B, D+1, X, Y]
 
@@ -713,7 +753,9 @@ def build_test_dataset(config):
     test_vectorfield_name = config['test_vectorfield'] if 'test_vectorfield' in config else config.dataset.names[0]
     vectorfield_datapath = os.path.join(config.dataset.dat_dir, f"{test_vectorfield_name}.{config.dataset.extension}")
     vectorfield = netCDF.load_vector_field2d(vectorfield_datapath)
-
+    if vectorfield is None:
+        print(f"[build_test_dataset] load {test_vectorfield_name} failed. Skip this field.")
+        return None, None, None, None
     tmin, tmax = float(vectorfield.tmin), float(vectorfield.tmax)
     time_window_start_ratio = float(config.dataset.t_start)
     time_window_target_ratio = float(config.dataset.t_target)
@@ -731,15 +773,21 @@ def build_test_dataset(config):
     localized = bool(config.pcds.localized)
 
     # 缓存键
-    key_str = (
-        f"ftle_upsampling_test|vectorfield={test_vectorfield_name}|"
-        f"timesliceCount={timesliceCount}|UPsampling={up}|"
-        f"lowResGridIntervalScale={low_res_grid_sampling}|"
-        f"time_window_start_ratio={time_window_start_ratio}|time_window_target_ratio={time_window_target_ratio}|"
-        f"max_steps={max_steps}|dt={flowline_dt:.8g}|offset_dist={offset_dist:.8g}|"
-        f"LstepsPerline={LstepsPerline}|localized={localized}"
-    )
-    tag = "FTLEUpsamplingTestDataset_" + hashlib.md5(key_str.encode("utf-8")).hexdigest()[:16]
+    key_obj = {
+        "name": "ftle_upsampling_test",
+        "vectorfield": str(test_vectorfield_name),
+        "timesliceCount": int(timesliceCount),
+        "UPsampling": int(up),
+        "lowResGridIntervalScale": float(low_res_grid_sampling),
+        "time_window_start_ratio": float(time_window_start_ratio),
+        "time_window_target_ratio": float(time_window_target_ratio),
+        "max_steps": int(max_steps),
+        "dt": float(flowline_dt),
+        "offset_dist": float(offset_dist),
+        "LstepsPerline": int(LstepsPerline),
+        "localized": bool(localized),
+    }
+    tag = stable_hash(key_obj, prefix="FTLEUpsamplingTestDataset_")
     cache_dir = os.path.join("./outputs", "temp")
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, f"{tag}.npz")
@@ -796,7 +844,6 @@ def build_test_dataset(config):
             LowResFTLE=lowResFTLE_all_t.detach().cpu().numpy().astype(np.float32),
             HighResFTLE=highResFTLE_all_t.detach().cpu().numpy().astype(np.float32),
             LowResPathlines=lowResPathlines_all.detach().cpu().numpy().astype(np.float32),
-            meta=key_str,
         )
     except Exception as e:
         print(f"[build_test_dataset] cache save failed: {e}")
@@ -826,97 +873,98 @@ def test_UpsamplingModel(config, model, device,visualize=False):
         # 使用带缓存的数据集
         lowResFTLE_all, lowResPathlines_all, highResFTLE_all, vectorfield = build_test_dataset(config)
 
-        patch_size = int(getattr(config.dataset, 'patchSize', 32))
-        patch_stride = int(getattr(config.dataset, 'patchStride', 2))
-        LstepsPerline = int(config.pcds.sampled_points_per_line)
+        if lowResFTLE_all is not None and lowResPathlines_all is not None and highResFTLE_all is not None and vectorfield is not None:
+            patch_size = int(getattr(config.dataset, 'patchSize', 32))
+            patch_stride = int(getattr(config.dataset, 'patchStride', 2))
+            patch_stride=patch_stride*4 if visualize else patch_stride # faster test if not visualize
 
-        mse_sum = 0.0
-        mae_sum = 0.0
-        maxe_sum = 0.0
-        psnr_sum = 0.0
-        sample_count = int(lowResFTLE_all.shape[0])
+            LstepsPerline = int(config.pcds.sampled_points_per_line)
+            mse_sum = 0.0
+            mae_sum = 0.0
+            maxe_sum = 0.0
+            psnr_sum = 0.0
+            sample_count = int(lowResFTLE_all.shape[0])
+            for test_i in range(sample_count):
+                low_resFTLE_field = lowResFTLE_all[test_i]
+                high_resFTLE_field = highResFTLE_all[test_i]
+                lowResPathlinesPreprocessed = lowResPathlines_all[test_i]
 
-        for test_i in range(sample_count):
-            low_resFTLE_field = lowResFTLE_all[test_i]
-            high_resFTLE_field = highResFTLE_all[test_i]
-            lowResPathlinesPreprocessed = lowResPathlines_all[test_i]
+                # normalization like training（以训练集统计量归一化低分辨率输入）
+                ftle_min = float(config.ftle_min)
+                ftle_max = float(config.ftle_max)
+                low_resFTLE_field_clip = np.clip(low_resFTLE_field, ftle_min, ftle_max)
+                low_resFTLE_field_norm = (low_resFTLE_field_clip - ftle_min) / max(1e-12, (ftle_max - ftle_min))
 
-            # normalization like training（以训练集统计量归一化低分辨率输入）
-            ftle_min = float(config.ftle_min)
-            ftle_max = float(config.ftle_max)
-            low_resFTLE_field_clip = np.clip(low_resFTLE_field, ftle_min, ftle_max)
-            low_resFTLE_field_norm = (low_resFTLE_field_clip - ftle_min) / max(1e-12, (ftle_max - ftle_min))
+                ny_low, nx_low = low_resFTLE_field.shape
+                ny_hi, nx_hi = high_resFTLE_field.shape
+                ry = float(ny_hi) / float(max(1, ny_low))
+                rx = float(nx_hi) / float(max(1, nx_low))
 
-            ny_low, nx_low = low_resFTLE_field.shape
-            ny_hi, nx_hi = high_resFTLE_field.shape
-            ry = float(ny_hi) / float(max(1, ny_low))
-            rx = float(nx_hi) / float(max(1, nx_low))
+                row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
+                col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
 
-            row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
-            col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
+                pred_grid = np.zeros((ny_hi, nx_hi), dtype=np.float32)
+                weight_grid = np.zeros((ny_hi, nx_hi), dtype=np.float32)
 
-            pred_grid = np.zeros((ny_hi, nx_hi), dtype=np.float32)
-            weight_grid = np.zeros((ny_hi, nx_hi), dtype=np.float32)
+                for i0 in row_starts:
+                    i1 = min(i0 + patch_size, ny_low)
+                    for j0 in col_starts:
+                        j1 = min(j0 + patch_size, nx_low)
 
-            for i0 in row_starts:
-                i1 = min(i0 + patch_size, ny_low)
-                for j0 in col_starts:
-                    j1 = min(j0 + patch_size, nx_low)
+                        # map to high-res
+                        hi_h = max(1, int(round((i1 - i0) * ry)))
+                        hi_w = max(1, int(round((j1 - j0) * rx)))
+                        hi_i0 = int(round(i0 * ry))
+                        hi_j0 = int(round(j0 * rx))
+                        if i0 == row_starts[-1]:
+                            hi_i0 = ny_hi - hi_h
+                        if j0 == col_starts[-1]:
+                            hi_j0 = nx_hi - hi_w
+                        hi_i1 = hi_i0 + hi_h
+                        hi_j1 = hi_j0 + hi_w
 
-                    # map to high-res
-                    hi_h = max(1, int(round((i1 - i0) * ry)))
-                    hi_w = max(1, int(round((j1 - j0) * rx)))
-                    hi_i0 = int(round(i0 * ry))
-                    hi_j0 = int(round(j0 * rx))
-                    if i0 == row_starts[-1]:
-                        hi_i0 = ny_hi - hi_h
-                    if j0 == col_starts[-1]:
-                        hi_j0 = nx_hi - hi_w
-                    hi_i1 = hi_i0 + hi_h
-                    hi_j1 = hi_j0 + hi_w
+                        # build inputs
+                        lr_patch_norm = torch.from_numpy(low_resFTLE_field_norm[i0:i1, j0:j1]).unsqueeze(0).to(device).float()
 
-                    # build inputs
-                    lr_patch_norm = torch.from_numpy(low_resFTLE_field_norm[i0:i1, j0:j1]).unsqueeze(0).to(device).float()
+                        # select corresponding pathlines groups
+                        idx_list = []
+                        for rr in range(i0, i1):
+                            base = rr * nx_low
+                            for cc in range(j0, j1):
+                                idx_list.append(base + cc)
+                        idx_tensor = torch.as_tensor(idx_list, dtype=torch.long)
+                        pl_patch = lowResPathlinesPreprocessed[idx_tensor].unsqueeze(0).to(device).float()
 
-                    # select corresponding pathlines groups
-                    idx_list = []
-                    for rr in range(i0, i1):
-                        base = rr * nx_low
-                        for cc in range(j0, j1):
-                            idx_list.append(base + cc)
-                    idx_tensor = torch.as_tensor(idx_list, dtype=torch.long)
-                    pl_patch = lowResPathlinesPreprocessed[idx_tensor].unsqueeze(0).to(device).float()
+                        # forward
+                        pred_patch = model(lr_patch_norm, pl_patch).to(device).float()  # [1, hi_h, hi_w]
+                        # inverse normalization
+                        pred_patch = pred_patch * (ftle_max - ftle_min) + ftle_min
+                        patch_np = pred_patch.squeeze(0).detach().cpu().numpy()
+                        pred_grid[hi_i0:hi_i1, hi_j0:hi_j1] += patch_np
+                        weight_grid[hi_i0:hi_i1, hi_j0:hi_j1] += 1.0
 
-                    # forward
-                    pred_patch = model(lr_patch_norm, pl_patch).to(device).float()  # [1, hi_h, hi_w]
-                    # inverse normalization
-                    pred_patch = pred_patch * (ftle_max - ftle_min) + ftle_min
-                    patch_np = pred_patch.squeeze(0).detach().cpu().numpy()
-                    pred_grid[hi_i0:hi_i1, hi_j0:hi_j1] += patch_np
-                    weight_grid[hi_i0:hi_i1, hi_j0:hi_j1] += 1.0
+                # metrics (raw scale)
+                weight_grid = np.clip(weight_grid, 1.0, None)
+                pred_grid = pred_grid / weight_grid
 
-            # metrics (raw scale)
-            weight_grid = np.clip(weight_grid, 1.0, None)
-            pred_grid = pred_grid / weight_grid
+                label_y_b = high_resFTLE_field.astype(np.float32)
+                pred_b = pred_grid.astype(np.float32)
+                mse, mae, maxe, psnr = compute_metrics(label_y_b, pred_b)
 
-            label_y_b = high_resFTLE_field.astype(np.float32)
-            pred_b = pred_grid.astype(np.float32)
-            mse, mae, maxe, psnr = compute_metrics(label_y_b, pred_b)
+                if visualize and test_i == sample_count-1:
+                    visualize_FTLEUpampling(label_y_b, pred_b, low_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
 
-            if visualize and test_i == sample_count-1:
-                visualize_FTLEUpampling(label_y_b, pred_b, low_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
+                mse_sum += mse
+                mae_sum += mae
+                maxe_sum += maxe
+                psnr_sum += psnr
 
-            mse_sum += mse
-            mae_sum += mae
-            maxe_sum += maxe
-            psnr_sum += psnr
-
-        mse = mse_sum / sample_count
-        mae = mae_sum / sample_count
-        maxe = maxe_sum / sample_count
-        psnr = psnr_sum / sample_count
-        print(f"test average: mse={mse:.6f}, mae={mae:.6f}, maxe={maxe:.6f}, psnr={psnr:.6f}")
-        return {"mse": mse, "mae": mae, "maxe": maxe, "psnr": psnr}
+            mse = mse_sum / sample_count
+            mae = mae_sum / sample_count
+            maxe = maxe_sum / sample_count
+            psnr = psnr_sum / sample_count
+            print(f"test average: mse={mse:.6f}, mae={mae:.6f}, maxe={maxe:.6f}, psnr={psnr:.6f}")
+            return {"mse": mse, "mae": mae, "maxe": maxe, "psnr": psnr}
 
      
 
@@ -1089,11 +1137,12 @@ def relocate_flow2d_dataset_folder(config):
     if platform.system() == "Windows":
         config.dataset.dat_dir=" C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d"
     elif platform.system() == "Linux":
-        config.dataset.dat_dir="/home/zhanx0o/DeepVortex/FlowDataFolder"
+        config.dataset.dat_dir="/home/zhanx0o/DeepVortex/FLowDataFolder/"
     else:
         raise ValueError(f"Unknown system: {platform.system()}")
-    
 
+
+    
 if __name__=="__main__":
     print("PyTorch version:", torch.__version__)
     print("torch.cuda.is_available():",torch.cuda.is_available())  # Should return True

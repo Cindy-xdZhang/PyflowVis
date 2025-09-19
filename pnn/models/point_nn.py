@@ -157,6 +157,7 @@ class EncNPNew(nn.Module):
         self.embed_dim = embed_dim
         self.alpha, self.beta = alpha, beta
 
+
         # Raw-point Embedding
         self.raw_point_embed = PosE_Initial(3, self.embed_dim, self.alpha, self.beta)
 
