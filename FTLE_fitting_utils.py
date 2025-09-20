@@ -622,14 +622,15 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
     UnsteadyVectorFields=[]
     for name in config.dataset.names:
         if name == "beads2d":
-            UnsteadyVectorFields.append(beadsFLow([64,64],32))
+            UnsteadyVectorFields.append(beadsFLow([128,128],32))
         elif name == "doublegyre2d":
-            UnsteadyVectorFields.append(double_gyre_2D([128,64],64))
+            UnsteadyVectorFields.append(double_gyre_2D([256,128],64))
         elif name == "rfc2d":
-            UnsteadyVectorFields.append(rotation_four_center([64,64],32))
-        elif "GerrisFlowSolverData/*.am" in name:
+            UnsteadyVectorFields.append(rotation_four_center([128,128],32))
+        elif "GerrisFlowSolverData" in name:
             #laod amira fiels from the folder GerrisFlowSolverData
-            amira_folder=os.path.join(config.dataset.dat_dir, "GerrisFlowSolverData")
+            amira_folder=os.path.join(config.dataset.dat_dir, name)
+            logging.info(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load amira files from {amira_folder}")
             for file in os.listdir(amira_folder):
                 if file.endswith(".am"):
                     am_file_path=os.path.join(amira_folder, file)
@@ -792,7 +793,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
         LstepsPerline=int(config.pcds.sampled_points_per_line)
         localized=bool(config.pcds.localized)
         patch_size=int(getattr(config.dataset, 'patchSize', 32))
-        patch_stride=int(getattr(config.dataset, 'patchStride', 2))
+        patch_stride=4*int(getattr(config.dataset, 'patchStride', 4))
         LoadCacheSuccess=False
        
         # helper: compute starts so that last window touches boundary (may overlap previous)

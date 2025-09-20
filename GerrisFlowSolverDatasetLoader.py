@@ -29,8 +29,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-resample_ratio_Spatial=0.5
-resample_ratio_Time=0.25
+resample_ratio_Spatial=0.4
+resample_ratio_Time=0.2
 
 
 
@@ -142,6 +142,15 @@ def download_with_progress(url: str, dest_path: str, resume: bool = True, chunk_
     # Finalize: rename .part to final path
     os.replace(temp_path, dest_path)
 
+# def locate_dist_path(file_name: str):
+#     # resampled amira dataset, are saved with 1000 as catogory number, and the original amira dataset are saved with 0 as catogory number
+#     # e.g. 2013.am -> flowData2D\\GerrisFlowSolverData_2000_3000\\2013.am
+#     if file_name.endswith(".am"):
+#         file_name = file_name[:-3]
+
+
+
+
 def temp_resample_amira_dataset():
     temp_amira_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverDataTemp"
     resampled_amira_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData"
@@ -155,7 +164,7 @@ def temp_resample_amira_dataset():
     max_retries = 5
     retry_delay = 10  # 秒
 
-    for id in range(0, 2000,10):
+    for id in range(4444, 4445):
         id_str = f"{id:04d}"
         dest_file = os.path.join(temp_amira_folder, f"{id_str}.am")
         dest_nc_file = os.path.join(resampled_amira_folder, f"{id_str}.am")
