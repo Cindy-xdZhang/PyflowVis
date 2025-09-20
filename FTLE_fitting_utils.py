@@ -616,11 +616,12 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
             "pred_grid": pred_grid
         }
 
-def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
+def load_UnsteadyVectorFields_netCDFOrAnalytical(flowDataFolder,vector_field_names: list[str]|str):
     netCDF = NetCDFLoader()
     amiraLoader=AmiraLoader()
     UnsteadyVectorFields=[]
-    for name in config.dataset.names:
+    vector_field_names = vector_field_names if isinstance(vector_field_names, list) else [vector_field_names]
+    for name in vector_field_names:
         if name == "beads2d":
             UnsteadyVectorFields.append(beadsFLow([128,128],32))
         elif name == "doublegyre2d":
@@ -629,7 +630,7 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
             UnsteadyVectorFields.append(rotation_four_center([128,128],32))
         elif "GerrisFlowSolverData" in name:
             #laod amira fiels from the folder GerrisFlowSolverData
-            amira_folder=os.path.join(config.dataset.dat_dir, name)
+            amira_folder=os.path.join(flowDataFolder, name)
             logging.info(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load amira files from {amira_folder}")
             for file in os.listdir(amira_folder):
                 if file.endswith(".am"):
@@ -641,7 +642,7 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(config):
                     UnsteadyVectorFields.append(load_vector_field2d)
         else:
             try:
-                vectorfield_datapath=os.path.join(config.dataset.dat_dir, f"{name}.{config.dataset.extension}")
+                vectorfield_datapath=os.path.join(flowDataFolder, f"{name}.nc")
                 load_vector_field2d=netCDF.load_vector_field2d(vectorfield_datapath)
                 if load_vector_field2d is not None:
                     UnsteadyVectorFields.append(load_vector_field2d)
@@ -698,7 +699,7 @@ class PointWiseFTLETrainDataset(Dataset):
         
         #generate training samples
         if not cacheSuccess:
-            UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config)
+            UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,config.dataset.names)
             integration_interval=float(flowline_dt*max_steps)
             for i,vectorfield in enumerate(UnsteadyVectorFields):
                 logging.info(f"[generate_training_samples] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
@@ -844,7 +845,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
                          
 
-        UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config)
+        UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,config.dataset.names)
         FTLE_fieldsLowRes=[]      # list[Tensor patch_yx]
         FTLE_fieldsHighRes=[]     # list[Tensor patch_yx (hi)]
         lowResPathlinesData=[]    # list[Tensor (patch_hw groups, nerbors, L, 3)]

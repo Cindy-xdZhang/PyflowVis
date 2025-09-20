@@ -18,7 +18,7 @@ from DeepUtils.utils.stable_hash import stable_hash
 from FTLE_fitting_utils import *
 from DeepUtils.MiscFunctions import *
 from model_zoo import *
-
+import pickle
 import wandb
 GLOBAL_WANDB_PROJECT_NAME="FlowMapTokenizer"
 
@@ -40,20 +40,14 @@ def build_test_dataset(config):
         vectorfield: UnsteadyVectorField2D object (for visualization/boundary info)
     """
     # Parameter collection
-    netCDF = NetCDFLoader()
-    test_vectorfield_name = config['test_vectorfield'] if 'test_vectorfield' in config else config.dataset.names[0]
-    vectorfield_datapath = os.path.join(config.dataset.dat_dir, f"{test_vectorfield_name}.{config.dataset.extension}")
-    vectorfield = netCDF.load_vector_field2d(vectorfield_datapath)
-    if vectorfield is None:
-        logging.info(f"[build_test_dataset] load {test_vectorfield_name} failed. Skip this field.")
-        return None, None, None, None
-    tmin, tmax = float(vectorfield.tmin), float(vectorfield.tmax)
+    # 支持多个测试流场名称；兼容字符串输入
+    names_cfg = config['test_vectorfield'] if 'test_vectorfield' in config else [config.dataset.names[0]]
+    test_vectorfield_names = names_cfg if isinstance(names_cfg, (list, tuple)) else [names_cfg]
+    
+
     time_window_start_ratio = float(config.dataset.t_start)
     time_window_target_ratio = float(config.dataset.t_target)
-    time_window_start = float(time_window_start_ratio * (tmax - tmin) + tmin)
-    time_window_target = float(time_window_target_ratio * (tmax - tmin) + tmin)
     timesliceCount = int(getattr(config.dataset, 'timesliceCount', 8))
-    sample_times = np.linspace(time_window_start, time_window_target, num=timesliceCount)
 
     low_res_grid_sampling = float(config.dataset.low_res_grid_sampling)
     up = int(config.dataset.UPsampling)
@@ -66,7 +60,7 @@ def build_test_dataset(config):
     # Cache key
     key_obj = {
         "name": "ftle_upsampling_test",
-        "vectorfield": str(test_vectorfield_name),
+        "vectorfields": list(map(str, test_vectorfield_names)),
         "timesliceCount": int(timesliceCount),
         "UPsampling": int(up),
         "lowResGridIntervalScale": float(low_res_grid_sampling),
@@ -81,7 +75,7 @@ def build_test_dataset(config):
     tag = stable_hash(key_obj, prefix="FTLEUpsamplingTestDataset_")
     cache_dir = os.path.join(config.cache_dir, "temp")
     os.makedirs(cache_dir, exist_ok=True)
-    cache_path = os.path.join(cache_dir, f"{tag}.npz")
+    cache_path = os.path.join(cache_dir, f"{tag}.pkl")
 
     lowResFTLE_list = []
     highResFTLE_list = []
@@ -90,65 +84,74 @@ def build_test_dataset(config):
     # Try loading cache first
     if os.path.exists(cache_path):
         try:
-            data = np.load(cache_path)
-            lowResFTLE_all = data["LowResFTLE"]
-            highResFTLE_all = data["HighResFTLE"]
-            lowResPathlines_np = data["LowResPathlines"]
-            # Convert back to torch; subsequent tests index pathlines using torch tensors
-            lowResPathlines_all = torch.from_numpy(lowResPathlines_np).float()
-            logging.info(f"[build_test_dataset] loaded {lowResFTLE_all.shape[0]} samples from cache {cache_path}")
-            return lowResFTLE_all, lowResPathlines_all, highResFTLE_all, vectorfield
+            data = pickle.load(open(cache_path, "rb"))
+            lowResFTLE_all_list = data["lowResFTLE_list"]
+            highResFTLE_all_list = data["highResFTLE_list"]
+            lowResPathlines_all = data["lowResPathlines_list"]
+            assert len(lowResFTLE_all_list) == len(highResFTLE_all_list) ==len(lowResPathlines_all)
+            logging.info(f"[build_test_dataset] loaded {len(lowResPathlines_all)} samples from cache {cache_path}")
+            return lowResFTLE_all_list,  lowResPathlines_all,highResFTLE_all_list
         except Exception as e:
             logging.info(f"[build_test_dataset] cache load failed: {e}. Regenerating...")
 
-    # Generate data
-    for time_slice in sample_times:
-        # Low-resolution slice and corresponding pathlines
-        low_resFTLE_field, lowResPathlines, low_res_xs, low_res_ys = generate_FTLE_SLICE(
-            config, vectorfield, float(time_slice), flowline_dt, max_steps, low_res_grid_sampling
-        )
-        # High-resolution (as ground truth)
-        high_res_sampling = up * low_res_grid_sampling
-        high_resFTLE_field, _, high_res_xs, high_res_ys = generate_FTLE_SLICE(
-            config, vectorfield, float(time_slice), flowline_dt, max_steps, high_res_sampling
-        )
 
-        # Preprocessing consistent with training: temporal downsampling and normalization (no FTLE normalization)
-        temporal_sampled_P_all = temporal_downsamplePathlineCrossPrimitive(lowResPathlines, int(LstepsPerline))
-        # The training set used constant 5 as cross neighborsize; keep consistent here
-        lowResPathlinesPreprocessed = preprocess_localization_normalization(
-            temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False
-        ).cpu().float()
+    for vf_name in test_vectorfield_names:
+        vf_obj = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,vf_name)[0]
+        if vf_obj is None:
+            logging.info(f"[build_test_dataset] load {vf_name} failed. Skip this field.")
+            continue
+  
+        # 针对每个流场单独确定时间窗口
+        tmin, tmax = float(vf_obj.tmin), float(vf_obj.tmax)
+        time_window_start = float(time_window_start_ratio * (tmax - tmin) + tmin)
+        time_window_target = float(time_window_target_ratio * (tmax - tmin) + tmin)
+        sample_times = np.linspace(time_window_start, time_window_target, num=timesliceCount)
 
-        lowResFTLE_list.append(torch.from_numpy(low_resFTLE_field).float())
-        highResFTLE_list.append(torch.from_numpy(high_resFTLE_field).float())
-        lowResPathlines_list.append(lowResPathlinesPreprocessed)
+        for time_slice in sample_times:
+            # Low-resolution slice and corresponding pathlines
+            low_resFTLE_field, lowResPathlines, low_res_xs, low_res_ys = generate_FTLE_SLICE(
+                config, vf_obj, float(time_slice), flowline_dt, max_steps, low_res_grid_sampling
+            )
+            # High-resolution (as ground truth)
+            high_res_sampling = up * low_res_grid_sampling
+            high_resFTLE_field, _, high_res_xs, high_res_ys = generate_FTLE_SLICE(
+                config, vf_obj, float(time_slice), flowline_dt, max_steps, high_res_sampling
+            )
 
-    # Stack
-    lowResFTLE_all_t = torch.stack(lowResFTLE_list, dim=0)
-    highResFTLE_all_t = torch.stack(highResFTLE_list, dim=0)
-    lowResPathlines_all = torch.stack(lowResPathlines_list, dim=0)
 
+            # Preprocessing consistent with training: temporal downsampling and normalization (no FTLE normalization)
+            temporal_sampled_P_all = temporal_downsamplePathlineCrossPrimitive(lowResPathlines, int(LstepsPerline))
+            # 与训练保持一致的邻域大小 5
+            lowResPathlinesPreprocessed = preprocess_localization_normalization(
+                temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False
+            ).cpu().float()
+
+            lowResFTLE_list.append(low_resFTLE_field)
+            highResFTLE_list.append(high_resFTLE_field)
+            lowResPathlines_list.append(lowResPathlinesPreprocessed)
+
+        
     # Save cache (use float32)
     try:
-        np.savez(
-            cache_path,
-            LowResFTLE=lowResFTLE_all_t.detach().cpu().numpy().astype(np.float32),
-            HighResFTLE=highResFTLE_all_t.detach().cpu().numpy().astype(np.float32),
-            LowResPathlines=lowResPathlines_all.detach().cpu().numpy().astype(np.float32),
-        )
-        logging.info(f"[build_test_dataset] saved {lowResFTLE_all_t.shape[0]} samples to cache {cache_path}")
+        with open(cache_path, "wb") as f:
+            pickle.dump({"lowResFTLE_list": lowResFTLE_list, "highResFTLE_list": highResFTLE_list, "lowResPathlines_list": lowResPathlines_list}, f)
+        logging.info(f"[build_test_dataset] saved {len(lowResFTLE_list)} samples to cache {cache_path}")
     except Exception as e:
         logging.info(f"[build_test_dataset] cache save failed: {e}")
 
     # Return numpy (FTLE) + torch (Pathlines), consistent with test usage
+
     return (
-        lowResFTLE_all_t.detach().cpu().numpy().astype(np.float32),
-        lowResPathlines_all,
-        highResFTLE_all_t.detach().cpu().numpy().astype(np.float32),
-        vectorfield,
+        lowResFTLE_list,
+        lowResPathlines_list,
+        highResFTLE_list
     )
+
+test_times=0
+
 def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
+    global test_times
+    test_times += 1
     with torch.no_grad():
         model.to(device).eval()
 
@@ -165,11 +168,12 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
 
         # Use cached dataset
         if test_dataset is None:
-            lowResFTLE_all, lowResPathlines_all, highResFTLE_all, vectorfield = build_test_dataset(config)
+            lowResFTLE_all, lowResPathlines_all, highResFTLE_all = build_test_dataset(config)
         else:
-            lowResFTLE_all, lowResPathlines_all, highResFTLE_all, vectorfield = test_dataset
+            lowResFTLE_all, lowResPathlines_all, highResFTLE_all = test_dataset
 
-        if lowResFTLE_all is not None and lowResPathlines_all is not None and highResFTLE_all is not None and vectorfield is not None:
+
+        if lowResFTLE_all is not None and lowResPathlines_all is not None and highResFTLE_all is not None :
             patch_size = int(getattr(config.dataset, 'patchSize', 32))
             patch_stride = int(getattr(config.dataset, 'patchStride', 2))
             patch_stride=patch_stride*4 if visualize==False else patch_stride # faster test if not visualize
@@ -179,17 +183,19 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
             mae_sum = 0.0
             maxe_sum = 0.0
             psnr_sum = 0.0
-            sample_count = int(lowResFTLE_all.shape[0])
+            psnr_bilinear_sum = 0.0
+            sample_count = int(len(lowResPathlines_all))
             for test_i in range(sample_count):
                 low_resFTLE_field = lowResFTLE_all[test_i]
-                high_resFTLE_field = highResFTLE_all[test_i]
-                lowResPathlinesPreprocessed = lowResPathlines_all[test_i]
+                high_resFTLE_field =highResFTLE_all[test_i]
+                lowResPathlinesPreprocessed =lowResPathlines_all[test_i]
 
                 # Normalization as in training (normalize low-res input using train-set statistics)
                 ftle_min = float(config.ftle_min)
                 ftle_max = float(config.ftle_max)
                 low_resFTLE_field_clip = np.clip(low_resFTLE_field, ftle_min, ftle_max)
                 low_resFTLE_field_norm = (low_resFTLE_field_clip - ftle_min) / max(1e-12, (ftle_max - ftle_min))
+                low_resFTLE_field_norm=torch.from_numpy(low_resFTLE_field_norm).float()
 
                 ny_low, nx_low = low_resFTLE_field.shape
                 ny_hi, nx_hi = high_resFTLE_field.shape
@@ -220,7 +226,7 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
                         hi_j1 = hi_j0 + hi_w
 
                         # build inputs
-                        lr_patch_norm = torch.from_numpy(low_resFTLE_field_norm[i0:i1, j0:j1]).unsqueeze(0).to(device).float()
+                        lr_patch_norm = low_resFTLE_field_norm[i0:i1, j0:j1].unsqueeze(0).to(device).float()
 
                         # select corresponding pathlines groups
                         idx_list = []
@@ -247,7 +253,18 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
                 pred_b = pred_grid.astype(np.float32)
                 mse, mae, maxe, psnr = compute_metrics(label_y_b, pred_b)
 
+                # 计算双线性插值基线的 PSNR
+                if test_times == 1:
+                    with torch.no_grad():
+                        lr = torch.from_numpy(low_resFTLE_field)[None, None, ...].float()
+                        lr_up = torch.nn.functional.interpolate(lr, size=(label_y_b.shape[0], label_y_b.shape[1]), mode='bilinear', align_corners=False)[0, 0]
+                        bilinear_grid = lr_up.detach().cpu().numpy().astype(np.float32)
+                    _, _, _, psnr_bilinear = compute_metrics(label_y_b, bilinear_grid)
+                    psnr_bilinear_sum += psnr_bilinear
+
                 if visualize and test_i == sample_count-1:
+                    vectorfield_4vis = config.test_vectorfield[-1] if isinstance(config.test_vectorfield, list) else [config.test_vectorfield]
+                    vectorfield = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,vectorfield_4vis)[0]
                     visualize_FTLEUpampling(label_y_b, pred_b, low_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
 
                 mse_sum += mse
@@ -259,6 +276,9 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
             mae = mae_sum / sample_count
             maxe = maxe_sum / sample_count
             psnr = psnr_sum / sample_count
+            psnr_bilinear = psnr_bilinear_sum / sample_count
+            if test_times == 1:
+                logging.info(f"baseline psnr_bilinear={psnr_bilinear:.6f}")
             logging.info(f"test average: mse={mse:.6f}, mae={mae:.6f}, maxe={maxe:.6f}, psnr={psnr:.6f}")
             return {"mse": mse, "mae": mae, "maxe": maxe, "psnr": psnr}
 
@@ -357,7 +377,10 @@ def train_model(config, model, dataset, device,test_dataset=None):
                 best_psnr = cur_psnr
                 best_state_dict = copy.deepcopy(model.state_dict())
                 logging.info(f"[best] epoch {epoch}: psnr={best_psnr:.2f} dB (checkpoint updated)")
-            logging.info(f"epoch {epoch}: {LOSS_NAME} ={epoch_avg_loss:.6f}. Test:mse={Res['mse']:.6f}, mae={Res['mae']:.6f}, maxe={Res['maxe']:.6f}, psnr={cur_psnr:.2f} dB") if Res is not None else logging.info(f"epoch {epoch}: {LOSS_NAME} ={epoch_avg_loss:.6f}")
+            if Res is not None:
+                logging.info(f"epoch {epoch}: {LOSS_NAME} ={epoch_avg_loss:.6f}. Test:mse={Res['mse']:.6f}, mae={Res['mae']:.6f}, maxe={Res['maxe']:.6f}, psnr={cur_psnr:.2f} dB")
+            else:
+                logging.info(f"epoch {epoch}: {LOSS_NAME} ={epoch_avg_loss:.6f}")
             if config['wandb']:
                 wandb.log({"epoch": epoch,  "epoch_Loss": epoch_avg_loss, "test_mse": Res['mse'], "test_mae": Res['mae'], "test_maxe": Res['maxe'], "test_psnr": cur_psnr})
         else:
@@ -371,7 +394,7 @@ def train_model(config, model, dataset, device,test_dataset=None):
         logging.info(f"[final] loaded best checkpoint with best psnr={best_psnr:.2f} dB")
         test_result= task_init_fn(config, model,test_dataset, device=str(device), visualize=True) if task_init_fn is not None and callable(task_init_fn) else None
         if config['wandb'] and test_result is not None and isinstance(test_result,dict):            
-            wandb.summary.update({"best_test_mse": test_result['mse'],"best_test_psnr": test_result['psnr']})
+            wandb.summary.update({"best_test_mse": test_result['mse'],"best_test_psnr": test_result['psnr'], "best_test_psnr_bilinear": test_result.get('psnr_bilinear', float('nan'))})
             for key, value in test_result.items():
                 wandb.summary.update({key: value})
             wandb.finish()

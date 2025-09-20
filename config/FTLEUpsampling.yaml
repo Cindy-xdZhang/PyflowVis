@@ -1,7 +1,7 @@
 seed: 7068
 epochs: 6
 train_points_count: 72000
-batch_size: 24
+batch_size: 12
 print_freq: 200
 
 lr: 0.0001
@@ -17,9 +17,10 @@ model:
   # NAME: FTLEUpsamplingFMT_Unet
   # NAME: FTLEUpsamplingFMT_Vit
   # NAME: FTLEUpsamplingFMT_UnetV2
-  # NAME: ESPCN
+  NAME: ESPCN
   # NAME: FTLEUpsamplingViTBaseline
-  NAME: ConditionalFMTNet
+  # NAME: ConditionalFMTNet
+  # NAME: FTLEUpsamplingFMT_Vit_Version2
 
 wandb: False 
 
@@ -31,7 +32,7 @@ dataset:
 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d  GerrisFlowSolverData/*.am
-  names: [doublegyre2d,GerrisFlowSolverDataTiny]
+  names: [GerrisFlowSolverDataTiny]
   extension: nc
   t_start: 0.2 #% for the whole time
   t_target: 0.8
@@ -39,7 +40,7 @@ dataset:
   patchStride: 20 # when do fast testing or generate traing dataset, real patchStride is patchStride*4(for faster testing and training), only finaly visualize, use patchStride
   
 test_tasks: test_UpsamplingModel
-test_vectorfield: cylinder2d
+test_vectorfield: [cylinder2d,doublegyre2d]
 
 
 
@@ -47,7 +48,7 @@ test_vectorfield: cylinder2d
 pnn:
   split: 3
   points: 1024
-  stages: 0
+  stages: 2
   dim: 24
   k: 6
   alpha: 1000

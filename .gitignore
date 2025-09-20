@@ -23,3 +23,4 @@ FlowDataAndVisualizationScripts/.ipynb_checkpoints/
 *.nbi
 pnn/pointnet2_ops_lib/build/
 outputs/
+*.pkl

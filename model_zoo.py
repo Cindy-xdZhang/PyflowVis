@@ -665,12 +665,14 @@ class ConditionalFMTNet(nn.Module):
         LstepsPerline = int(getattr(cfg.pcds, 'sampled_points_per_line', 4)) if hasattr(cfg, 'pcds') else 4
         self.cross_neighborsize = nerbors
         self.pointsPerPrimitive = LstepsPerline * nerbors
-        self.embed_dim = int(embed_dim if embed_dim is not None else getattr(cfg.pnn, 'dim', 36))
+        self.num_stages = int(getattr(cfg.pnn, 'stages', 0)) if hasattr(cfg, 'pnn') else 0
+        embed_dim= int(embed_dim if embed_dim is not None else getattr(cfg.pnn, 'dim', 36))
+        self.fmt_feature_dim = embed_dim * (2 ** (self.num_stages - 0))
         # 为稳定输出维度，采用 stages=0（与 Unet/Vit 实现一致）
-        self.encoder = EncNPNew(self.pointsPerPrimitive, 0, self.embed_dim, k, alpha, beta)
+        self.encoder = EncNPNew(self.pointsPerPrimitive, self.num_stages, embed_dim, k, alpha, beta)
 
         # 点 MLP：输入维度 = token_dim + 1(lowres ftle) + 2(xy)
-        in_dim = self.embed_dim + 3
+        in_dim = self.fmt_feature_dim + 3
         layers: list[nn.Module] = []
         dim = in_dim
         for i in range(int(max(1, mlp_depth))):
@@ -694,7 +696,7 @@ class ConditionalFMTNet(nn.Module):
         points_N3 = P
         points_3N = P.permute(0, 2, 1).contiguous()
         feat = self.encoder(points_N3, points_3N)  # [B*N, D]
-        feat = feat.reshape(B, X, Y, self.embed_dim).permute(0, 3, 1, 2).contiguous()
+        feat = feat.reshape(B, X, Y, self.fmt_feature_dim).permute(0, 3, 1, 2).contiguous()
 
         # 2) 上采样至目标高分辨率
         target_h = int(X * max(1, self.upscale))
@@ -739,11 +741,15 @@ class FTLEUpsamplingFMT_Vit(nn.Module):
         LstepsPerline = int(getattr(cfg.pcds, 'sampled_points_per_line', 4)) if hasattr(cfg, 'pcds') else 4
         self.cross_neighborsize = nerbors
         self.pointsPerPrimitive = LstepsPerline * nerbors
-        self.embed_dim = int(embed_dim if embed_dim is not None else getattr(cfg.pnn, 'dim', 36))
-        self.encoder = EncNPNew(self.pointsPerPrimitive, 0, self.embed_dim, k, alpha, beta)
+        embed_dim = int(embed_dim if embed_dim is not None else getattr(cfg.pnn, 'dim', 36))
+        self.num_stages = int(getattr(cfg.pnn, 'stages', 0)) if hasattr(cfg, 'pnn') else 0
+        self.encoder = EncNPNew(self.pointsPerPrimitive, self.num_stages, embed_dim, k, alpha, beta)
+
+        self.fmt_feature_dim = embed_dim * (2 ** (self.num_stages - 0))
+
 
         # token dimension
-        self.token_in_dim = self.embed_dim + 3
+        self.token_in_dim = self.fmt_feature_dim + 3
         self.vit_dim = int(vit_dim)
         self.token_proj = nn.Linear(self.token_in_dim, self.vit_dim)
 
@@ -807,7 +813,7 @@ class FTLEUpsamplingFMT_Vit(nn.Module):
         points_N3 = P
         points_3N = P.permute(0, 2, 1).contiguous()
         feat = self.encoder(points_N3, points_3N)
-        feat = feat.reshape(B, X, Y, self.embed_dim).permute(0, 3, 1, 2).contiguous()
+        feat = feat.reshape(B, X, Y, self.fmt_feature_dim).permute(0, 3, 1, 2).contiguous()
 
         # coordinate channels
         yy = torch.linspace(0, 1, steps=X, device=lowResFTLE.device)

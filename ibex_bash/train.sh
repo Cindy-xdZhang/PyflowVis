@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -N 1
 #SBATCH --array=0
-#SBATCH -J seg
+#SBATCH -J FMT
 #SBATCH -o slurm_logs/%x.%3a.%A.out
 #SBATCH -e slurm_logs/%x.%3a.%A.err
 
@@ -32,9 +32,9 @@ echo $NUM_GPU_AVAILABLE
 
 
 #Edit below with the launching command:
-# cfg=$1
-# PY_ARGS=${@:2}
+cfg=$1
+PY_ARGS=${@:2}
 # python train.py --cfg $cfg ${PY_ARGS}
 # python train.py --config config/segmentation/pathline_transformer.yaml
 
-python FTLE_experiment.py --config config/FTLEUpsampling.yaml  
+python FTLE_experiment.py --config $cfg ${PY_ARGS}
