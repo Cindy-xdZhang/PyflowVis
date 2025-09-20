@@ -207,7 +207,10 @@ def argParseAndPrepareConfig():
     parser.add_argument("--data_dir", type=str, default=None,help="path to the dataset")
     parser.add_argument("--model_path", type=str, default=None,help="path to the model")
     parser.add_argument("--model_name", type=str, default=None,help="name of the model")
-    
+    parser.add_argument("--pnn_k", type=str, default=None,help="pnn k")
+    parser.add_argument("--pnn_stages", type=str, default=None,help="pnn stages")
+    parser.add_argument("--pnn_dim", type=str, default=None,help="pnn dim")
+
     args = parser.parse_args()
     cfg = EasyConfig()
     cfg.load(args.config, recursive=True)
@@ -231,6 +234,12 @@ def argParseAndPrepareConfig():
         cfg['model_path'] = args.model_path
     if args.model_name is not None:
         cfg['model']['NAME'] = args.model_name
+    if args.pnn_k is not None:
+        cfg['pnn']['k'] = args.pnn_k
+    if args.pnn_stages is not None:
+        cfg['pnn']['stages'] = args.pnn_stages
+    if args.pnn_dim is not None:
+        cfg['pnn']['dim'] = args.pnn_dim
 
     if 'random_seed' not in cfg:
         cfg['random_seed']=np.random.randint(0,5000)

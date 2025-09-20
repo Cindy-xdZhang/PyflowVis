@@ -16,24 +16,27 @@ model:
   # NAME: UpsamplingUnetModel
   # NAME: FTLEUpsamplingFMT_Unet
   # NAME: FTLEUpsamplingFMT_Vit
-  NAME: FTLEUpsamplingFMT_UnetV2
+  # NAME: FTLEUpsamplingFMT_UnetV2
+  # NAME: ESPCN
+  # NAME: FTLEUpsamplingViTBaseline
+  NAME: ConditionalFMTNet
 
 wandb: False 
 
 dataset:
-  timesliceCount: 10 # total data set is    NumberOfVectorFields*timesliceCount* (VectorFieldGridRes//PatchSize)   
+  timesliceCount: 5 # total data set is    NumberOfVectorFields*timesliceCount* (VectorFieldGridRes//PatchSize)   
 
   low_res_grid_sampling: 0.5 #low resolution ftle's grid =vectorfield.grid*low_res_grid_sampling 
   UPsampling: 4 # must be integer
 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d  GerrisFlowSolverData/*.am
-  names: [doublegyre2d,GerrisFlowSolverData0000_1000]
+  names: [doublegyre2d,GerrisFlowSolverDataTiny]
   extension: nc
   t_start: 0.2 #% for the whole time
   t_target: 0.8
   patchSize: 64
-  patchStride: 8 # when do fast testing or generate traing dataset, real patchStride is patchStride*4(for faster testing and training), only finaly visualize, use patchStride
+  patchStride: 20 # when do fast testing or generate traing dataset, real patchStride is patchStride*4(for faster testing and training), only finaly visualize, use patchStride
   
 test_tasks: test_UpsamplingModel
 test_vectorfield: cylinder2d

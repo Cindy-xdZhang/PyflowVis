@@ -119,8 +119,8 @@ def main():
     
 
     #exmaple loading amria file
-    # vectorField2d=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData\\0071.am")
-    # actFieldWidget.insertField("resampled",vectorField2d)
+    vectorField2d=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData2000_3000\\2000.am")
+    actFieldWidget.insertField("resampled",vectorField2d)
 
     # vectorField2d2=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverDataTemp\\0071.am")
     # actFieldWidget.insertField("original",vectorField2d2)
