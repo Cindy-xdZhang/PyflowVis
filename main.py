@@ -119,13 +119,14 @@ def main():
     
 
     #exmaple loading amria file
-    vectorField2d=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData2000_3000\\2000.am")
-    actFieldWidget.insertField("resampled",vectorField2d)
+    # vectorField2d=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData2000_3000\\2000.am")
+    # actFieldWidget.insertField("resampled",vectorField2d)
 
     # vectorField2d2=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverDataTemp\\0071.am")
     # actFieldWidget.insertField("original",vectorField2d2)
-    # vectorField2d= double_gyre_2D((250,125),64,Tmax=20)
-    # actFieldWidget.insertField("double_gyre",vectorField2d)
+    
+    vectorField2d= double_gyre_2D((250,125),64,Tmax=20)
+    actFieldWidget.insertField("double_gyre",vectorField2d)
 
     # flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
     # cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")

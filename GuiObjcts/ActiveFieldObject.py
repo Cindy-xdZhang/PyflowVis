@@ -80,7 +80,14 @@ class ActiveField(Object):
 
             actFieldWidget.insertScalarField(activeFieldName +FTLE_param_str,resultScalarFieldSlice)     
 
-            ridge_mask=ridge_extraction(resultScalarFieldSlice)
+            ridge_mask = extract_ridges_2d_amr_mask(resultScalarFieldSlice,  
+            max_level=3,          # 细化到 2^3=8 倍 finest 粗起点
+            neighbor_range=1,     # ridge 周围 1 环细化带
+            s_min=None,           # 或者设一个 FTLE 阈值，比如 0.2
+            lambda_max=None,      # 或设更负的阈值，如 -1e-3
+            lookahead_cells=0,    # 若要更激进可>0（此处已用更强检测，通常用不上）
+            lookahead_by='height')
+
             # get meta information from ridge mask
             RidgeMask_grid_size=ridge_mask.shape#shape is (T,Y,X)
             RidgeMask_domainMinBoundary=vector_field.domainMinBoundary
