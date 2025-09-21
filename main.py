@@ -125,8 +125,24 @@ def main():
     # vectorField2d2=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverDataTemp\\0071.am")
     # actFieldWidget.insertField("original",vectorField2d2)
 
+
+
+
+
+    #####################################################################################
+    #########################reference frame transformation test#########################
+    #####################################################################################
     vectorField2d= rotation_four_center((64,64),64)
     actFieldWidget.insertField("rfc",vectorField2d)
+    vectorField2d2= constant_rotation((64,64),64)
+    actFieldWidget.insertField("constant_rotation",vectorField2d2)
+    #####################################################################################
+    #########################reference frame transformation test#########################
+    #####################################################################################
+
+
+
+
 
     # flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
     # cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")

@@ -120,19 +120,21 @@ def compute_worldline_2d(vector_field: UnsteadyVectorField2D, start_pos3d: np.nd
 	return wl
 
 
-def instantaneous_angular_velocity_z(vector_field: UnsteadyVectorField2D, x: float, y: float, t: float, h: float = 1e-3) -> float:
+def instantaneous_angular_velocity_z(vector_field: UnsteadyVectorField2D, x: float, y: float, t: float) -> float:
 	"""
 	以二阶中心差分计算 2D 场的角速度 z 分量: 0.5*(du/dy - dv/dx)，
 	与 C++ 中 0.5*(dvdx(1) - dvdy(0)) 等价。
 	"""
+	dY = (vector_field.domainMaxBoundary[1] - vector_field.domainMinBoundary[1]) / float(vector_field.Ydim - 1);
+	dX = (vector_field.domainMaxBoundary[0] - vector_field.domainMinBoundary[0]) / float(vector_field.Xdim - 1);
 	# du/dy
-	v_y_plus = vector_field.get_vector(x, y + h, t)
-	v_y_minus = vector_field.get_vector(x, y - h, t)
-	du_dy = (v_y_plus[0] - v_y_minus[0]) / (2.0 * h)
+	v_y_plus = vector_field.get_vector(x, y + dY, t)
+	v_y_minus = vector_field.get_vector(x, y - dY, t)
+	du_dy = (v_y_plus[0] - v_y_minus[0]) / (2.0 * dY)
 	# dv/dx
-	v_x_plus = vector_field.get_vector(x + h, y, t)
-	v_x_minus = vector_field.get_vector(x - h, y, t)
-	dv_dx = (v_x_plus[1] - v_x_minus[1]) / (2.0 * h)
+	v_x_plus = vector_field.get_vector(x + dX, y, t)
+	v_x_minus = vector_field.get_vector(x - dX, y, t)
+	dv_dx = (v_x_plus[1] - v_x_minus[1]) / (2.0 * dX)
 	omega = 0.5 * (du_dy - dv_dx)
 	return float(omega)
 

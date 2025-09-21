@@ -106,9 +106,10 @@ mat3 getObserverTransformation(float normalized_time)
         vec3(cosTheta, sinTheta, 0),
         vec3(-sinTheta, cosTheta, 0),
         vec3(0, 0, 1));
-    mat3 rotateInverse = transpose(rotateMat);
+    // mat3 rotateInverse = transpose(rotateMat);//didn't know whyon c++ glsl  side we need to transpose, but on python  we don't need to transpose..
 
-    mat3 inverseTransformation = (transMatP2 * rotateInverse * transMatP1);
+    mat3 inverseTransformation = (transMatP2 * rotateMat * transMatP1);
+    // mat3 inverseTransformation = rotateMat ;
     return inverseTransformation;
 }
 
@@ -116,7 +117,7 @@ vec2 referenceFrameTransform(vec2 p, float normalizedTime)
 {
       mat3   transformation;
       if (transformationMode == 1) {
-         transformation = getTransformationDefault(normalizedTime);
+         transformation = getObserverTransformation(normalizedTime);
       }
       else {
          return p;
@@ -140,7 +141,7 @@ void main() {
 
     vec2 pos2d = in_position.xy;
     //observer transforamtion
-    // vec2 pos2d = referenceFrameTransform(pos2d, in_attribs.x);
+    pos2d = referenceFrameTransform(pos2d, in_attribs.x);
     vec3 resultpos = vec3(pos2d, 0) + n;
 
     

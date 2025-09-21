@@ -319,6 +319,8 @@ class ShaderProgram:
         for name, value in self.uniform_Flags.items():
             if not value:
                 logger.warning(f"Shader program {self.key_name} 's Uniform {name} has not been set.")
+                if name=="projMat" or name=="viewMat":
+                    logger.warning(f"Shader program {self.key_name} 's  Camera Object is not set,maybe you forget to call super().postInit()?")
 
         
     def __setUnforms(self, uniforms:dict):

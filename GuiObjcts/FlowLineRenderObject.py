@@ -63,18 +63,27 @@ class FlowLineObject(Object):
 
         getEngine().eventRegister.registerChannelEvent("seeding_changed", lambda : dirtyCallBack(self))
         
+
+        #########################################################
         # for observer-relative transformation (UI variables)
+        #########################################################
         self.create_variable("InputFieldMaxTime", 0.0, False, False)
         self.create_variable("InputFieldMinTime", 0.0, False, False)
-        self.create_variable("DefaultMaxTime", 0.0, False, False)
-        self.create_variable("DefaultMinTime", 0.0, False, False)
+        self.create_variable("DefaultObseverMaxTime", 0.0, False, False)
+        self.create_variable("DefaultObseverMinTime", 0.0, False, False)
         self.create_variable_callback("transformationMode", ["none", "observed", "inverse"], lambda obj: None, True, True)
-        
+        # create SSBO for worldline/integratedC (binding=6 in shader)
+        self.ssbo0_id = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, self.ssbo0_id)
+        gl.glBufferData(gl.GL_SHADER_STORAGE_BUFFER, 0, None, gl.GL_DYNAMIC_DRAW)
+        gl.glBindBufferBase(gl.GL_SHADER_STORAGE_BUFFER, 6, self.ssbo0_id)
+        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, 0)
+        self.create_variable("SSBOBufferId0",  self.ssbo0_id, False, False)
+        self.create_variable("ssbo0_length",  int(0), False, False)
+        self.create_variable("worldlineStartPos0", (0.0, 0.0), False, False)
         def change_reference_frame_action():
-            actFieldWidget:ActiveFieldObj = self.parentScene.getObject("ActiveField")
-            if actFieldWidget is None:
-                return
-            vector_field:UnsteadyVectorField2D = actFieldWidget.getActiveObserverField()
+           
+            vector_field:UnsteadyVectorField2D = self.activeFieldWidget.getActiveObserverField()
             if vector_field is None or vector_field.getDim() != 2:
                 print("Changing reference frame is only implemented for 2D active field.")
                 return
@@ -84,11 +93,11 @@ class FlowLineObject(Object):
             seeds = indicator.getValue("SeedingGroup0")
             if not seeds:
                 return
-            start_pos3d, t0 = seeds[0]  # 取第一条作为世界线起点
+            start_pos3d, t0 = seeds[-1]  
             step_size = self.getValue("stepSize")
-            obs_time = actFieldWidget.time()
+            obs_time = self.activeFieldWidget.time()
             try:
-                rf = compute_reference_frame_transformation_from_field(
+                rf:ReferenceFrameTransformation2D = compute_reference_frame_transformation_from_field(
                     vector_field=vector_field,
                     start_pos3d=start_pos3d,
                     t0=t0,
@@ -97,11 +106,13 @@ class FlowLineObject(Object):
                     maxIterations=self.getValue("maxIteration"),
                     method=self.getOptionValue("integrator")
                 )
-       
+                self.__setFrameTransformationBuffers(rf.worldline.pathline, rf.integrated_rotation, start_pos3d, obs_time)
             except Exception as e:
                 print(f"[ReferenceFrame] Failed: {e}")
-        
+        def reset_reference_frame_action():
+            self.__resetFrameTransformationBuffers()
         self.addAction("Change reference frame by integrating observer field", lambda obj: change_reference_frame_action())
+        self.addAction("Reset reference frame", lambda obj: reset_reference_frame_action())
 
         
 
@@ -174,7 +185,14 @@ class FlowLineObject(Object):
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         gl.glBindVertexArray(0)
 
-        
+
+    def postInit(self):
+        super().postInit()
+        self.activeFieldWidget = self.parentScene.getObject("ActiveField")
+        if self.activeFieldWidget is None:
+            logging.getLogger().error("No ActiveField object found in scene, return")
+            return
+  
     def __initDynamicTypeGLContext__(self):
         self.vertex_count = 0
         self.mOffsetIndices = []
@@ -195,43 +213,34 @@ class FlowLineObject(Object):
         gl.glEnableVertexAttribArray(1)
         gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(3 * 4))
         
-        # create SSBO for worldline/integratedC (binding=6 in shader)
-        self.ssbo0_id = gl.glGenBuffers(1)
-        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, self.ssbo0_id)
-        gl.glBufferData(gl.GL_SHADER_STORAGE_BUFFER, 0, None, gl.GL_DYNAMIC_DRAW)
-        gl.glBindBufferBase(gl.GL_SHADER_STORAGE_BUFFER, 6, self.ssbo0_id)
-        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, 0)
         
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         gl.glBindVertexArray(0)
 
-    def _set_uniform_float(self, shader:Shader, name:str, value:float):
-        loc = gl.glGetUniformLocation(shader.shaderProgram, name)
-        if loc != -1:
-            gl.glUniform1f(loc, float(value))
 
-    def _set_uniform_int(self, shader:Shader, name:str, value:int):
-        loc = gl.glGetUniformLocation(shader.shaderProgram, name)
-        if loc != -1:
-            gl.glUniform1i(loc, int(value))
+    def __resetFrameTransformationBuffers(self):
+        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, self.ssbo0_id)
+        gl.glBufferData(gl.GL_SHADER_STORAGE_BUFFER, 0, None, gl.GL_DYNAMIC_DRAW)
+        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, 0)
+        self.setValue("ssbo0_length",  int(0), callback=False)
+        self.setValue("worldlineStartPos0", (0.0, 0.0), callback=False)
+        self.updateOptionValue("transformationMode", "none")
 
-    def _set_uniform_vec2(self, shader:Shader, name:str, vec2):
-        loc = gl.glGetUniformLocation(shader.shaderProgram, name)
-        if loc != -1:
-            gl.glUniform2f(loc, float(vec2[0]), float(vec2[1]))
-
-    def setFrameTransformationBuffers(self, pathline, integratedRotation, reference_point, observationTime:float, target_frame_id:int):
+    def __setFrameTransformationBuffers(self, pathline, integratedRotation, reference_point, observationTime:float):
         """
         Python 版本：将 worldline 与 integratedRotation 写入 SSBO(binding=6)，并设置相关 UI 变量。
         - pathline: [(pos3d, t), ...]
         - integratedRotation: [theta_i]
-        - reference_point: (x0, y0)
+        - reference_point: (x0, y0)/(x0, y0, z0)
         """
         if pathline is None or integratedRotation is None or len(pathline) != len(integratedRotation) or len(pathline) == 0:
             print("[setFrameTransformationBuffers] invalid inputs")
             return
         worldlinetimeMin = float(pathline[0][1])
         worldlinetimeMax = float(pathline[-1][1])
+        activeFieldTimeMin = float(self.activeFieldWidget.getActiveField().getMinTime())
+        activeFieldTimeMax = float(self.activeFieldWidget.getActiveField().getMaxTime())
+
         # pack vec4(x, y, theta, time)
         buf = np.zeros((len(pathline), 4), dtype=np.float32)
         for i, (p3, t) in enumerate(pathline):
@@ -245,15 +254,15 @@ class FlowLineObject(Object):
         gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, 0)
         # update variables
         self.updateOptionValue("transformationMode", "observed")
-        self.setValue("DefaultMaxTime", worldlinetimeMax, callback=False)
-        self.setValue("DefaultMinTime", worldlinetimeMin, callback=False)
-        self.setValue("InputFieldMaxTime", worldlinetimeMax, callback=False)
-        self.setValue("InputFieldMinTime", worldlinetimeMin, callback=False)
+        self.setValue("DefaultObseverMaxTime", worldlinetimeMax, callback=False)
+        self.setValue("DefaultObseverMinTime", worldlinetimeMin, callback=False)
+        self.setValue("InputFieldMaxTime", activeFieldTimeMax, callback=False)
+        self.setValue("InputFieldMinTime",  activeFieldTimeMin, callback=False)
         # record counts for shader uniform (we set at draw time)
-        self._ssbo0_length = int(buf.shape[0])
-        self._worldlineStartPos0 = (float(reference_point[0]), float(reference_point[1]))
+        self.setValue("ssbo0_length", int(buf.shape[0]), callback=False)
+        self.setValue("worldlineStartPos0", (float(reference_point[0]), float(reference_point[1])), callback=False)
 
-    def setFrameTransformation(self, instaneousC, worldline, timerange, observationTime:float, target_frame_id:int):
+    def setFrameTransformation(self, instaneousC, worldline, timerange, observationTime:float):
         """
         Python 版本：从瞬时角速度与世界线构建 integratedRotation，然后调用 setFrameTransformationBuffers。
         - instaneousC: [omega_i]
@@ -289,7 +298,7 @@ class FlowLineObject(Object):
             angular_c = float(instaneousC[i + 1])
             integratedRotation[i + 1] = integratedRotation[i] + (+dt) * angular_c
         reference_point = (float(worldline[k][0][0]), float(worldline[k][0][1]))
-        self.setFrameTransformationBuffers(worldline, integratedRotation, reference_point, observationTime, target_frame_id)
+        self.__setFrameTransformationBuffers(worldline, integratedRotation, reference_point, observationTime)
 
 
     def render(self):

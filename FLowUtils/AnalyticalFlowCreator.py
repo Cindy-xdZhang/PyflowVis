@@ -88,7 +88,7 @@ def constant_rotation(grid_size, timestep, domainBoundaryMin=[-2.0,-2.0,0.0], do
     :param scale: Float, the scale of the rotation.
     :return: UnsteadyVectorField2D object
     """
-    flow_creator = AnalyticalFlowCreator('-y', 'x')
+    flow_creator = AnalyticalFlowCreator('y', '-x')
     vectorField2d = flow_creator.create_flow_field(grid_size, timestep, domainBoundaryMin, domainBoundaryMax)
     if scale != 1.0:
         vectorField2d.field *= scale
