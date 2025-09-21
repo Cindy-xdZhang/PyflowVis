@@ -721,6 +721,121 @@ class ConditionalFMTNet(nn.Module):
         # 训练中标签已归一化，无需此处再做激活，保持线性输出由损失控制
         return out
 
+class ConditionalFMTNetv2(nn.Module):
+    """
+    ConditionalFMTNet 的滑窗版本：按 tile 滑窗将窗口内所有 cross-primitive 拼成点集，
+    经 FMT encoder 得到 coarse 特征图 [B, D, Hc, Wc]，直接双线性上采样到目标高分辨率，
+    再与上采样后的低分辨率 FTLE 以及高分辨率坐标 (x,y) 逐像素拼接，经点 MLP 输出。
+
+    输入：
+      - lowResFTLE:      [B, X, Y]
+      - lowResPathlines: [B, X*Y, nerbors, L, 3]
+    输出：
+      - pred:            [B, X*UP, Y*UP]
+    """
+    def __init__(self, cfg, lowResX: int, lowResY: int, upscale: int = 4,
+                 embed_dim: int | None = None, mlp_hidden: int = 256, mlp_depth: int = 3, dropout: float = 0.0):
+        super().__init__()
+        self.lowResX = int(lowResX)
+        self.lowResY = int(lowResY)
+        self.upscale = int(upscale)
+
+        # 滑窗大小（tile 边长），默认 8
+        self.FMT_focus_area = int(getattr(cfg, 'FMT_focus_area', 8))
+
+        # FMT 编码器配置
+        num_stages = int(getattr(cfg.pnn, 'stages', 1)) if hasattr(cfg, 'pnn') else 1
+        k = int(getattr(cfg.pnn, 'k', 6)) if hasattr(cfg, 'pnn') else 6
+        alpha = float(getattr(cfg.pnn, 'alpha', 1000)) if hasattr(cfg, 'pnn') else 1000.0
+        beta = float(getattr(cfg.pnn, 'beta', 100)) if hasattr(cfg, 'pnn') else 100.0
+        nerbors = int(getattr(cfg.pcds, 'num_cross_points_per_seeding', 5)) if hasattr(cfg, 'pcds') else 5
+        LstepsPerline = int(getattr(cfg.pcds, 'sampled_points_per_line', 4)) if hasattr(cfg, 'pcds') else 4
+        self.cross_neighborsize = nerbors
+        self.pointsPerPrimitive = LstepsPerline * nerbors
+        embed_dim = int(embed_dim if embed_dim is not None else getattr(cfg.pnn, 'dim', 36))
+        self.encoder = EncNPNew(self.pointsPerPrimitive, num_stages, embed_dim, k, alpha, beta)
+        self.fmt_feature_dim = embed_dim * (2 ** (num_stages - 0))
+
+        # 点 MLP：D(token) + 1(lowres ftle) + 2(xy)
+        in_dim = self.fmt_feature_dim + 3
+        layers: list[nn.Module] = []
+        dim = in_dim
+        for i in range(int(max(1, mlp_depth))):
+            next_dim = mlp_hidden if i < mlp_depth - 1 else 1
+            layers.append(nn.Linear(dim, next_dim))
+            if i < mlp_depth - 1:
+                layers.append(nn.GELU())
+                if dropout > 0:
+                    layers.append(nn.Dropout(dropout))
+            dim = next_dim
+        self.mlp = nn.Sequential(*layers)
+
+    @staticmethod
+    def _tiling_starts(length: int, k: int):
+        if k >= length:
+            return [0]
+        s = int(k)
+        starts = list(range(0, length - k + 1, s))
+        last = length - k
+        if starts[-1] != last:
+            starts.append(last)
+        return starts
+
+    def forward(self, lowResFTLE: torch.Tensor, lowResPathlines: torch.Tensor) -> torch.Tensor:
+        B, X, Y = lowResFTLE.shape
+        _, N, nerbors, L, Dim = lowResPathlines.shape
+        assert N == X * Y, "lowResPathlines second dim must be X*Y"
+        assert nerbors == self.cross_neighborsize, "nerbors mismatch with model setting"
+
+        # 1) 局部 FMT → coarse feature map [B, D, Hc, Wc]
+        k = int(self.FMT_focus_area)
+        row_starts = self._tiling_starts(int(X), k)
+        col_starts = self._tiling_starts(int(Y), k)
+        Hc, Wc = len(row_starts), len(col_starts)
+
+        feat_coarse = lowResFTLE.new_zeros((B, self.fmt_feature_dim, Hc, Wc))
+        for ri, i0 in enumerate(row_starts):
+            i1 = min(i0 + k, int(X))
+            for ci, j0 in enumerate(col_starts):
+                j1 = min(j0 + k, int(Y))
+                idx_list = []
+                for rr in range(i0, i1):
+                    base = rr * int(Y)
+                    idx_list.extend(range(base + j0, base + j1))
+                if len(idx_list) == 0:
+                    continue
+                idx_tensor = torch.as_tensor(idx_list, dtype=torch.long, device=lowResFTLE.device)
+                pl_win = lowResPathlines[:, idx_tensor, ...]  # [B, M, nerbors, L, 3]
+                B2, M, _, _, _ = pl_win.shape
+                P = pl_win.reshape(B2, M * nerbors * L, Dim).contiguous()  # [B, M*K, 3]
+                points_N3 = P
+                points_3N = P.permute(0, 2, 1).contiguous()
+                feat_win = self.encoder(points_N3, points_3N)  # [B, D]
+                feat_coarse[:, :, ri, ci] = feat_win
+
+        # 2) 上采样到目标高分辨率 [B, D, X*UP, Y*UP]
+        target_h = int(X * max(1, self.upscale))
+        target_w = int(Y * max(1, self.upscale))
+        feat_hi = F.interpolate(feat_coarse, size=(target_h, target_w), mode='bilinear', align_corners=False)
+
+        # 低分辨率 FTLE 也上采样到目标高分辨率
+        lr_up = F.interpolate(lowResFTLE.unsqueeze(1), size=(target_h, target_w), mode='bilinear', align_corners=False)
+
+        # 3) 高分辨率坐标通道 (x,y) ∈ [0,1]
+        yy = torch.linspace(0, 1, steps=target_h, device=lowResFTLE.device)
+        xx = torch.linspace(0, 1, steps=target_w, device=lowResFTLE.device)
+        Y_grid, X_grid = torch.meshgrid(yy, xx, indexing='ij')
+        coord = torch.stack([X_grid, Y_grid], dim=0).unsqueeze(0).repeat(B, 1, 1, 1)
+
+        # 4) 逐像素点 MLP
+        B_, D_, Hh, Wh = feat_hi.shape
+        token_flat = feat_hi.permute(0, 2, 3, 1).reshape(B_ * Hh * Wh, D_)
+        lr_flat = lr_up.permute(0, 2, 3, 1).reshape(B_ * Hh * Wh, 1)
+        xy_flat = coord.permute(0, 2, 3, 1).reshape(B_ * Hh * Wh, 2)
+        mlp_in = torch.cat([token_flat, lr_flat, xy_flat], dim=1)  # [B*Hh*Wh, D+3]
+        out = self.mlp(mlp_in).reshape(B_, Hh, Wh)
+        return out
+
 class FTLEUpsamplingFMT_Vit(nn.Module):
     """
     vision transformer for upsampling FTLE from lowRes to highRes
@@ -1171,6 +1286,11 @@ def build_model(config, device):
         lowResX = int(config.lowResX)
         lowResY = int(config.lowResY)
         model = ConditionalFMTNet(config, lowResX, lowResY, upscale=int(config.dataset.UPsampling)).to(device)
+        return model
+    elif config.model.NAME == 'ConditionalFMTNetv2':
+        lowResX = int(config.lowResX)
+        lowResY = int(config.lowResY)
+        model = ConditionalFMTNetv2(config, lowResX, lowResY, upscale=int(config.dataset.UPsampling)).to(device)
         return model
     elif config.model.NAME == 'ESPCN':
         lowResX = int(config.lowResX)
