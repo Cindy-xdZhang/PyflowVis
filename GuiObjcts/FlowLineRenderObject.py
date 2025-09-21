@@ -8,6 +8,7 @@ import ctypes
 import numpy as np
 from FLowUtils.ScalarField2d import *
 from FLowUtils.flowlineIntegral import *
+from FLowUtils.KillingObserver2D import compute_reference_frame_transformation_from_field
 
 from GuiObjcts.ActiveFieldObject import *
 
@@ -61,8 +62,49 @@ class FlowLineObject(Object):
         self.create_variable_callback("stepSize", 0.01 ,dirtyCallBack,True)
 
         getEngine().eventRegister.registerChannelEvent("seeding_changed", lambda : dirtyCallBack(self))
+        
+        # for observer-relative transformation (UI variables)
+        self.create_variable("InputFieldMaxTime", 0.0, False, False)
+        self.create_variable("InputFieldMinTime", 0.0, False, False)
+        self.create_variable("DefaultMaxTime", 0.0, False, False)
+        self.create_variable("DefaultMinTime", 0.0, False, False)
+        self.create_variable_callback("transformationMode", ["none", "observed", "inverse"], lambda obj: None, True, True)
+        
+        def change_reference_frame_action():
+            actFieldWidget = self.parentScene.getObject("ActiveField")
+            if actFieldWidget is None:
+                return
+            vector_field:UnsteadyVectorField2D = actFieldWidget.getActiveField()
+            if vector_field is None or vector_field.getDim() != 2:
+                print("Changing reference frame is only implemented for 2D active field.")
+                return
+            indicator = self.parentScene.getObject("indicator") if self.parentScene.hasObject("indicator") else None
+            if indicator is None:
+                return
+            seeds = indicator.getValue("SeedingGroup0")
+            if not seeds:
+                return
+            start_pos3d, t0 = seeds[0]  # 取第一条作为世界线起点
+            step_size = self.getValue("stepSize")
+            obs_time = actFieldWidget.time()
+            try:
+                rf = compute_reference_frame_transformation_from_field(
+                    vector_field=vector_field,
+                    start_pos3d=start_pos3d,
+                    t0=t0,
+                    stepSize=step_size,
+                    observation_time=obs_time,
+                    maxIterations=self.getValue("maxIteration"),
+                    method=self.getOptionValue("integrator")
+                )
+                # TODO: 将 rf.integrated_rotation 应用于可视化或缓存（目前仅打印长度）
+                print(f"[ReferenceFrame] Integrated rotation samples: {len(rf.integrated_rotation)}")
+            except Exception as e:
+                print(f"[ReferenceFrame] Failed: {e}")
+        
+        self.addAction("Change reference frame by integrating observer field", lambda obj: change_reference_frame_action())
 
-      
+        
 
         
 

@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from pnn.models.point_nn import EncNPNew
+
+
 def calculate_model_parm_size(model: nn.Module):
     """
     Summarize parameter/buffer counts and memory footprint (MB) of a PyTorch model.
@@ -732,6 +734,7 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
 
     def forward(self, lowResFTLE: torch.Tensor, lowResPathlines: torch.Tensor) -> torch.Tensor:
         B, X, Y = lowResFTLE.shape
+        PSL(lowResPathlines, self.pointsPerPrimitive)
         _, N, nerbors, L, Dim = lowResPathlines.shape
         assert N == X * Y, "lowResPathlines second dim must be X*Y"
         assert nerbors == self.cross_neighborsize, "nerbors mismatch with model setting"

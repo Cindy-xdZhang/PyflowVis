@@ -1305,10 +1305,68 @@ def resample_to_fixed_count(points: torch.Tensor,
     return Pk
 
 
+@torch.no_grad()
+def PSL(points: torch.Tensor, K: int) -> torch.Tensor:
+    """
+    Perceptual/importance-driven temporal sampling for pathline-cross primitives.
+    -  points: tensor, shape [groups, lines_per_group, L_timesteps, D]
+    - outputs:       [G, LinesPerGroup, K, D]
+
+    策略：
+    1) 若 random=True，退化为随机中段采样（保留首尾）。
+    3) 否则，按时间估计“转向角”显著性（基于切向向量夹角），对每组在 1..T-2 中选取 top-(K-2) 的时刻，
+       并与首(0)尾(T-1)一起作为采样索引；组内所有 L 条线共享同一组选取的时间索引。
+    """
+    if K < 2:
+        raise ValueError("K must be >= 2 to keep both head and tail")
+    if points.dim() != 4:
+        raise ValueError("points must have shape [G, L, T, D]")
+    device = points.device
+    G, L, T, D = points.shape[0], points.shape[1], points.shape[2], points.shape[3]
+    assert K <= T, "K must be <= number of timesteps T"
+
+
+    # 计算基于切向矢量的转角显著性：角度越大越重要
+    # 仅使用前两维 (x,y) 来估计方向变化
+    Pxy = points[..., :2]  # [G,L,T,2]
+    if T <= 2:
+        # 这里 K < T 已经保证 T>=3，否则会走上面的 K>=T 分支
+        return points[:, :, :K, :]
+
+    V = Pxy[:, :, 1:, :] - Pxy[:, :, :-1, :]          # [G,L,T-1,2]
+    V_prev = V[:, :, :-1, :]                           # [G,L,T-2,2]
+    V_next = V[:, :, 1:, :]                            # [G,L,T-2,2]
+    eps = 1e-8
+    dot = (V_prev * V_next).sum(dim=-1)                # [G,L,T-2]
+    n0 = V_prev.norm(dim=-1).clamp_min(eps)            # [G,L,T-2]
+    n1 = V_next.norm(dim=-1).clamp_min(eps)            # [G,L,T-2]
+    cos_theta = (dot / (n0 * n1)).clamp(-1.0, 1.0)     # [G,L,T-2]
+    angle = torch.acos(cos_theta)                      # [G,L,T-2]
+
+    # 全局聚合（跨 G 和 L）得到每个时间步的显著性
+    saliency_global = angle.mean(dim=(0, 1))           # [T-2]
+
+    # 选出中间的 K-2 个时间索引（位于 [1..T-2]），再与 0 和 T-1 合并，生成 1-D sel_idx
+    m = max(K - 2, 0)
+    if m > 0:
+        mid_idx = torch.topk(saliency_global, k=m, dim=0, largest=True, sorted=False).indices  # [m] in [0..T-3]
+        mid_idx = mid_idx + 1  # shift 到真实时间索引 [1..T-2]
+        mid_idx, _ = torch.sort(mid_idx)               # 升序
+        sel_idx = torch.cat([
+            torch.tensor([0], device=device, dtype=torch.long),
+            mid_idx,
+            torch.tensor([T - 1], device=device, dtype=torch.long)
+        ], dim=0)                                      # [K]
+    else:
+        sel_idx = torch.tensor([0, T - 1], device=device, dtype=torch.long)
+
+    out = points[:, :, sel_idx, :]
+    return out
+
+
 
 @torch.no_grad()
-def temporal_downsamplePathlineCrossPrimitive(points: torch.Tensor,
-                                     K: int) -> torch.Tensor:
+def temporal_downsamplePathlineCrossPrimitiveRandom(points: torch.Tensor,  K: int) -> torch.Tensor:
     """
     Resample pathlines along the time dimension to a fixed number of steps K: keep head and tail, randomly sample the middle.
     Args:
@@ -1318,38 +1376,92 @@ def temporal_downsamplePathlineCrossPrimitive(points: torch.Tensor,
     Returns:
       - Tensor with the same number of dimensions as points, but the time dimension is K
     """
-    if K < 2:
-        raise ValueError("K must be >= 2 to keep both head and tail")
-    if points.dim() < 3:
-        raise ValueError("points must have at least 3 dims: [groups, lines_per_group, timesteps, ...]")
-
+    if points.dim() != 4:
+        raise ValueError("points must have shape [G, L, T, D]")
     device = points.device
-    T = points.shape[2]
+    G, L, T, D = points.shape[0], points.shape[1], points.shape[2], points.shape[3]
+    assert K <= T and K >= 2, "K must be <= number of timesteps T and >= 2"
 
-    # Select K indices along the time dimension (same indices for all batches and groups)
-    if T <= 0:
-        raise ValueError("timesteps dimension must be > 0")
-
-    if T == 1:
-        sel_idx = torch.zeros(K, device=device, dtype=torch.long)
+    if K == 2:
+        sel_idx = torch.tensor([0, T - 1], device=device, dtype=torch.long)
     else:
-        if K == 2:
-            sel_idx = torch.tensor([0, T - 1], device=device, dtype=torch.long)
-        elif T > 2:
-            num_mid = K - 2
-            # Randomly sample the middle indices from [1, T-2] (globally consistent), and sort by time
-            idx_mid = torch.randint(1, T - 1, (num_mid,), device=device)
-            idx_mid, _ = torch.sort(idx_mid)
-            sel_idx = torch.cat([
-                torch.tensor([0], device=device, dtype=torch.long),
-                idx_mid,
-                torch.tensor([T - 1], device=device, dtype=torch.long)
-            ], dim=0)
-        else:  # T == 2 and K > 2
-            assert False, "T == 2 and K > 2 is not supported"
-            
+        num_mid = K - 2
+        # Randomly sample the middle indices from [1, T-2] (globally consistent), and sort by time
+        idx_mid = torch.randint(1, T - 1, (num_mid,), device=device)
+        idx_mid, _ = torch.sort(idx_mid)
+        sel_idx = torch.cat([
+            torch.tensor([0], device=device, dtype=torch.long),
+            idx_mid,
+            torch.tensor([T - 1], device=device, dtype=torch.long)
+        ], dim=0)
+        
     out = points[:, :, sel_idx, :]
     return out
+
+
+
+@torch.no_grad()
+def temporal_downsamplePathlineCrossPrimitiveRegular(points: torch.Tensor, K: int) -> torch.Tensor:
+    """
+    均匀间隔下采样（时间维）：保留首尾，并在 (1..T-2) 区间内等间距选取 num_mid=K-2 个索引。
+    Args:
+      - points: [G, L, T, D]
+      - K: 目标时间步数（>=2 且 <= T）
+    Returns:
+      - [G, L, K, D]
+    """
+    if points.dim() != 4:
+        raise ValueError("points must have shape [G, L, T, D]")
+    device = points.device
+    G, L, T, D = points.shape[0], points.shape[1], points.shape[2], points.shape[3]
+    assert 2 <= K <= T, "K must be <= number of timesteps T and >= 2"
+
+    if K == 2:
+        sel_idx = torch.tensor([0, T - 1], device=device, dtype=torch.long)
+    else:
+        num_mid = K - 2
+        if T - 2 <= 0:
+            # 没有中间可选步，退化为首尾
+            sel_idx = torch.tensor([0, T - 1], device=device, dtype=torch.long)
+        elif num_mid >= (T - 2):
+            # 取尽所有中间索引
+            mid_idx = torch.arange(1, T - 1, device=device, dtype=torch.long)
+            sel_idx = torch.cat([
+                torch.tensor([0], device=device, dtype=torch.long),
+                mid_idx,
+                torch.tensor([T - 1], device=device, dtype=torch.long)
+            ], dim=0)
+        else:
+            # 使用 linspace 在 [1, T-2] 上等间距选取 num_mid 个位置，并四舍五入到最近整数
+            mid_pos = torch.linspace(1, T - 2, steps=num_mid, device=device)
+            mid_idx = torch.round(mid_pos).to(torch.long)
+            # 保序与去重（极少数情况下 round 可能产生重复，保持稳定性）
+            mid_idx = torch.unique(mid_idx, sorted=True)
+            # 若因去重不足，则用 clamp+补齐策略
+            while mid_idx.numel() < num_mid:
+                # 尝试在剩余可用集合中插入缺少的索引（简单策略：扩展邻近位置）
+                need = num_mid - mid_idx.numel()
+                candidates = torch.arange(1, T - 1, device=device, dtype=torch.long)
+                mask = torch.ones_like(candidates, dtype=torch.bool)
+                mask[mid_idx - 1] = False if mid_idx.numel() > 0 else True
+                add = candidates[mask][:need]
+                mid_idx = torch.sort(torch.cat([mid_idx, add]))[0]
+
+            sel_idx = torch.cat([
+                torch.tensor([0], device=device, dtype=torch.long),
+                mid_idx[:num_mid],
+                torch.tensor([T - 1], device=device, dtype=torch.long)
+            ], dim=0)
+
+    out = points[:, :, sel_idx, :]
+    return out
+
+
+
+
+
+
+
 
 @torch.no_grad()
 def temporal_downsamplePathlineCrossPrimitiveWithValidLength(points: torch.Tensor,valid_length: torch.Tensor,

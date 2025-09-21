@@ -47,7 +47,7 @@ def build_test_dataset(config):
 
     time_window_start_ratio = float(config.dataset.t_start)
     time_window_target_ratio = float(config.dataset.t_target)
-    timesliceCount = int(getattr(config.dataset, 'timesliceCount', 8))
+    timesliceCount =int(getattr(config.dataset, 'timesliceCount', 8))//2
 
     low_res_grid_sampling = float(config.dataset.low_res_grid_sampling)
     up = int(config.dataset.UPsampling)
@@ -70,7 +70,6 @@ def build_test_dataset(config):
         "dt": float(flowline_dt),
         "offset_dist": float(offset_dist),
         "LstepsPerline": int(LstepsPerline),
-        "localized": bool(localized),
     }
     tag = stable_hash(key_obj, prefix="FTLEUpsamplingTestDataset_")
     cache_dir = os.path.join(config.cache_dir, "temp")
@@ -118,19 +117,14 @@ def build_test_dataset(config):
                 config, vf_obj, float(time_slice), flowline_dt, max_steps, high_res_sampling
             )
 
-
             # Preprocessing consistent with training: temporal downsampling and normalization (no FTLE normalization)
-            temporal_sampled_P_all = temporal_downsamplePathlineCrossPrimitive(lowResPathlines, int(LstepsPerline))
-            # 与训练保持一致的邻域大小 5
-            lowResPathlinesPreprocessed = preprocess_localization_normalization(
-                temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False
-            ).cpu().float()
+            # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
+            # temporal_sampled_P_all = temporal_downsamplePathlineCrossPrimitiveRegular(lowResPathlines, int(LstepsPerline))
+            temporal_sampled_P_all=PSL(lowResPathlines, int(LstepsPerline))
 
             lowResFTLE_list.append(low_resFTLE_field)
             highResFTLE_list.append(high_resFTLE_field)
-            lowResPathlines_list.append(lowResPathlinesPreprocessed)
-
-        
+            lowResPathlines_list.append(temporal_sampled_P_all)
     # Save cache (use float32)
     try:
         with open(cache_path, "wb") as f:
@@ -241,7 +235,6 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
                         # forward
                         pred_patch = model(lr_patch_norm, pl_patch).to(device).float()  # [1, hi_h, hi_w]
                         # inverse normalization
-                        pred_patch = pred_patch * (ftle_max - ftle_min) + ftle_min
                         patch_np = pred_patch.squeeze(0).detach().cpu().numpy()
                         pred_grid[hi_i0:hi_i1, hi_j0:hi_j1] += patch_np
                         weight_grid[hi_i0:hi_i1, hi_j0:hi_j1] += 1.0
@@ -249,6 +242,7 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
                 # metrics (raw scale)
                 weight_grid = np.clip(weight_grid, 1.0, None)
                 pred_grid = pred_grid / weight_grid
+                pred_grid = pred_grid * (ftle_max - ftle_min) + ftle_min
 
                 label_y_b = high_resFTLE_field.astype(np.float32)
                 pred_b = pred_grid.astype(np.float32)

@@ -6,7 +6,7 @@ import hashlib
 from DeepUtils.utils.stable_hash import stable_hash
 from FLowUtils.ScalarField2d import ScalarField2D,ScalarFieldManager
 import matplotlib.pyplot as plt
-from pnn.libs.flows import temporal_downsamplePathlineCrossPrimitive, LocLines, normalizeLines
+from pnn.libs.flows import PSL, LocLines, normalizeLines
 from FLowUtils.flowlineIntegral import batch_pathlineCross_integration_2D_auto
 from FLowUtils.netCDFLoader import *
 from FLowUtils.AnalyticalFlowCreator import *
@@ -554,8 +554,9 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
             GroupSize_BatchSize = Pathline_batch_group.shape[0]
             keep_groups_full = (PathlineLength_batch_group == max_steps).all(dim=1)  # [GroupSize_BatchSize]
 
-            # 重采样到 LstepsPerline（对所有组）
-            P_K = temporal_downsamplePathlineCrossPrimitive(Pathline_batch_group, LstepsPerline) #P_K.view(G_b, nerb, LstepsPerline, 3)
+            #reduce number of points saved
+            P_K = temporal_downsamplePathlineCrossPrimitiveRegular(Pathline_batch_group, LstepsPerline) #P_K.view(G_b, nerb, LstepsPerline, 3)
+
             # 计算真值 FTLE，并将非满长组置零
             if not (keep_groups_full).any():
                 continue
@@ -632,6 +633,7 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(flowDataFolder,vector_field_nam
             #laod amira fiels from the folder GerrisFlowSolverData
             amira_folder=os.path.join(flowDataFolder, name)
             logging.info(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load amira files from {amira_folder}")
+            am_files_list=[]
             for file in os.listdir(amira_folder):
                 if file.endswith(".am"):
                     am_file_path=os.path.join(amira_folder, file)
@@ -640,6 +642,11 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(flowDataFolder,vector_field_nam
                         print(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {file} failed. Skip this field.")
                         continue
                     UnsteadyVectorFields.append(load_vector_field2d)
+                    am_files_list.append(file)
+            if len(am_files_list)==0:
+                logging.warning(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] no .am files found in {amira_folder}. Skip this field.")
+            else:
+                logging.info(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {len(am_files_list)} .am files from {amira_folder}: {am_files_list}")
         else:
             try:
                 vectorfield_datapath=os.path.join(flowDataFolder, f"{name}.nc")
@@ -792,7 +799,6 @@ class FTLEUpsamplingTrainDataset(Dataset):
         time_window_start_ratio=float(config.dataset.t_start)
         time_window_target_ratio=float(config.dataset.t_target)
         LstepsPerline=int(config.pcds.sampled_points_per_line)
-        localized=bool(config.pcds.localized)
         patch_size=int(getattr(config.dataset, 'patchSize', 32))
         patch_stride=4*int(getattr(config.dataset, 'patchStride', 4))
         LoadCacheSuccess=False
@@ -821,10 +827,9 @@ class FTLEUpsamplingTrainDataset(Dataset):
                 "dt": float(flowline_dt),
                 "offset_dist": float(offset_dist),
                 "LstepsPerline": int(LstepsPerline),
-                "localized": bool(localized),
                 "patchSize": int(patch_size),
-                "patchStride": int(patch_stride),
-            }
+                "patchStride": int(patch_stride)
+                 }
             tag = stable_hash(key_obj, prefix="FTLEUpsamplingTrainingDataset_")
             cache_dir = os.path.join(config.cache_dir, "temp")
             os.makedirs(cache_dir, exist_ok=True)
@@ -844,7 +849,6 @@ class FTLEUpsamplingTrainDataset(Dataset):
                 except Exception as e:
                     print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
                          
-
         UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,config.dataset.names)
         FTLE_fieldsLowRes=[]      # list[Tensor patch_yx]
         FTLE_fieldsHighRes=[]     # list[Tensor patch_yx (hi)]
@@ -863,8 +867,10 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     high_res_sampling=UPsampling*low_res_grid_sampling
                     high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,high_res_sampling)
                     # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
-                    temporal_sampled_P_all=temporal_downsamplePathlineCrossPrimitive(lowResPathlines, int(LstepsPerline))
-                    lowResPathlinesPreprocessed=preprocess_localization_normalization(temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False ).cpu().float()
+                    # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
+
+                    lowResPathlinesPreprocessed=PSL(lowResPathlines, LstepsPerline)
+                    # lowResPathlinesPreprocessed=preprocess_localization_normalization(temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False ).cpu().float()
 
                     # sliding window tiling into patches that fully cover the 2D plane
                     ny_low, nx_low = low_resFTLE_field.shape
@@ -914,7 +920,6 @@ class FTLEUpsamplingTrainDataset(Dataset):
                             lowResPathlinesData.append(pl_patch)
                             # itemMap2VectorField.append(vectorfield)
 
-
             self.lowResFTLE = torch.stack(FTLE_fieldsLowRes)
             self.lowResPathlines = torch.stack(lowResPathlinesData)
             self.labels = torch.stack(FTLE_fieldsHighRes)
@@ -923,20 +928,19 @@ class FTLEUpsamplingTrainDataset(Dataset):
             try:
                 # use the same tag to construct the path (if the previous load failed, need to reconstruct)
                 key_obj = {
-                    "name": "ftle_upsampling_train",
-                    "vectorfields": list(all_vectorfieldsname),
-                    "timesliceCount": int(timesliceCount),
-                    "UPsampling": int(UPsampling),
-                    "lowResGridIntervalScale": float(low_res_grid_sampling),
-                    "time_window_start_ratio": float(time_window_start_ratio),
-                    "time_window_target_ratio": float(time_window_target_ratio),
-                    "max_steps": int(max_steps),
-                    "dt": float(flowline_dt),
-                    "offset_dist": float(offset_dist),
-                    "LstepsPerline": int(LstepsPerline),
-                    "localized": bool(localized),
-                    "patchSize": int(patch_size),
-                    "patchStride": int(patch_stride),
+                "name": "ftle_upsampling_train",
+                "vectorfields": list(all_vectorfieldsname),
+                "timesliceCount": int(timesliceCount),
+                "UPsampling": int(UPsampling),
+                "lowResGridIntervalScale": float(low_res_grid_sampling),
+                "time_window_start_ratio": float(time_window_start_ratio),
+                "time_window_target_ratio": float(time_window_target_ratio),
+                "max_steps": int(max_steps),
+                "dt": float(flowline_dt),
+                "offset_dist": float(offset_dist),
+                "LstepsPerline": int(LstepsPerline),
+                "patchSize": int(patch_size),
+                "patchStride": int(patch_stride)
                 }
                 tag = stable_hash(key_obj, prefix="FTLEUpsamplingTrainingDataset_")
                 cache_dir = os.path.join(config.cache_dir, "temp")
@@ -953,6 +957,8 @@ class FTLEUpsamplingTrainDataset(Dataset):
 
           #normalize the ftle
        
+        #put preprocessing here if any
+
         #normalize the ftle
         self.ftle_min = float(self.labels.min())
         self.ftle_max = float(self.labels.max())
@@ -961,7 +967,6 @@ class FTLEUpsamplingTrainDataset(Dataset):
         normalized_y=(self.labels-self.ftle_min)/(self.ftle_max-self.ftle_min)
         normalized_y=normalized_y.clamp(0,1)
         self.labels = normalized_y       # [N]
-
 
 
 
