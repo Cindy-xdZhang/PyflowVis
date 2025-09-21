@@ -6,6 +6,10 @@ import logging
 import tkinter as tk
 from tkinter import filedialog
 
+# Fold state storage for long list widgets
+LIST_FOLD_THRESHOLD = 8
+_list_fold_states: Dict[str, bool] = {}
+
 ###
 ###all gui widget functions
 ###
@@ -139,6 +143,21 @@ def draw_list_input(label, value):
     new_value = list(value)  # Make a copy to edit
 
     imgui.text(label + ":")
+  
+
+    # Determine and render fold/unfold control
+    is_folded = _list_fold_states.get(label, len(new_value) >= LIST_FOLD_THRESHOLD)
+    _list_fold_states[label] = is_folded
+    imgui.same_line()
+    if imgui.small_button(("Unfold" if is_folded else "Fold") + f"##{label}"):
+        is_folded = not is_folded
+        _list_fold_states[label] = is_folded
+    if is_folded:
+        imgui.same_line()
+        imgui.text(f"({len(new_value)} items)")
+        return changed, new_value
+
+
     imgui.same_line()
     if imgui.button(f"Add##{label}"):
         # Guess type from first element, or default to int
@@ -155,7 +174,6 @@ def draw_list_input(label, value):
         else:
             new_value.append(0)
         changed = True
-
     remove_indices = []
     for i, v in enumerate(new_value):
         imgui.push_id(f"{label}_{i}")
@@ -194,6 +212,8 @@ def draw_list_input(label, value):
         new_value.pop(idx)
 
     return changed, new_value
+
+    
 def draw_options_combo( label, value_list, current_selection):
     def draw_combo_options(label:str, x_list:list,current_selection_i:str):
         # Draw a combo box with the provided options and return the selected index

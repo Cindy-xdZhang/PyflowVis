@@ -1,4 +1,20 @@
 {
+    "python.analysis.extraPaths": [
+        "./misc",
+        "./GuiObjcts",
+        "./FLowUtils",
+        "./DeepUtils/utils",
+        "./DeepUtils/loss",
+        "./DeepUtils/optim",
+        "./DeepUtils/scheduler",
+        "./DeepUtils/optim",
+        "./DeepUtils/dataset",
+        "./DeepUtils/models",
+        "./pnn",
+        "./pnn/libs",
+        "./pnn/models",
+        "./pnn/utils",
+    ],
     "files.associations": {
         "*.py": "python",
         "algorithm": "cpp",

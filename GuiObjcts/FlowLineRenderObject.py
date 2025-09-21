@@ -8,7 +8,7 @@ import ctypes
 import numpy as np
 from FLowUtils.ScalarField2d import *
 from FLowUtils.flowlineIntegral import *
-from FLowUtils.KillingObserver2D import compute_reference_frame_transformation_from_field
+from FLowUtils.KillingObserver2D import compute_reference_frame_transformation_from_field, ReferenceFrameTransformation2D
 
 from GuiObjcts.ActiveFieldObject import *
 
@@ -71,10 +71,10 @@ class FlowLineObject(Object):
         self.create_variable_callback("transformationMode", ["none", "observed", "inverse"], lambda obj: None, True, True)
         
         def change_reference_frame_action():
-            actFieldWidget = self.parentScene.getObject("ActiveField")
+            actFieldWidget:ActiveFieldObj = self.parentScene.getObject("ActiveField")
             if actFieldWidget is None:
                 return
-            vector_field:UnsteadyVectorField2D = actFieldWidget.getActiveField()
+            vector_field:UnsteadyVectorField2D = actFieldWidget.getActiveObserverField()
             if vector_field is None or vector_field.getDim() != 2:
                 print("Changing reference frame is only implemented for 2D active field.")
                 return
@@ -97,8 +97,7 @@ class FlowLineObject(Object):
                     maxIterations=self.getValue("maxIteration"),
                     method=self.getOptionValue("integrator")
                 )
-                # TODO: 将 rf.integrated_rotation 应用于可视化或缓存（目前仅打印长度）
-                print(f"[ReferenceFrame] Integrated rotation samples: {len(rf.integrated_rotation)}")
+       
             except Exception as e:
                 print(f"[ReferenceFrame] Failed: {e}")
         
@@ -196,12 +195,101 @@ class FlowLineObject(Object):
         gl.glEnableVertexAttribArray(1)
         gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(3 * 4))
         
+        # create SSBO for worldline/integratedC (binding=6 in shader)
+        self.ssbo0_id = gl.glGenBuffers(1)
+        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, self.ssbo0_id)
+        gl.glBufferData(gl.GL_SHADER_STORAGE_BUFFER, 0, None, gl.GL_DYNAMIC_DRAW)
+        gl.glBindBufferBase(gl.GL_SHADER_STORAGE_BUFFER, 6, self.ssbo0_id)
+        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, 0)
         
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         gl.glBindVertexArray(0)
 
+    def _set_uniform_float(self, shader:Shader, name:str, value:float):
+        loc = gl.glGetUniformLocation(shader.shaderProgram, name)
+        if loc != -1:
+            gl.glUniform1f(loc, float(value))
 
- 
+    def _set_uniform_int(self, shader:Shader, name:str, value:int):
+        loc = gl.glGetUniformLocation(shader.shaderProgram, name)
+        if loc != -1:
+            gl.glUniform1i(loc, int(value))
+
+    def _set_uniform_vec2(self, shader:Shader, name:str, vec2):
+        loc = gl.glGetUniformLocation(shader.shaderProgram, name)
+        if loc != -1:
+            gl.glUniform2f(loc, float(vec2[0]), float(vec2[1]))
+
+    def setFrameTransformationBuffers(self, pathline, integratedRotation, reference_point, observationTime:float, target_frame_id:int):
+        """
+        Python 版本：将 worldline 与 integratedRotation 写入 SSBO(binding=6)，并设置相关 UI 变量。
+        - pathline: [(pos3d, t), ...]
+        - integratedRotation: [theta_i]
+        - reference_point: (x0, y0)
+        """
+        if pathline is None or integratedRotation is None or len(pathline) != len(integratedRotation) or len(pathline) == 0:
+            print("[setFrameTransformationBuffers] invalid inputs")
+            return
+        worldlinetimeMin = float(pathline[0][1])
+        worldlinetimeMax = float(pathline[-1][1])
+        # pack vec4(x, y, theta, time)
+        buf = np.zeros((len(pathline), 4), dtype=np.float32)
+        for i, (p3, t) in enumerate(pathline):
+            buf[i, 0] = float(p3[0])
+            buf[i, 1] = float(p3[1])
+            buf[i, 2] = float(integratedRotation[i])
+            buf[i, 3] = float(t)
+        # upload SSBO
+        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, self.ssbo0_id)
+        gl.glBufferData(gl.GL_SHADER_STORAGE_BUFFER, buf.nbytes, buf, gl.GL_DYNAMIC_DRAW)
+        gl.glBindBuffer(gl.GL_SHADER_STORAGE_BUFFER, 0)
+        # update variables
+        self.updateOptionValue("transformationMode", "observed")
+        self.setValue("DefaultMaxTime", worldlinetimeMax, callback=False)
+        self.setValue("DefaultMinTime", worldlinetimeMin, callback=False)
+        self.setValue("InputFieldMaxTime", worldlinetimeMax, callback=False)
+        self.setValue("InputFieldMinTime", worldlinetimeMin, callback=False)
+        # record counts for shader uniform (we set at draw time)
+        self._ssbo0_length = int(buf.shape[0])
+        self._worldlineStartPos0 = (float(reference_point[0]), float(reference_point[1]))
+
+    def setFrameTransformation(self, instaneousC, worldline, timerange, observationTime:float, target_frame_id:int):
+        """
+        Python 版本：从瞬时角速度与世界线构建 integratedRotation，然后调用 setFrameTransformationBuffers。
+        - instaneousC: [omega_i]
+        - worldline: [(pos3d, t), ...]
+        - timerange: (tmin, tmax)
+        """
+        if timerange[0] >= timerange[1]:
+            print("[setFrameTransformation] Time range error.")
+            return
+        if not worldline or not instaneousC or len(worldline) != len(instaneousC):
+            print("[setFrameTransformation] invalid worldline/instC inputs")
+            return
+        min_obs_time = worldline[0][1]
+        max_obs_time = worldline[-1][1]
+        N = len(instaneousC)
+        dt = (max_obs_time - min_obs_time) / float(max(1, N - 1))
+        k = 0
+        for (_, tt) in worldline:
+            if tt < observationTime:
+                k += 1
+            else:
+                break
+        if k == N:
+            k = N - 1
+        integratedRotation = [0.0] * N
+        integratedRotation[k] = 0.0
+        # backward
+        for i in range(k, 0, -1):
+            angular_c = float(instaneousC[i - 1])
+            integratedRotation[i - 1] = integratedRotation[i] + (-dt) * angular_c
+        # forward
+        for i in range(k, N - 1):
+            angular_c = float(instaneousC[i + 1])
+            integratedRotation[i + 1] = integratedRotation[i] + (+dt) * angular_c
+        reference_point = (float(worldline[k][0][0]), float(worldline[k][0][1]))
+        self.setFrameTransformationBuffers(worldline, integratedRotation, reference_point, observationTime, target_frame_id)
 
 
     def render(self):

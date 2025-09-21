@@ -26,12 +26,12 @@ class LICRender(Object):
         # Render the LIC image
         self.render_lic(lic_image)
   
-class ActiveField(Object):
+class ActiveFieldObj(Object):
     def __init__(self):
         super().__init__("ActiveField")
         self.pause=True
 
-        def timedirtyCallBack(obj:ActiveField) -> None:
+        def timedirtyCallBack(obj:ActiveFieldObj) -> None:
             vectorGlyph=obj.parentScene.getObject("vectorGlyph")
             if vectorGlyph is not None:
                 vectorGlyph.dirty=True
@@ -40,7 +40,7 @@ class ActiveField(Object):
             if flowlineOBj is not None and flowlineOBj.getValue("streamline_active"):
                 flowlineOBj.streamline_dirty=True
 
-        def updateActivefieldcb(obj:ActiveField) -> None:
+        def updateActivefieldcb(obj:ActiveFieldObj) -> None:
             timedirtyCallBack(obj)
             activeField=obj.getActiveField()
             if activeField is not None:
@@ -48,7 +48,7 @@ class ActiveField(Object):
                 obj.updateValue("animationSpeed",animationSpeed)
                 getEngine().eventRegister.notifyEvent("activefield_changed")
         
-        def updateActiveScalarfieldcb(obj:ActiveField) -> None:
+        def updateActiveScalarfieldcb(obj:ActiveFieldObj) -> None:
            planarObj=obj.parentScene.getObject("plane")
            planarObj.setScalarField(obj.getActiveScalarField())
 
@@ -58,9 +58,13 @@ class ActiveField(Object):
         self.create_variable_gui("animationSpeed",0.01,False, {'widget': 'input'})
         #list of str is treated specially  as option in my gui implementation, don't need to specify customization, it always render as combo box
         self.create_variable_callback_with_gui_customization("active field",[],updateActivefieldcb,False)
+        self.create_variable_gui("observer field",[],False)
+
 
         self.scalarFieldManager=ScalarFieldManager()
         self.create_variable_callback_with_gui_customization("active scalar field",[],updateActiveScalarfieldcb,False)
+
+
         self.create_variable_gui("scalarFieldOperation", ["MAGNITUDE","CURL","Q_CRITERION","LAMBDA2","IVD"], False)
         self.addAction("compute scalar field",lambda obj:obj.requestScalarField())
 
@@ -68,7 +72,7 @@ class ActiveField(Object):
         self.create_variable("FTLE_dt_MaxIter_upSampling_timeUps", np.array([0.01,2000,2,1]) ,True)
 
         def FTLE_2D_CUDA_action(*args, **kwargs):
-            actFieldWidget:ActiveField = self
+            actFieldWidget:ActiveFieldObj = self
             vector_field:UnsteadyVectorField2D = actFieldWidget.getActiveField()
             activeFieldName=actFieldWidget.getActiveFieldName()
             if vector_field is None:
@@ -102,13 +106,13 @@ class ActiveField(Object):
         self.addAction("FTLE_2D_CUDA", FTLE_2D_CUDA_action)
 
         def saveActiveFieldAction(*args, **kwargs) -> None:
-            actFieldWidget:ActiveField = self
+            actFieldWidget:ActiveFieldObj = self
             activeField=actFieldWidget.getActiveScalarField()
             activeFieldName=actFieldWidget.getActiveScalarFieldName()
             if activeField is not None:
                 self.scalarFieldManager.save_scalar_field_to_file(activeField, "outputs/scalarFields",activeFieldName)
 
-        self.addAction("save active scalarfield",saveActiveFieldAction)\
+        self.addAction("save active scalarfield",saveActiveFieldAction)
         
 
         def loadActiveFieldAction(*args, **kwargs) -> None:
@@ -172,9 +176,20 @@ class ActiveField(Object):
         if fieldName not in fieldNameList:
             fieldNameList.append(fieldName)
             self.setValue("active field",fieldNameList,False)
+        
+        self.setValue("observer field",fieldNameList,False)
         # if  only one field exist,  make it active
         if len(fieldNameList)==1:
             self.updateOptionValue("active field",fieldNameList[0])
+
+    def getActiveObserverField(self):
+        if self.getActiveObserverFieldName() in self.activeField:
+            return self.activeField[self.getActiveObserverFieldName()]
+        else:
+            return None
+
+    def getActiveObserverFieldName(self):
+        return self.getOptionValue("observer field")
 
     def getActiveFieldName(self)->str:
         return self.getOptionValue("active field")

@@ -99,7 +99,7 @@ def main():
     indicator=Indicator("indicator",camera)
     coord=CoordinateSystem()
     planarManifold=PlanarManifold()
-    actFieldWidget=ActiveField()
+    actFieldWidget=ActiveFieldObj()
     VectorGlyph=VertexArrayVectorGlyph()
     VectorGlyph.setMaterial(defaultMat)
     # commandBar=MainUICommand("mainCommandUI")
@@ -119,14 +119,14 @@ def main():
     
 
     #exmaple loading amria file
-    # vectorField2d=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData2000_3000\\2000.am")
+    # vectorField2d=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData\\0190.am")
     # actFieldWidget.insertField("resampled",vectorField2d)
 
     # vectorField2d2=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverDataTemp\\0071.am")
     # actFieldWidget.insertField("original",vectorField2d2)
-    
-    vectorField2d= double_gyre_2D((250,125),64,Tmax=20)
-    actFieldWidget.insertField("double_gyre",vectorField2d)
+
+    vectorField2d= rotation_four_center((64,64),64)
+    actFieldWidget.insertField("rfc",vectorField2d)
 
     # flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
     # cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
