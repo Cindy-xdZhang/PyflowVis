@@ -184,6 +184,7 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
             maxe_sum = 0.0
             psnr_sum = 0.0
             psnr_bilinear_sum = 0.0
+            psnr_cubic_sum = 0.0
             sample_count = int(len(lowResPathlines_all))
             for test_i in range(sample_count):
                 low_resFTLE_field = lowResFTLE_all[test_i]
@@ -253,7 +254,7 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
                 pred_b = pred_grid.astype(np.float32)
                 mse, mae, maxe, psnr = compute_metrics(label_y_b, pred_b)
 
-                # 计算双线性插值基线的 PSNR
+                # 计算插值基线的 PSNR（双线性与立方）
                 if test_times == 1:
                     with torch.no_grad():
                         lr = torch.from_numpy(low_resFTLE_field)[None, None, ...].float()
@@ -261,10 +262,15 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
                         bilinear_grid = lr_up.detach().cpu().numpy().astype(np.float32)
                     _, _, _, psnr_bilinear = compute_metrics(label_y_b, bilinear_grid)
                     psnr_bilinear_sum += psnr_bilinear
+                    with torch.no_grad():
+                        lr_up_cubic = torch.nn.functional.interpolate(lr, size=(label_y_b.shape[0], label_y_b.shape[1]), mode='bicubic', align_corners=False)[0, 0]
+                        cubic_grid = lr_up_cubic.detach().cpu().numpy().astype(np.float32)
+                    _, _, _, psnr_cubic = compute_metrics(label_y_b, cubic_grid)
+                    psnr_cubic_sum += psnr_cubic
 
                 if visualize and test_i == sample_count-1:
                     vectorfield_4vis = config.test_vectorfield[-1] if isinstance(config.test_vectorfield, list) else [config.test_vectorfield]
-                    vectorfield = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,vectorfield_4vis)[0]
+                    vectorfield = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,vectorfield_4vis)[-1]
                     visualize_FTLEUpampling(label_y_b, pred_b, low_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
 
                 mse_sum += mse
@@ -277,8 +283,9 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
             maxe = maxe_sum / sample_count
             psnr = psnr_sum / sample_count
             psnr_bilinear = psnr_bilinear_sum / sample_count
+            psnr_cubic = psnr_cubic_sum / sample_count
             if test_times == 1:
-                logging.info(f"baseline psnr_bilinear={psnr_bilinear:.6f}")
+                logging.info(f"baseline psnr_bilinear={psnr_bilinear:.6f}, psnr_cubic={psnr_cubic:.6f}")
             logging.info(f"test average: mse={mse:.6f}, mae={mae:.6f}, maxe={maxe:.6f}, psnr={psnr:.6f}")
             return {"mse": mse, "mae": mae, "maxe": maxe, "psnr": psnr}
 

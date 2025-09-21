@@ -449,6 +449,160 @@ class UpsamplingUnetModel(nn.Module):
         return pred
 
 
+class AttentionFusion(nn.Module):
+    """
+    融合来自 pathline 的特征图 F ∈ [B, D, X, Y] 与低分辨率 FTLE 的单通道映射 L ∈ [B, 1, X, Y]。
+    - 首先将 L 通过 1x1 卷积映射到 D 维，与 F 对齐；
+    - 计算通道维度上的注意力权重：
+        a = sigmoid(Conv1x1([F, L_proj])) ∈ [B, D, X, Y]
+      最终输出：a · F + (1-a) · L_proj
+    该设计能在逐空间位置和逐通道上自适应选择来自 pathline 的信息或来自低分辨率 FTLE 的先验。
+    """
+    def __init__(self, channels: int):
+        super().__init__()
+        self.to_d_from_lr = nn.Conv2d(1, channels, kernel_size=1, bias=True)
+        self.gate = nn.Sequential(
+            nn.Conv2d(channels * 2, channels, kernel_size=1, bias=True),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, feat_from_pathline: torch.Tensor, lowres_ftle_1ch: torch.Tensor) -> torch.Tensor:
+        # feat_from_pathline: [B, D, X, Y]
+        # lowres_ftle_1ch:    [B, 1, X, Y]
+        Lp = self.to_d_from_lr(lowres_ftle_1ch)
+        gate_in = torch.cat([feat_from_pathline, Lp], dim=1)
+        a = self.gate(gate_in)
+        return a * feat_from_pathline + (1.0 - a) * Lp
+
+
+class FTLEupsamplingFMT_UnetV3(nn.Module):
+    """
+    基于 FTLEupsamplingFMT_UnetV2 的滑窗 FMT 特征提取流程，但将 "特征与低分辨率 FTLE 的简单拼接"
+    替换为 "注意力融合"（AttentionFusion）。
+
+    Pipeline:
+      1) 滑窗聚合局部 pathline，EncNPNew → coarse FMT 特征图 [B, D, Hc, Wc]
+      2) 双线性上采样到 [B, D, X, Y]
+      3) 与低分辨率 FTLE 的 1 通道图 [B,1,X,Y] 通过 AttentionFusion 融合 → [B, D, X, Y]
+      4) 以 D 通道作为 UNet 编码器输入，随后与 V2 相同的上采样头输出高分辨率预测
+    """
+    def __init__(self, cfg, lowResX: int, lowResY: int, upscale: float, base_ch: int = 32,
+                 embed_dim: int | None = None):
+        super().__init__()
+        self.lowResX = int(lowResX)
+        self.lowResY = int(lowResY)
+        self.upscale = int(upscale)
+
+        # FMT 编码器（滑窗）
+        self.FMT_focus_area = int(getattr(cfg, 'FMT_focus_area', 8))
+        num_stages = int(getattr(cfg.pnn, 'stages', 1)) if hasattr(cfg, 'pnn') else 1
+        k = int(getattr(cfg.pnn, 'k', 6)) if hasattr(cfg, 'pnn') else 6
+        alpha = float(getattr(cfg.pnn, 'alpha', 1000)) if hasattr(cfg, 'pnn') else 1000.0
+        beta = float(getattr(cfg.pnn, 'beta', 100)) if hasattr(cfg, 'pnn') else 100.0
+        nerbors = int(getattr(cfg.pcds, 'num_cross_points_per_seeding', 5)) if hasattr(cfg, 'pcds') else 5
+        LstepsPerline = int(getattr(cfg.pcds, 'sampled_points_per_line', 4)) if hasattr(cfg, 'pcds') else 4
+        self.cross_neighborsize = nerbors
+        self.pointsPerPrimitive = LstepsPerline * nerbors
+        self.embed_dim = int(embed_dim if embed_dim is not None else getattr(cfg.pnn, 'dim', 36))
+        self.encoder = EncNPNew(self.pointsPerPrimitive, num_stages, self.embed_dim, k, alpha, beta)
+        self.fmt_feature_dim = self.embed_dim * (2 ** (num_stages - 0))
+
+        # 注意力融合：将 [B,D,X,Y] 与 [B,1,X,Y] 融合到 [B,D,X,Y]
+        self.fuse = AttentionFusion(self.fmt_feature_dim)
+
+        # Unet 主干：输入通道使用融合后的 D 通道（不再拼接 1 通道 FTLE）
+        in_channels = self.fmt_feature_dim
+        self.inc = DoubleConv(in_channels, base_ch)
+        self.down1 = Down(base_ch, base_ch * 2)
+        self.down2 = Down(base_ch * 2, base_ch * 4)
+        self.up1 = Up(base_ch * 4, base_ch * 2)
+        self.up2 = Up(base_ch * 2, base_ch)
+        self.out_low = nn.Conv2d(base_ch, base_ch, kernel_size=1)
+
+        n_up = max(0, int(round(math.log2(max(1, self.upscale)))))
+        self.up_blocks = nn.ModuleList()
+        in_ch = base_ch
+        for i in range(n_up):
+            out_ch = base_ch if i < n_up - 1 else base_ch // 2
+            self.up_blocks.append(
+                nn.Sequential(
+                    nn.ConvTranspose2d(in_ch, out_ch, kernel_size=2, stride=2),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1, bias=False),
+                    nn.BatchNorm2d(out_ch),
+                    nn.ReLU(inplace=True),
+                )
+            )
+            in_ch = out_ch
+        self.out_high = nn.Conv2d(in_ch, 1, kernel_size=1)
+
+    def _tiling_starts(self, length: int, k: int):
+        if k >= length:
+            return [0]
+        s = int(k)
+        starts = list(range(0, length - k + 1, s))
+        last = length - k
+        if starts[-1] != last:
+            starts.append(last)
+        return starts
+
+    def forward(self, lowResFTLE: torch.Tensor, lowResPathlines: torch.Tensor) -> torch.Tensor:
+        B, X, Y = lowResFTLE.shape
+        _, N, nerbors, L, Dim = lowResPathlines.shape
+        assert N == X * Y, "lowResPathlines second dim must be X*Y"
+        assert nerbors == self.cross_neighborsize, "nerbors mismatch with model setting"
+
+        # 1) 滑窗局部 FMT → coarse feature map [B, D, Hc, Wc]
+        k = int(self.FMT_focus_area)
+        row_starts = self._tiling_starts(int(X), k)
+        col_starts = self._tiling_starts(int(Y), k)
+        Hc, Wc = len(row_starts), len(col_starts)
+
+        feat_coarse = lowResFTLE.new_zeros((B, self.fmt_feature_dim, Hc, Wc))
+        for ri, i0 in enumerate(row_starts):
+            i1 = min(i0 + k, int(X))
+            for ci, j0 in enumerate(col_starts):
+                j1 = min(j0 + k, int(Y))
+                idx_list = []
+                for rr in range(i0, i1):
+                    base = rr * int(Y)
+                    idx_list.extend(range(base + j0, base + j1))
+                if len(idx_list) == 0:
+                    continue
+                idx_tensor = torch.as_tensor(idx_list, dtype=torch.long, device=lowResFTLE.device)
+                pl_win = lowResPathlines[:, idx_tensor, ...]  # [B, M, nerbors, L, Dim]
+                B2, M, _, _, _ = pl_win.shape
+                P = pl_win.reshape(B2, M * nerbors * L, Dim).contiguous()
+                points_N3 = P
+                points_3N = P.permute(0, 2, 1).contiguous()
+                feat_win = self.encoder(points_N3, points_3N)  # [B, D]
+                feat_coarse[:, :, ri, ci] = feat_win
+
+        # 2) 上采样到低分辨率大小 [B, D, X, Y]
+        feat_map = F.interpolate(feat_coarse, size=(int(X), int(Y)), mode='bilinear', align_corners=False)
+
+        # 3) 注意力融合 FMT 特征与 1 通道低分辨率 FTLE
+        ftle_in = lowResFTLE.unsqueeze(1)  # [B,1,X,Y]
+        fused = self.fuse(feat_map, ftle_in)  # [B,D,X,Y]
+
+        # 4) UNet 编码-解码 + 渐进上采样
+        x1 = self.inc(fused)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x = self.up1(x3, x2)
+        x = self.up2(x, x1)
+        x = self.out_low(x)
+        for blk in self.up_blocks:
+            x = blk(x)
+        pred = self.out_high(x).squeeze(1)  # [B, X*UP, Y*UP]
+
+        # 尺寸对齐
+        target_h = int(X * max(1, self.upscale))
+        target_w = int(Y * max(1, self.upscale))
+        if pred.shape[-2] != target_h or pred.shape[-1] != target_w:
+            pred = F.interpolate(pred.unsqueeze(1), size=(target_h, target_w), mode='bilinear', align_corners=False).squeeze(1)
+        return pred
+
 class ESPCN(nn.Module):
     """
     简化版 ESPCN：两层卷积 + 一层反卷积（转置卷积）。
@@ -719,6 +873,93 @@ class ConditionalFMTNet(nn.Module):
         mlp_in = torch.cat([token_flat, lr_flat, xy_flat], dim=1)  # [B*Hh*Wh, D+3]
         out = self.mlp(mlp_in).reshape(B_, Hh, Wh)
         # 训练中标签已归一化，无需此处再做激活，保持线性输出由损失控制
+        return out
+
+class ConditionalFMTNetV3(nn.Module):
+    """
+    ConditionalFMTNet 的注意力融合版本：
+      - 逐格 FMT 编码得到 token feature map [B, D, X, Y]
+      - 双线性上采样到目标高分辨率 [B, D, Hh, Wh]
+      - 低分辨率 FTLE 亦上采样到 [B, 1, Hh, Wh]
+      - 使用 AttentionFusion 将二者融合为 [B, D, Hh, Wh]
+      - 与高分辨率坐标 (x,y) 拼接为 [D+2] 的逐像素向量，经点 MLP 输出
+    输入：
+      - lowResFTLE:      [B, X, Y]
+      - lowResPathlines: [B, X*Y, nerbors, L, 3]
+    输出：
+      - pred:            [B, X*UP, Y*UP]
+    """
+    def __init__(self, cfg, lowResX: int, lowResY: int, upscale: int = 4,
+                 embed_dim: int | None = None, mlp_hidden: int = 256, mlp_depth: int = 3, dropout: float = 0.0):
+        super().__init__()
+        self.lowResX = int(lowResX)
+        self.lowResY = int(lowResY)
+        self.upscale = int(upscale)
+
+        # FMT tokenizer（每低分辨率单元一 token）
+        k = int(getattr(cfg.pnn, 'k', 6)) if hasattr(cfg, 'pnn') else 6
+        alpha = float(getattr(cfg.pnn, 'alpha', 1000)) if hasattr(cfg, 'pnn') else 1000.0
+        beta = float(getattr(cfg.pnn, 'beta', 100)) if hasattr(cfg, 'pnn') else 100.0
+        nerbors = int(getattr(cfg.pcds, 'num_cross_points_per_seeding', 5)) if hasattr(cfg, 'pcds') else 5
+        LstepsPerline = int(getattr(cfg.pcds, 'sampled_points_per_line', 4)) if hasattr(cfg, 'pcds') else 4
+        self.cross_neighborsize = nerbors
+        self.pointsPerPrimitive = LstepsPerline * nerbors
+        self.num_stages = int(getattr(cfg.pnn, 'stages', 0)) if hasattr(cfg, 'pnn') else 0
+        embed_dim = int(embed_dim if embed_dim is not None else getattr(cfg.pnn, 'dim', 36))
+        self.fmt_feature_dim = embed_dim * (2 ** (self.num_stages - 0))
+        self.encoder = EncNPNew(self.pointsPerPrimitive, self.num_stages, embed_dim, k, alpha, beta)
+
+        # 注意力融合器：将 [B,D,Hh,Wh] 与 [B,1,Hh,Wh] 融合到 [B,D,Hh,Wh]
+        self.fuse = AttentionFusion(self.fmt_feature_dim)
+
+        # 点 MLP：输入维度 = D(token_fused) + 2(xy)
+        in_dim = self.fmt_feature_dim + 2
+        layers: list[nn.Module] = []
+        dim = in_dim
+        for i in range(int(max(1, mlp_depth))):
+            next_dim = mlp_hidden if i < mlp_depth - 1 else 1
+            layers.append(nn.Linear(dim, next_dim))
+            if i < mlp_depth - 1:
+                layers.append(nn.GELU())
+                if dropout > 0:
+                    layers.append(nn.Dropout(dropout))
+            dim = next_dim
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, lowResFTLE: torch.Tensor, lowResPathlines: torch.Tensor) -> torch.Tensor:
+        B, X, Y = lowResFTLE.shape
+        _, N, nerbors, L, Dim = lowResPathlines.shape
+        assert N == X * Y, "lowResPathlines second dim must be X*Y"
+        assert nerbors == self.cross_neighborsize, "nerbors mismatch with model setting"
+
+        # 1) 每格 FMT 编码 → [B, D, X, Y]
+        P = lowResPathlines.reshape(B * N, nerbors * L, Dim).contiguous()
+        points_N3 = P
+        points_3N = P.permute(0, 2, 1).contiguous()
+        feat = self.encoder(points_N3, points_3N)  # [B*N, D]
+        feat = feat.reshape(B, X, Y, self.fmt_feature_dim).permute(0, 3, 1, 2).contiguous()
+
+        # 2) 上采样至目标高分辨率
+        target_h = int(X * max(1, self.upscale))
+        target_w = int(Y * max(1, self.upscale))
+        feat_hi = F.interpolate(feat, size=(target_h, target_w), mode='bilinear', align_corners=False)  # [B,D,Hh,Wh]
+        lr_up = F.interpolate(lowResFTLE.unsqueeze(1), size=(target_h, target_w), mode='bilinear', align_corners=False)  # [B,1,Hh,Wh]
+
+        # 3) 坐标通道（归一化到[0,1]）
+        yy = torch.linspace(0, 1, steps=target_h, device=lowResFTLE.device)
+        xx = torch.linspace(0, 1, steps=target_w, device=lowResFTLE.device)
+        Y_grid, X_grid = torch.meshgrid(yy, xx, indexing='ij')
+        coord = torch.stack([X_grid, Y_grid], dim=0).unsqueeze(0).repeat(B, 1, 1, 1)  # [B,2,Hh,Wh]
+
+        # 4) 注意力融合 token 与 lowres FTLE
+        fused = self.fuse(feat_hi, lr_up)  # [B,D,Hh,Wh]
+
+        # 5) 点查询 MLP（逐像素）：[fused(D), x(1), y(1)]
+        B_, D_, Hh, Wh = fused.shape
+        token_flat = fused.permute(0, 2, 3, 1).reshape(B_ * Hh * Wh, D_)
+        xy_flat = coord.permute(0, 2, 3, 1).reshape(B_ * Hh * Wh, 2)
+        mlp_in = torch.cat([token_flat, xy_flat], dim=1)  # [B*Hh*Wh, D+2]
+        out = self.mlp(mlp_in).reshape(B_, Hh, Wh)
         return out
 
 class ConditionalFMTNetv2(nn.Module):
@@ -1277,6 +1518,11 @@ def build_model(config, device):
         lowResY = int(config.lowResY)
         model = FTLEupsamplingFMT_UnetV2(config, lowResX, lowResY,upscale=int(config.dataset.UPsampling)).to(device)
         return model
+    elif config.model.NAME == 'FTLEUpsamplingFMT_UnetV3' or config.model.NAME == 'FTLEUpsamplingFMT_Unet_V3':
+        lowResX = int(config.lowResX)
+        lowResY = int(config.lowResY)
+        model = FTLEupsamplingFMT_UnetV3(config, lowResX, lowResY,upscale=int(config.dataset.UPsampling)).to(device)
+        return model
     elif config.model.NAME == 'FTLEUpsamplingViTBaseline':
         lowResX = int(config.lowResX)
         lowResY = int(config.lowResY)
@@ -1291,6 +1537,11 @@ def build_model(config, device):
         lowResX = int(config.lowResX)
         lowResY = int(config.lowResY)
         model = ConditionalFMTNetv2(config, lowResX, lowResY, upscale=int(config.dataset.UPsampling)).to(device)
+        return model
+    elif config.model.NAME == 'ConditionalFMTNetV3' or config.model.NAME == 'ConditionalFMTNet_V3':
+        lowResX = int(config.lowResX)
+        lowResY = int(config.lowResY)
+        model = ConditionalFMTNetV3(config, lowResX, lowResY, upscale=int(config.dataset.UPsampling)).to(device)
         return model
     elif config.model.NAME == 'ESPCN':
         lowResX = int(config.lowResX)
