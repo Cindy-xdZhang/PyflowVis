@@ -1,5 +1,5 @@
 seed: 7068
-epochs: 6
+epochs: 3
 train_points_count: 72000
 batch_size: 12
 print_freq: 200
@@ -13,15 +13,20 @@ loss:
   NAME: MSELoss
 
 model:
+  # NAME: ESPCN
   # NAME: UpsamplingUnetModel
   # NAME: FTLEUpsamplingFMT_Unet
+  # NAME: FTLEUpsamplingFMT_UnetV3
   # NAME: FTLEUpsamplingFMT_Vit
-  # NAME: FTLEUpsamplingFMT_UnetV2
-  # NAME: ESPCN
-  NAME: ConditionalFMTNetV3
+  NAME: FTLEUpsamplingFMT_UnetV2
+  # NAME: ConditionalFMTNetV3
   # NAME: FTLEUpsamplingViTBaseline
   # NAME: ConditionalFMTNet
   # NAME: FTLEUpsamplingFMT_Vit_Version2
+
+# mode: upsamplingFLowMap
+# mode = 'point_FTLE_regression'
+mode : upsamplingFTLE
 
 wandb: False 
 
@@ -33,11 +38,11 @@ dataset:
 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d  GerrisFlowSolverData/*.am
-  names: [GerrisFlowSolverDataTurbulentTest]
+  names: [GerrisFlowSolverDatadebug,cylinder2d]
   extension: nc
   t_start: 0.2 #% for the whole time
   t_target: 0.8
-  patchSize: 32
+  patchSize: 32 #modify this according to low_res_grid_sampling, since low_res_grid_sampling will influence how large the low res ftle grid , it could happen that low res ftle grid is smaller than patchSize
   patchStride: 10 # when do fast testing or generate traing dataset, real patchStride is patchStride*4(for faster testing and training), only finaly visualize, use patchStride
   
 test_tasks: test_UpsamplingModel

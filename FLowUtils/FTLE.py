@@ -87,7 +87,7 @@ def compute_FTLE_2D_CUDA_oneSlice(vector_field:UnsteadyVectorField2D,  time:floa
     cuda.memcpy_htod(FTLE_gpu, FTLE_host)
 
     # Launch configuration
-    block = (32, 16, 1)
+    block = (32, 32, 1)
     grid = ((FTLE_size_x + block[0] - 1) // block[0], (FTLE_size_y + block[1] - 1) // block[1], 1)
 
 

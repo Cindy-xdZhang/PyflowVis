@@ -273,8 +273,8 @@ class FTLEUpsamplingFMT_Unet(nn.Module):
         self.cache_coordGrid=None
 
     def construct_cache_coordGrid(self,B: int,lowResX: int,lowResY: int):
-        yy = torch.linspace(0, 1, steps=lowResX, device=device)
-        xx = torch.linspace(0, 1, steps=lowResY, device=device)
+        yy = torch.linspace(0, 1, steps=lowResX)
+        xx = torch.linspace(0, 1, steps=lowResY)
         Y_grid, X_grid = torch.meshgrid(yy, xx, indexing='ij')  # [X,Y]
         coord = torch.stack([X_grid, Y_grid], dim=0).unsqueeze(0).repeat(B, 1, 1, 1)  # [B,2,X,Y]
         self.cache_coordGrid=coord
@@ -284,7 +284,7 @@ class FTLEUpsamplingFMT_Unet(nn.Module):
         _, N, nerbors, L, Dim = lowResPathlines.shape
         assert N == X * Y, "lowResPathlines second dim must be X*Y"
         assert nerbors == self.cross_neighborsize, "nerbors mismatch with model setting"
-        if self.cache_coordGrid is None or self.cache_coordGrid.shape[0] != B:
+        if self.cache_coordGrid is None or self.cache_coordGrid.shape[0] != B or self.cache_coordGrid.shape[2] != X or self.cache_coordGrid.shape[3] != Y:
             self.construct_cache_coordGrid(B, X, Y)
 
         # 1) Encode cross-primitive to per-cell 32-D feature
@@ -734,7 +734,6 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
 
     def forward(self, lowResFTLE: torch.Tensor, lowResPathlines: torch.Tensor) -> torch.Tensor:
         B, X, Y = lowResFTLE.shape
-        PSL(lowResPathlines, self.pointsPerPrimitive)
         _, N, nerbors, L, Dim = lowResPathlines.shape
         assert N == X * Y, "lowResPathlines second dim must be X*Y"
         assert nerbors == self.cross_neighborsize, "nerbors mismatch with model setting"

@@ -1,4 +1,5 @@
 from torch.nn.functional import upsample
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 import torch,os
@@ -14,6 +15,8 @@ from FLowUtils.netCDFLoader import *
 from FLowUtils.AnalyticalFlowCreator import *
 from FLowUtils.ScalarField2d import compute_ivd_2D
 
+global_UniformValueSpatical=8.0
+global_UniformValueTemporal=12.5663704#4 pi
 
 torch.set_printoptions(precision=4, threshold=10000, linewidth=200, sci_mode=False)
 
@@ -229,6 +232,43 @@ def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampl
     starts_xy = np.stack([XX.reshape(-1), YY.reshape(-1)], axis=1)
     return starts_xy,xs,ys
 
+
+
+
+def generate_FLowMap_SLICE(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:float,dt:float,maxIterations:int, resolutionUPsampling:float=1.0):
+    nerbors=5
+    offset_dist = float(cfg.pcds.offset_dist)
+    max_steps = int(cfg.pcds.max_iterations)
+    starts_xy,xs,ys=generate_seedingGrid_2D(vectorfield,resolutionUPsampling)
+    ny, nx = len(ys), len(xs)
+    Pathline_b, PathlineLength_b = batch_pathlineCross_integration_2D_auto(
+                points=starts_xy,
+                vectorfield=vectorfield,
+                t_start=float(physcial_time), t_target=float(physcial_time+dt*maxIterations),
+                dt=float(dt), max_steps=int(max_steps),
+                offsets_size=float(offset_dist), method="rk4"
+            )
+    Pathline_g = Pathline_b.view(nx*ny, nerbors, max_steps, 3)
+    PathlineLength_g = PathlineLength_b.view(nx*ny, nerbors)
+    # y_all=computeFTLEFromPathlineCrossPrimitive(Pathline_g, vectorfield_dt=vectorfield.timeInterval)
+
+    keep_groups_full = (PathlineLength_g == max_steps).all(dim=1)
+    true_grid = np.full((ny, nx, 6), 0, dtype=np.float32)
+    linear_index=np.arange(nx*ny)
+    valid_index=linear_index[keep_groups_full]
+    rows=valid_index//nx
+    cols=valid_index%nx
+    centralPointfirt_pos=Pathline_g[valid_index, 0, 0,:]
+    centralPointlast_pos=Pathline_g[valid_index, 0, max_steps-1,:]
+    #concat centralPointfirt_pos and centralPointlast_pos
+    flowMap=torch.concat([centralPointfirt_pos,centralPointlast_pos-centralPointfirt_pos],axis=1)
+    flowMap[...,0:2]=flowMap[...,0:2]/global_UniformValueSpatical
+    flowMap[...,2]=flowMap[...,2]/global_UniformValueTemporal
+    flowMap[...,3:5]=flowMap[...,3:5]/global_UniformValueSpatical
+    flowMap[...,5]=flowMap[...,5]/global_UniformValueTemporal
+    true_grid[rows, cols,:] =flowMap.detach().cpu().numpy()
+
+    return true_grid,Pathline_g,nx,ny
 
 
 def generate_FTLE_SLICE(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:float,dt:float,maxIterations:int, resolutionUPsampling:float=1.0):
@@ -487,6 +527,48 @@ def visualize_FTLEUpampling(true_grid: np.ndarray, pred_grid: np.ndarray,low_res
     plt.show(block=True)
     plt.close(fig)
 
+
+
+
+def visualize_OneScalarField(true_grid: np.ndarray, domainMinBoundary,domainMaxBoundary,
+                         upscale_factor: int = 1, dpi: int = 300):
+    def robust_minmax(a):
+        if np.all(np.isnan(a)):
+            return 0.0, 1.0
+        vmin = np.nanpercentile(a, 2)
+        vmax = np.nanpercentile(a, 98)
+        if not np.isfinite(vmin): vmin = np.nanmin(a)
+        if not np.isfinite(vmax): vmax = np.nanmax(a)
+        if vmin == vmax:
+            vmax = vmin + 1e-6
+        return float(vmin), float(vmax)
+    
+    xmin, ymin, _ = domainMinBoundary
+    xmax, ymax, _ = domainMaxBoundary
+    extent = [xmin, xmax, ymin, ymax]
+    vmin, vmax = robust_minmax(true_grid)
+
+    # 可选上采样，仅用于显示
+    grid_to_show = true_grid
+    if upscale_factor and upscale_factor > 1:
+        with torch.no_grad():
+            g = torch.from_numpy(true_grid)[None, None, ...].float()
+            g_hi = torch.nn.functional.interpolate(g, scale_factor=upscale_factor, mode='bilinear', align_corners=False)[0, 0]
+            grid_to_show = g_hi.cpu().numpy()
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8), constrained_layout=True, dpi=dpi)
+    im = ax.imshow(grid_to_show, origin='lower', extent=extent, cmap='coolwarm', vmin=vmin, vmax=vmax, interpolation='bilinear')
+    ax.set_title('Scalar Field')
+    ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_aspect('equal')
+
+    cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cb.formatter.set_powerlimits((0, 0))
+    cb.update_ticks()
+
+    plt.show(block=True)
+    plt.close(fig)
+
+
 def visualize_ftle_sliceComparison(true_grid: np.ndarray, pred_grid: np.ndarray, domainMinBoundary,domainMaxBoundary,psnr: float=0.0,save_path: str | None = None,
                          upscale_factor: int = 1, dpi: int = 300):
     # 公共显示范围（稳健地忽略极端值）
@@ -542,13 +624,13 @@ def visualize_ftle_sliceComparison(true_grid: np.ndarray, pred_grid: np.ndarray,
         plt.savefig(save_path, dpi=200)
     plt.show(block=True)
     plt.close(fig)
+    
 
 
+def compute_metrics(in_true_grid:np.ndarray|torch.Tensor, in_pred_grid:np.ndarray|torch.Tensor):
 
-def compute_metrics(in_true_grid:np.ndarray, in_pred_grid:np.ndarray):
-
-    true_grid= in_true_grid.cpu().numpy()  if in_true_grid is torch.Tensor else in_true_grid 
-    pred_grid= in_pred_grid.cpu().numpy() if in_pred_grid is torch.Tensor else in_pred_grid 
+    true_grid= in_true_grid.cpu().numpy()  if  isinstance(in_true_grid, torch.Tensor) else in_true_grid 
+    pred_grid= in_pred_grid.cpu().numpy() if  isinstance(in_pred_grid, torch.Tensor) else in_pred_grid 
 
     y_global_max = true_grid.max()
     y_global_min = true_grid.min()
@@ -851,51 +933,38 @@ class FTLEUpsamplingTrainDataset(Dataset):
         patch_stride=4*int(getattr(config.dataset, 'patchStride', 4))
         LoadCacheSuccess=False
        
-        # helper: compute starts so that last window touches boundary (may overlap previous)
-        def _tiling_starts(length: int, k: int, stride: int) -> list[int]:
-            if k >= length:
-                return [0]
-            s = max(1, int(stride))
-            starts = list(range(0, length - k + 1, s))
-            last = length - k
-            if starts[-1] != last:
-                starts.append(last)
-            return starts
-
-        if useCacheSystem:
-            key_obj = {
-                "name": "ftle_upsampling_train",
-                "vectorfields": list(all_vectorfieldsname),
-                "timesliceCount": int(timesliceCount),
-                "UPsampling": int(UPsampling),
-                "lowResGridIntervalScale": float(low_res_grid_sampling),
-                "time_window_start_ratio": float(time_window_start_ratio),
-                "time_window_target_ratio": float(time_window_target_ratio),
-                "max_steps": int(max_steps),
-                "dt": float(flowline_dt),
-                "offset_dist": float(offset_dist),
-                "LstepsPerline": int(LstepsPerline),
-                "patchSize": int(patch_size),
-                "patchStride": int(patch_stride)
-                 }
-            tag = stable_hash(key_obj, prefix="FTLEUpsamplingTrainingDataset_")
-            cache_dir = os.path.join(config.cache_dir, "temp")
-            os.makedirs(cache_dir, exist_ok=True)
-            cache_path = os.path.join(cache_dir, f"{tag}.npz")
-
-            if os.path.exists(cache_path):
-                try:
-                    data = np.load(cache_path)
-                    data_np = data["Data"]
-                    labels_np = data["Labels"]
-                    lowResPathlines_np = data["LowResPathlines"]
-                    self.lowResFTLE = torch.from_numpy(data_np).float()
-                    self.lowResPathlines = torch.from_numpy(lowResPathlines_np).float()
-                    self.labels = torch.from_numpy(labels_np).float()
-                    LoadCacheSuccess=True
-                    logging.info(f"[FTLEUpsamplingTrainDataset] loaded {self.lowResFTLE.shape[0]} samples from cache {cache_path}")
-                except Exception as e:
-                    print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
+   
+        key_obj = {
+            "name": "ftle_upsampling_train",
+            "vectorfields": list(all_vectorfieldsname),
+            "timesliceCount": int(timesliceCount),
+            "UPsampling": int(UPsampling),
+            "lowResGridIntervalScale": float(low_res_grid_sampling),
+            "time_window_start_ratio": float(time_window_start_ratio),
+            "time_window_target_ratio": float(time_window_target_ratio),
+            "max_steps": int(max_steps),
+            "dt": float(flowline_dt),
+            "offset_dist": float(offset_dist),
+            "LstepsPerline": int(LstepsPerline),
+            "patchSize": int(patch_size),
+            "patchStride": int(patch_stride)
+                }
+        tag = stable_hash(key_obj, prefix="FTLEUpsamplingTrainingDataset_")
+        cache_dir = os.path.join(config.cache_dir, "temp")
+        cache_path = os.path.join(cache_dir, f"{tag}.npz")
+        if useCacheSystem and os.path.exists(cache_path):
+            try:
+                data = np.load(cache_path)
+                data_np = data["Data"]
+                labels_np = data["Labels"]
+                lowResPathlines_np = data["LowResPathlines"]
+                self.lowResFTLE = torch.from_numpy(data_np).float()
+                self.lowResPathlines = torch.from_numpy(lowResPathlines_np).float()
+                self.labels = torch.from_numpy(labels_np).float()
+                LoadCacheSuccess=True
+                logging.info(f"[FTLEUpsamplingTrainDataset] loaded {self.lowResFTLE.shape[0]} samples from cache {cache_path}")
+            except Exception as e:
+                print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
                          
         UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,config.dataset.names)
         FTLE_fieldsLowRes=[]      # list[Tensor patch_yx]
@@ -904,6 +973,18 @@ class FTLEUpsamplingTrainDataset(Dataset):
         # itemMap2VectorField=[]
 
         if not LoadCacheSuccess:
+            # helper: compute starts so that last window touches boundary (may overlap previous)
+            def _tiling_starts(length: int, k: int, stride: int) -> list[int]:
+                if k >= length:
+                    return [0]
+                s = max(1, int(stride))
+                starts = list(range(0, length - k + 1, s))
+                last = length - k
+                if starts[-1] != last:
+                    starts.append(last)
+                return starts
+
+            high_res_sampling=int(UPsampling*low_res_grid_sampling)
             for i,vectorfield in enumerate(UnsteadyVectorFields):
                 logging.info(f"[FTLEUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
                 time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
@@ -912,7 +993,6 @@ class FTLEUpsamplingTrainDataset(Dataset):
                 for time_slice in timeslice:
                     # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
                     low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,low_res_grid_sampling)  
-                    high_res_sampling=int(UPsampling*low_res_grid_sampling)
                     high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,high_res_sampling)
                     # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
                     # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
@@ -930,9 +1010,9 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
 
                     for i0 in row_starts:
-                        i1 = i0 + patch_size
+                        i1 = min(i0 + patch_size, ny_low)
                         for j0 in col_starts:
-                            j1 = j0 + patch_size
+                            j1 = min(j0 + patch_size, nx_low)
 
                             # map to high-res indices (align last window to boundary)
                             hi_h = max(1,patch_size*UPsampling)
@@ -977,26 +1057,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
 
         if useCacheSystem and not LoadCacheSuccess:
             try:
-                # use the same tag to construct the path (if the previous load failed, need to reconstruct)
-                key_obj = {
-                "name": "ftle_upsampling_train",
-                "vectorfields": list(all_vectorfieldsname),
-                "timesliceCount": int(timesliceCount),
-                "UPsampling": int(UPsampling),
-                "lowResGridIntervalScale": float(low_res_grid_sampling),
-                "time_window_start_ratio": float(time_window_start_ratio),
-                "time_window_target_ratio": float(time_window_target_ratio),
-                "max_steps": int(max_steps),
-                "dt": float(flowline_dt),
-                "offset_dist": float(offset_dist),
-                "LstepsPerline": int(LstepsPerline),
-                "patchSize": int(patch_size),
-                "patchStride": int(patch_stride)
-                }
-                tag = stable_hash(key_obj, prefix="FTLEUpsamplingTrainingDataset_")
-                cache_dir = os.path.join(config.cache_dir, "temp")
                 os.makedirs(cache_dir, exist_ok=True)
-                cache_path = os.path.join(cache_dir, f"{tag}.npz")
                 np.savez(cache_path,
                         Data=self.lowResFTLE.detach().cpu().numpy().astype(np.float32),
                         Labels=self.labels.detach().cpu().numpy().astype(np.float32),
@@ -1028,123 +1089,106 @@ class FTLEUpsamplingTrainDataset(Dataset):
         return (self.lowResFTLE[idx], self.lowResPathlines[idx]), self.labels[idx]
 
 
-
-# ---------------- IVD Vortex Detection Datasets ----------------
-class IVDVortexTrainDataset(Dataset):
-    """
-    训练集：
-    - 输入：低分辨率 IVD tile + 低分辨率 pathlines tile（PSL 预处理）
-    - 标签：高分辨率 IVD 根据 ratio 百分位阈值二值化的 tile（0/1，float）
-    - 采样：与 FTLEUpsamplingTrainDataset 一致，滑窗切 tile
-    - 归一化：将低分辨率 IVD 使用全数据的 (ivd_min, ivd_max) 归一化到 [0,1]
-    """
-    def __init__(self, config, useCacheSystem: bool = True):
-        all_vectorfieldsname = [name for name in config.dataset.names]
-        timesliceCount = int(getattr(config.dataset, 'timesliceCount', 8))
-        UPsampling = int(config.dataset.UPsampling)
-        low_res_grid_sampling = float(config.dataset.low_res_grid_sampling)
-        max_steps = int(config.pcds.max_iterations)
-        flowline_dt = float(config.pcds.dt)
-        offset_dist = float(config.pcds.offset_dist)
-        LstepsPerline = int(config.pcds.sampled_points_per_line)
-        patch_size = int(getattr(config.dataset, 'patchSize', 32))
-        patch_stride = 4 * int(getattr(config.dataset, 'patchStride', 4))
-        self.ratio = float(getattr(config.dataset, 'IVDThreshold', 0.5))
-
-        def _tiling_starts(length: int, k: int, stride: int) -> list[int]:
-            if k >= length:
-                return [0]
-            s = max(1, int(stride))
-            starts = list(range(0, length - k + 1, s))
-            last = length - k
-            if starts[-1] != last:
-                starts.append(last)
-            return starts
-
-        LoadCacheSuccess = False
-        if useCacheSystem:
-            key_obj = {
-                "name": "ivd_vortex_train",
-                "vectorfields": list(all_vectorfieldsname),
-                "timesliceCount": int(timesliceCount),
-                "UPsampling": int(UPsampling),
-                "lowResGridIntervalScale": float(low_res_grid_sampling),
-                "max_steps": int(max_steps),
-                "dt": float(flowline_dt),
-                "offset_dist": float(offset_dist),
-                "LstepsPerline": int(LstepsPerline),
-                "patchSize": int(patch_size),
-                "patchStride": int(patch_stride),
-                "ratio": float(self.ratio),
+# Torch Dataset for training samples generated on-the-fly via generate_training_samples
+class FLowMapUpsamplingTrainDataset(Dataset):
+    def __init__(self,   config, useCacheSystem: bool = True):
+        UnsteadyVectorFields=[]
+        ftle_resolutionUPsampling=float(config.dataset.UPsampling)
+        all_vectorfieldsname=[name for name in config.dataset.names]
+        all_vectorfieldsname_str=",".join(all_vectorfieldsname)
+        timesliceCount=config.dataset.timesliceCount
+        UPsampling=int(config.dataset.UPsampling)
+        low_res_grid_sampling=float(config.dataset.low_res_grid_sampling)
+        max_steps: int=config.pcds.max_iterations
+        flowline_dt: float=config.pcds.dt
+        offset_dist: float =float(config.pcds.offset_dist)
+        time_window_start_ratio=float(config.dataset.t_start)
+        time_window_target_ratio=float(config.dataset.t_target)
+        LstepsPerline=int(config.pcds.sampled_points_per_line)
+        patch_size=int(getattr(config.dataset, 'patchSize', 32))
+        patch_stride=4*int(getattr(config.dataset, 'patchStride', 4))
+        LoadCacheSuccess=False
+        key_obj = {
+            "name": "ftle_upsampling_train",
+            "vectorfields": list(all_vectorfieldsname),
+            "timesliceCount": int(timesliceCount),
+            "UPsampling": int(UPsampling),
+            "lowResGridIntervalScale": float(low_res_grid_sampling),
+            "time_window_start_ratio": float(time_window_start_ratio),
+            "time_window_target_ratio": float(time_window_target_ratio),
+            "max_steps": int(max_steps),
+            "dt": float(flowline_dt),
+            "offset_dist": float(offset_dist),
+            "LstepsPerline": int(LstepsPerline),
+            "patchSize": int(patch_size),
+            "patchStride": int(patch_stride)
             }
-            tag = stable_hash(key_obj, prefix="IVDVortexTrainingDataset_")
-            cache_dir = os.path.join(config.cache_dir, "temp")
-            os.makedirs(cache_dir, exist_ok=True)
-            cache_path = os.path.join(cache_dir, f"{tag}.npz")
-            if os.path.exists(cache_path):
-                try:
-                    data = np.load(cache_path)
-                    self.lowResIVD = torch.from_numpy(data["Data"]).float()
-                    self.lowResPathlines = torch.from_numpy(data["LowResPathlines"]).float()
-                    self.labels = torch.from_numpy(data["Labels"]).float()
-                    self.ivd_min = float(data["ivd_min"]) if "ivd_min" in data else float(self.lowResIVD.min())
-                    self.ivd_max = float(data["ivd_max"]) if "ivd_max" in data else float(self.lowResIVD.max())
-                    LoadCacheSuccess = True
-                    logging.info(f"[IVDVortexTrainDataset] loaded {self.lowResIVD.shape[0]} samples from cache {cache_path}")
-                except Exception as e:
-                    print(f"[IVDVortexTrainDataset] cache load failed: {e}. Regenerating...")
-
+        tag = stable_hash(key_obj, prefix="FLowMapUpsamplingTrainingDataset_")
+        cache_dir = os.path.join(config.cache_dir, "temp")
+        cache_path = os.path.join(cache_dir, f"{tag}.npz")
+        if useCacheSystem and os.path.exists(cache_path):
+            try:
+                data = np.load(cache_path)
+                data_np = data["Data"]
+                labels_np = data["Labels"]
+                lowResPathlines_np = data["LowResPathlines"]
+                self.lowResFlowMap = torch.from_numpy(data_np).float()
+                self.lowResPathlines = torch.from_numpy(lowResPathlines_np).float()
+                self.labels = torch.from_numpy(labels_np).float()
+                LoadCacheSuccess=True
+                logging.info(f"[FLowMapUpsamplingTrainDataset] loaded {self.lowResFlowMap.shape[0]} samples from cache {cache_path}")
+            except Exception as e:
+                print(f"[FLowMapUpsamplingTrainDataset] cache load failed: {e}. Regenerating...")
+                         
         if not LoadCacheSuccess:
-            UnsteadyVectorFields = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir, config.dataset.names)
-            IVDE_fieldsLowRes = []     # list[Tensor patch_yx]
-            lowResPathlinesData = []   # list[Tensor (patch_hw groups, nerbors, L, 3)]
-            BinaryMaskHighRes = []     # list[Tensor patch_yx (hi) binary]
-            ivd_min_global = float('inf')
-            ivd_max_global = float('-inf')
+            # helper: compute starts so that last window touches boundary (may overlap previous)
+            def _tiling_starts(length: int, k: int, stride: int) -> list[int]:
+                if k >= length:
+                    return [0]
+                s = max(1, int(stride))
+                starts = list(range(0, length - k + 1, s))
+                last = length - k
+                if starts[-1] != last:
+                    starts.append(last)
+                return starts
 
-            for i, vectorfield in enumerate(UnsteadyVectorFields):
-                logging.info(f"[IVDVortexTrainDataset] generate training samples for {i+1}/{len(UnsteadyVectorFields)}...")
-                tmin, tmax = float(vectorfield.tmin), float(vectorfield.tmax)
-                time_window_start = float(getattr(config.dataset, 't_start', 0.1) * (tmax - tmin) + tmin)
-                time_window_target = float(getattr(config.dataset, 't_target', 0.9) * (tmax - tmin) + tmin)
-                sample_times = np.linspace(time_window_start, time_window_target, timesliceCount)
+            UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,config.dataset.names)
+            FLowMap_fieldsLowRes=[]      # list[Tensor patch_yx]
+            FLowMap_fieldsHighRes=[]     # list[Tensor patch_yx (hi)]
+            lowResPathlinesData=[]    # list[Tensor (patch_hw groups, nerbors, L, 3)]
+            high_res_sampling=int(UPsampling*low_res_grid_sampling)
+            for i,vectorfield in enumerate(UnsteadyVectorFields):
+                logging.info(f"[FLowMapUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
+                time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+                time_window_target = float(time_window_target_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+                timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
+                for time_slice in timeslice:
+                    # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
+                    low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FLowMap_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,low_res_grid_sampling)  
+                    high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FLowMap_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,high_res_sampling)
+                    # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
+                    # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
 
-                for time_slice in sample_times:
-                    # 低分辨率 IVD + pathlines
-                    low_resIVD_field, lowResPathlines, low_res_xs, low_res_ys = generate_IVD_SLICE(
-                        config, vectorfield, float(time_slice), flowline_dt, max_steps, low_res_grid_sampling
-                    )
-                    # 高分辨率 IVD（用于生成二值标签）
-                    high_res_sampling = UPsampling * low_res_grid_sampling
-                    high_resIVD_field, _, high_res_xs, high_res_ys = generate_IVD_SLICE(
-                        config, vectorfield, float(time_slice), flowline_dt, max_steps, high_res_sampling
-                    )
+                    lowResPathlinesPreprocessed=PSL(lowResPathlines, LstepsPerline)
+                    # lowResPathlinesPreprocessed=preprocess_localization_normalization(temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False ).cpu().float()
 
-                    ivd_min_global = min(ivd_min_global, float(np.min(high_resIVD_field)))
-                    ivd_max_global = max(ivd_max_global, float(np.max(high_resIVD_field)))
-
-                    # 滑窗切 tile
-                    ny_low, nx_low = low_resIVD_field.shape
-                    ny_hi, nx_hi = high_resIVD_field.shape
-                    ry = float(ny_hi) / float(max(1, ny_low))
-                    rx = float(nx_hi) / float(max(1, nx_low))
+                    # sliding window tiling into patches that fully cover the 2D plane
+                    ny_low, nx_low = low_resFTLE_field.shape[:2]
+                    ny_hi, nx_hi = high_resFTLE_field.shape[:2]
+                    ry = UPsampling
+                    rx = UPsampling
 
                     row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
                     col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
-
-                    # 用整幅高分辨率 IVD 的百分位阈值作为该 slice 的二值阈值
-                    threshold_value = float(np.nanpercentile(high_resIVD_field, self.ratio * 100.0))
-
-                    # pathlines 预处理（与 FTLE 一致）
-                    lowResPathlinesPreprocessed = PSL(lowResPathlines, int(LstepsPerline))
 
                     for i0 in row_starts:
                         i1 = i0 + patch_size
                         for j0 in col_starts:
                             j1 = j0 + patch_size
 
-                            hi_h = max(1, int(round((i1 - i0) * ry)))
-                            hi_w = max(1, int(round((j1 - j0) * rx)))
+                            # map to high-res indices (align last window to boundary)
+                            hi_h = max(1,patch_size*UPsampling)
+                            hi_w = max(1,patch_size*UPsampling)
                             hi_i0 = int(round(i0 * ry))
                             hi_j0 = int(round(j0 * rx))
                             if i0 == row_starts[-1]:
@@ -1154,10 +1198,13 @@ class IVDVortexTrainDataset(Dataset):
                             hi_i1 = hi_i0 + hi_h
                             hi_j1 = hi_j0 + hi_w
 
-                            lr_patch = torch.from_numpy(low_resIVD_field[i0:i1, j0:j1]).float()
-                            hr_patch = torch.from_numpy((high_resIVD_field[hi_i0:hi_i1, hi_j0:hi_j1] >= threshold_value).astype(np.float32)).float()
+                            # low-res FTLE patch
+                            lr_patch = torch.from_numpy(low_resFTLE_field[i0:i1, j0:j1,:]).float()
 
-                            # 选取落在低分辨率窗口内的 pathline groups
+                            # high-res FTLE patch
+                            hr_patch = torch.from_numpy(high_resFTLE_field[hi_i0:hi_i1, hi_j0:hi_j1,:]).float()
+
+                            # pathlines patch: select groups that fall inside the low-res window
                             idx_list = []
                             for rr in range(i0, i1):
                                 base = rr * nx_low
@@ -1167,187 +1214,146 @@ class IVDVortexTrainDataset(Dataset):
                                 continue
                             idx_tensor = torch.as_tensor(idx_list, dtype=torch.long)
                             pl_patch = lowResPathlinesPreprocessed[idx_tensor]
+                            if pl_patch.shape[0] == lr_patch.shape[0]*lr_patch.shape[1] and lr_patch.shape[1]*UPsampling  == hr_patch.shape[1]and\
+                               lr_patch.shape[0]*UPsampling== hr_patch.shape[0]:
+                                FLowMap_fieldsLowRes.append(lr_patch)
+                                FLowMap_fieldsHighRes.append(hr_patch)
+                                lowResPathlinesData.append(pl_patch)
+                            else:
+                                logging.warning(f"[FLowMapUpsamplingTrainDataset] pl_patch.shape: {pl_patch.shape}, lr_patch.shape: {lr_patch.shape}, hr_patch.shape: {hr_patch.shape}")
+                            # itemMap2VectorField.append(vectorfield)
 
-                            IVDE_fieldsLowRes.append(lr_patch)
-                            BinaryMaskHighRes.append(hr_patch)
-                            lowResPathlinesData.append(pl_patch)
-
-            self.lowResIVD = torch.stack(IVDE_fieldsLowRes)
+            self.lowResFlowMap = torch.stack(FLowMap_fieldsLowRes)
             self.lowResPathlines = torch.stack(lowResPathlinesData)
-            self.labels = torch.stack(BinaryMaskHighRes)
-            self.ivd_min = float(ivd_min_global if np.isfinite(ivd_min_global) else float(self.lowResIVD.min()))
-            self.ivd_max = float(ivd_max_global if np.isfinite(ivd_max_global) else float(self.lowResIVD.max()))
+            self.labels = torch.stack(FLowMap_fieldsHighRes)
 
-            if useCacheSystem:
-                try:
-                    key_obj = {
-                        "name": "ivd_vortex_train",
-                        "vectorfields": list(all_vectorfieldsname),
-                        "timesliceCount": int(timesliceCount),
-                        "UPsampling": int(UPsampling),
-                        "lowResGridIntervalScale": float(low_res_grid_sampling),
-                        "max_steps": int(max_steps),
-                        "dt": float(flowline_dt),
-                        "offset_dist": float(offset_dist),
-                        "LstepsPerline": int(LstepsPerline),
-                        "patchSize": int(patch_size),
-                        "patchStride": int(patch_stride),
-                        "ratio": float(self.ratio),
-                    }
-                    tag = stable_hash(key_obj, prefix="IVDVortexTrainingDataset_")
-                    cache_dir = os.path.join(config.cache_dir, "temp")
-                    os.makedirs(cache_dir, exist_ok=True)
-                    cache_path = os.path.join(cache_dir, f"{tag}.npz")
-                    np.savez(cache_path,
-                             Data=self.lowResIVD.detach().cpu().numpy().astype(np.float32),
-                             Labels=self.labels.detach().cpu().numpy().astype(np.float32),
-                             LowResPathlines=self.lowResPathlines.detach().cpu().numpy().astype(np.float32),
-                             ivd_min=np.array([self.ivd_min], dtype=np.float32),
-                             ivd_max=np.array([self.ivd_max], dtype=np.float32))
-                    logging.info(f"[IVDVortexTrainDataset] saved {self.lowResIVD.shape[0]} samples to cache {cache_path}")
-                except Exception as e:
-                    print(f"[IVDVortexTrainDataset] cache save failed: {e}")
+        if useCacheSystem and not LoadCacheSuccess:
+            try:
+                os.makedirs(cache_dir, exist_ok=True)
+                np.savez(cache_path,
+                        Data=self.lowResFlowMap.detach().cpu().numpy().astype(np.float32),
+                        Labels=self.labels.detach().cpu().numpy().astype(np.float32),
+                        LowResPathlines=self.lowResPathlines.detach().cpu().numpy().astype(np.float32))
+                logging.info(f"[FLowMapUpsamplingTrainDataset] saved {self.lowResFlowMap.shape[0]} samples to cache {cache_path}")
+            except Exception as e:
+                logging.error(f"[FLowMapUpsamplingTrainDataset] cache save failed: {e}")
 
-        # 归一化低分辨率 IVD 到 [0,1]
-        self.lowResIVD = self.lowResIVD.clamp(self.ivd_min, self.ivd_max)
-        denom = max(1e-12, (self.ivd_max - self.ivd_min))
-        self.lowResIVD = (self.lowResIVD - self.ivd_min) / denom
+
+          #normalize the ftle
+       
+        #put preprocessing here if any
+
+        #normalize the ftle
+        # self.ftle_min = float(self.labels.min())
+        # self.ftle_max = float(self.labels.max())
+        # self.lowResFTLE = self.lowResFTLE.clamp(self.ftle_min, self.ftle_max)
+        # self.lowResFTLE = (self.lowResFTLE-self.ftle_min)/(self.ftle_max-self.ftle_min)
+        # normalized_y=(self.labels-self.ftle_min)/(self.ftle_max-self.ftle_min)
+        # normalized_y=normalized_y.clamp(0,1)
+        # self.labels = normalized_y       # [N]
+
+
 
     def __len__(self):
-        return len(self.lowResIVD)
+        return len(self.lowResFlowMap)
 
     def __getitem__(self, idx):
-        return (self.lowResIVD[idx], self.lowResPathlines[idx]), self.labels[idx]
+        return (self.lowResFlowMap[idx], self.lowResPathlines[idx]), self.labels[idx]
 
 
-class IVDVortexTestDataset(Dataset):
+def FTLEFromFlowMap(flowMapRegularGrid:torch.Tensor, deltaT: float = 1.0, dxdy: float = 1.0):
     """
-    测试集：
-    - 针对每个流场的若干时间切片，生成：
-        低分辨率 IVD 切片、对应的低分辨率 pathlines（PSL 预处理）、高分辨率 IVD 的二值化切片
-    - 模型测试阶段可按 tile 滑动预测并合并（外部使用与 FTLE 测试相同的滑窗逻辑）
+    基于 flowmap 的 2D FTLE 估计（模仿 computeFTLEFromPathlineCrossPrimitive）。
+
+    输入:
+      - flowMapRegularGrid: [..., H, W, 6]，通道顺序为 [x0, y0, t0, x1, y1, t1]
+        若输入为 numpy，将自动转为 torch.float32。
+      - deltaT: 若缺失时间通道则使用的全局时间跨度；若提供 t0/t1 则按像素 |t1-t0|
+      - dxdy: 兼容参数，当前未使用（保留以兼容旧接口）
+    输出:
+      - ftle_grid: [..., H, W] 的 torch.float32 张量。
+
+    做法:
+      - 以起点坐标 (x0,y0) 的中心差分作为分母，对终点坐标 (x1,y1) 做中心差分作为分子，得到 J 的两列。
+      - 计算 Cauchy–Green 张量 C=J^T J 的最大特征值 λ_max。
+      - 对每个像素用物理时间跨度 ΔT=|t1-t0| 归一化：FTLE=0.5*log(λ_max)/ΔT。
     """
-    def __init__(self, config, useCacheSystem: bool = True):
-        names_cfg = config['test_vectorfield'] if 'test_vectorfield' in config else [config.dataset.names[0]]
-        test_vectorfield_names = names_cfg if isinstance(names_cfg, (list, tuple)) else [names_cfg]
-        timesliceCount = int(getattr(config.dataset, 'timesliceCount', 8)) // 2
-        UPsampling = int(config.dataset.UPsampling)
-        low_res_grid_sampling = float(config.dataset.low_res_grid_sampling)
-        max_steps = int(config.pcds.max_iterations)
-        flowline_dt = float(config.pcds.dt)
-        LstepsPerline = int(config.pcds.sampled_points_per_line)
-        self.ratio = float(getattr(config.dataset, 'IVDThreshold', 0.5))
+    # 支持 numpy 输入
+    if isinstance(flowMapRegularGrid, np.ndarray):
+        flow = torch.from_numpy(flowMapRegularGrid)
+    else:
+        flow = flowMapRegularGrid
 
-        # 容器
-        self.lowResIVD_list = []
-        self.lowResPathlines_list = []
-        self.binaryMask_list = []
-        self.ivd_min = float('inf')
-        self.ivd_max = float('-inf')
+    assert flow.dtype in (torch.float16, torch.float32, torch.float64) or flow.is_floating_point(), "flow map must be float tensor"
+    flow = flow.to(dtype=torch.float32)
 
-        # cache
-        LoadCacheSuccess = False
-        if useCacheSystem:
-            key_obj = {
-                "name": "ivd_vortex_test",
-                "vectorfields": list(map(str, test_vectorfield_names)),
-                "timesliceCount": int(timesliceCount),
-                "UPsampling": int(UPsampling),
-                "lowResGridIntervalScale": float(low_res_grid_sampling),
-                "max_steps": int(max_steps),
-                "dt": float(flowline_dt),
-                "LstepsPerline": int(LstepsPerline),
-                "ratio": float(self.ratio),
-            }
-            tag = stable_hash(key_obj, prefix="IVDVortexTestDataset_")
-            cache_dir = os.path.join(config.cache_dir, "temp")
-            os.makedirs(cache_dir, exist_ok=True)
-            cache_path = os.path.join(cache_dir, f"{tag}.npz")
-            if os.path.exists(cache_path):
-                try:
-                    data = np.load(cache_path, allow_pickle=True)
-                    self.lowResIVD_list = list(data["lowResIVD_list"])  # object array -> list
-                    self.lowResPathlines_list = list(data["lowResPathlines_list"])  # stored as object
-                    self.binaryMask_list = list(data["binaryMask_list"])  # object array -> list
-                    self.ivd_min = float(data["ivd_min"]) if "ivd_min" in data else 0.0
-                    self.ivd_max = float(data["ivd_max"]) if "ivd_max" in data else 1.0
-                    LoadCacheSuccess = True
-                    logging.info(f"[IVDVortexTestDataset] loaded {len(self.lowResIVD_list)} samples from cache {cache_path}")
-                except Exception as e:
-                    logging.info(f"[IVDVortexTestDataset] cache load failed: {e}. Regenerating...")
+    # 统一维度为 [..., H, W, C]
+    if flow.dim() == 3:
+        H, W, C = flow.shape
+        flow = flow.unsqueeze(0)  # [1, H, W, C]
+    elif flow.dim() >= 4:
+        H, W, C = flow.shape[-3], flow.shape[-2], flow.shape[-1]
+    else:
+        raise ValueError("flowMapRegularGrid must be [..., H, W, C] with C>=5")
+    if C < 5:
+        raise ValueError("flow map must have at least 5 channels: [x0,y0,t0,x1,y1(,t1)]")
 
-        if not LoadCacheSuccess:
-            for vf_name in test_vectorfield_names:
-                vf_obj = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir, vf_name)[0]
-                if vf_obj is None:
-                    logging.info(f"[IVDVortexTestDataset] load {vf_name} failed. Skip.")
-                    continue
+    # 提取起终点分量
+    x0 = flow[..., 0]
+    y0 = flow[..., 1]
+    t0 = flow[..., 2] if C >= 3 else None
+    X1 = flow[..., 3]
+    Y1 = flow[..., 4]
+    t1 = flow[..., 5] if C >= 6 else None
 
-                tmin, tmax = float(vf_obj.tmin), float(vf_obj.tmax)
-                time_window_start = float(getattr(config.dataset, 't_start', 0.1) * (tmax - tmin) + tmin)
-                time_window_target = float(getattr(config.dataset, 't_target', 0.9) * (tmax - tmin) + tmin)
-                sample_times = np.linspace(time_window_start, time_window_target, num=timesliceCount)
+    # 复制填充，便于中心差分（边界采用复制）
+    def _pad(t: torch.Tensor):
+        return F.pad(t, (1, 1, 1, 1), mode='replicate')  # [..., H+2, W+2]
 
-                for time_slice in sample_times:
-                    low_resIVD_field, lowResPathlines, _, _ = generate_IVD_SLICE(
-                        config, vf_obj, float(time_slice), flowline_dt, max_steps, low_res_grid_sampling
-                    )
-                    high_res_sampling = UPsampling * low_res_grid_sampling
-                    high_resIVD_field, _, _, _ = generate_IVD_SLICE(
-                        config, vf_obj, float(time_slice), flowline_dt, max_steps, high_res_sampling
-                    )
+    x0p = _pad(x0)
+    y0p = _pad(y0)
+    X1p = _pad(X1)
+    Y1p = _pad(Y1)
 
-                    self.ivd_min = min(self.ivd_min, float(np.min(high_resIVD_field)))
-                    self.ivd_max = max(self.ivd_max, float(np.max(high_resIVD_field)))
+    # 初始坐标间距（分母），使用起点坐标的中心差分
+    dx0_raw = (x0p[..., 1:-1, 2:] - x0p[..., 1:-1, :-2])
+    dy0_raw = (y0p[..., 2:, 1:-1] - y0p[..., :-2, 1:-1])
+    zero_mask = (dx0_raw.abs() <= 1e-5) | (dy0_raw.abs() <= 1e-5)
 
-                    threshold_value = float(np.nanpercentile(high_resIVD_field, self.ratio * 100.0))
-                    binary_hi = (high_resIVD_field >= threshold_value).astype(np.float32)
 
-                    # pathlines 预处理
-                    lowResPathlinesPreprocessed = PSL(lowResPathlines, int(LstepsPerline))
+    # 终点坐标关于起点的偏导（分子），中心差分
+    dX_dx0 = (X1p[..., 1:-1, 2:] - X1p[..., 1:-1, :-2]) / dx0_raw
+    dY_dx0 = (Y1p[..., 1:-1, 2:] - Y1p[..., 1:-1, :-2]) / dx0_raw
+    dX_dy0 = (X1p[..., 2:, 1:-1] - X1p[..., :-2, 1:-1]) / dx0_raw
+    dY_dy0 = (Y1p[..., 2:, 1:-1] - Y1p[..., :-2, 1:-1]) / dx0_raw
 
-                    self.lowResIVD_list.append(low_resIVD_field.astype(np.float32))
-                    self.lowResPathlines_list.append(lowResPathlinesPreprocessed)
-                    self.binaryMask_list.append(binary_hi.astype(np.float32))
 
-            if useCacheSystem:
-                try:
-                    tag = stable_hash({
-                        "name": "ivd_vortex_test",
-                        "vectorfields": list(map(str, test_vectorfield_names)),
-                        "timesliceCount": int(timesliceCount),
-                        "UPsampling": int(UPsampling),
-                        "lowResGridIntervalScale": float(low_res_grid_sampling),
-                        "max_steps": int(max_steps),
-                        "dt": float(flowline_dt),
-                        "LstepsPerline": int(LstepsPerline),
-                        "ratio": float(self.ratio),
-                    }, prefix="IVDVortexTestDataset_")
-                    cache_dir = os.path.join(config.cache_dir, "temp")
-                    os.makedirs(cache_dir, exist_ok=True)
-                    cache_path = os.path.join(cache_dir, f"{tag}.npz")
+    # 显式展开 Cauchy–Green 张量 C = J^T J 的分量
+    C11 = dX_dx0 * dX_dx0 + dY_dx0 * dY_dx0
+    C22 = dX_dy0 * dX_dy0 + dY_dy0 * dY_dy0
+    C12 = dX_dx0 * dX_dy0 + dY_dx0 * dY_dy0
 
-                    # 将 list 保存为 object 数组
-                    np.savez(cache_path,
-                             lowResIVD_list=np.array(self.lowResIVD_list, dtype=object),
-                             lowResPathlines_list=np.array(self.lowResPathlines_list, dtype=object),
-                             binaryMask_list=np.array(self.binaryMask_list, dtype=object),
-                             ivd_min=np.array([self.ivd_min], dtype=np.float32),
-                             ivd_max=np.array([self.ivd_max], dtype=np.float32))
-                    logging.info(f"[IVDVortexTestDataset] saved {len(self.lowResIVD_list)} samples to cache {cache_path}")
-                except Exception as e:
-                    logging.info(f"[IVDVortexTestDataset] cache save failed: {e}")
+    # 最大特征值解析式
+    trace = C11 + C22
+    diff = C11 - C22
+    rad = torch.sqrt((diff * diff + 4.0 * (C12 * C12)).clamp_min(1e-30))
+    lambda_max = 0.5 * (trace + rad)
+    lambda_max = lambda_max.clamp_min(1e-30)
 
-        # 将低分辨率 IVD 归一化参数暴露，外部测试时可按需使用
-        if not np.isfinite(self.ivd_min) or not np.isfinite(self.ivd_max) or self.ivd_max <= self.ivd_min:
-            self.ivd_min, self.ivd_max = 0.0, 1.0
+    # 时间跨度 ΔT(i,j)
+    if (t0 is not None) and (t1 is not None):
+        T_phys = (t1 - t0).abs().clamp_min(1e-12)
+    else:
+        # 若缺失时间通道，使用传入的 deltaT（默认 1.0）
+        T_val = float(abs(deltaT)) if abs(deltaT) > 0 else 1e-12
+        T_phys = torch.full_like(lambda_max, T_val)
 
-    def __len__(self):
-        return len(self.lowResIVD_list)
+    # FTLE: 0.5*log(lambda_max) / ΔT
+    ftle_core = 0.5 * torch.log(lambda_max) / T_phys
+    # 对分母为零的位置（由 zero_mask 标记）置 NaN，便于后续过滤
+    ftle_core = torch.where(zero_mask,  torch.zeros_like(dY_dx0), ftle_core)
 
-    def __getitem__(self, idx):
-        # 返回原始低分辨率 IVD（未归一化，供外部使用 train-set 统计或本数据集统计归一化）
-        lr_ivd = torch.from_numpy(self.lowResIVD_list[idx]).float()
-        pl = self.lowResPathlines_list[idx].float() if isinstance(self.lowResPathlines_list[idx], torch.Tensor) else torch.from_numpy(self.lowResPathlines_list[idx]).float()
-        mask = torch.from_numpy(self.binaryMask_list[idx]).float()
-        return (lr_ivd, pl), mask
+    # 还原成原始批次维度
+    if flowMapRegularGrid.dim() == 3:
+        return ftle_core.squeeze(0)
+    return ftle_core
