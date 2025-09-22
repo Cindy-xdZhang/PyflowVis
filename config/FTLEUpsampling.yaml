@@ -34,7 +34,7 @@ dataset:
   timesliceCount: 5 # total data set is    NumberOfVectorFields*timesliceCount* (VectorFieldGridRes//PatchSize)   
 
   low_res_grid_sampling: 0.25 #low resolution ftle's grid =vectorfield.grid*low_res_grid_sampling 
-  UPsampling: 4 # must be integer
+  UPsampling: 2 # must be integer
 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d  GerrisFlowSolverData/*.am

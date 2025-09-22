@@ -51,7 +51,7 @@ def build_test_dataset(config):
     timesliceCount =int(getattr(config.dataset, 'timesliceCount', 8))//2
 
     low_res_grid_sampling = float(config.dataset.low_res_grid_sampling)
-    up = int(config.dataset.UPsampling)
+    UPsampling = int(config.dataset.UPsampling)
     max_steps = int(config.pcds.max_iterations)
     flowline_dt = float(config.pcds.dt)
     offset_dist = float(config.pcds.offset_dist)
@@ -64,7 +64,7 @@ def build_test_dataset(config):
         "name": "ftle_upsampling_test",
         "vectorfields": list(map(str, test_vectorfield_names)),
         "timesliceCount": int(timesliceCount),
-        "UPsampling": int(up),
+        "UPsampling": int(UPsampling),
         "lowResGridIntervalScale": float(low_res_grid_sampling),
         "time_window_start_ratio": float(time_window_start_ratio),
         "time_window_target_ratio": float(time_window_target_ratio),
@@ -107,6 +107,7 @@ def build_test_dataset(config):
         time_window_start = float(time_window_start_ratio * (tmax - tmin) + tmin)
         time_window_target = float(time_window_target_ratio * (tmax - tmin) + tmin)
         sample_times = np.linspace(time_window_start, time_window_target, num=timesliceCount)
+        high_res_sampling=float(UPsampling*low_res_grid_sampling)
         if mode == 'upsamplingFTLE':
             for time_slice in sample_times:
                 # Low-resolution slice and corresponding pathlines
@@ -114,7 +115,6 @@ def build_test_dataset(config):
                     config, vf_obj, float(time_slice), flowline_dt, max_steps, low_res_grid_sampling
                 )
                 # High-resolution (as ground truth)
-                high_res_sampling = up * low_res_grid_sampling
                 high_resFTLE_field, _, high_res_xs, high_res_ys = generate_FTLE_SLICE(
                     config, vf_obj, float(time_slice), flowline_dt, max_steps, high_res_sampling
                 )

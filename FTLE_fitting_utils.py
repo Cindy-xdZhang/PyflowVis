@@ -984,7 +984,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     starts.append(last)
                 return starts
 
-            high_res_sampling=int(UPsampling*low_res_grid_sampling)
+            high_res_sampling=float(UPsampling*low_res_grid_sampling)
             for i,vectorfield in enumerate(UnsteadyVectorFields):
                 logging.info(f"[FTLEUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
                 time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
