@@ -1,3 +1,4 @@
+from torch.nn.functional import upsample
 from torch.utils.data import Dataset
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 import torch,os
@@ -215,8 +216,8 @@ def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampl
     assert resolutionUPsampling>0.01
 
     # Use linspace to specify number of samples instead of step size
-    num_x = int(np.ceil(vectorfield.Xdim * resolutionUPsampling))
-    num_y = int(np.ceil(vectorfield.Ydim * resolutionUPsampling))
+    num_x = int(round(vectorfield.Xdim * resolutionUPsampling))
+    num_y = int(round(vectorfield.Ydim * resolutionUPsampling))
     xs = np.linspace(xmin_grid, xmax_grid, num_x, dtype=np.float32)
     ys = np.linspace(ymin_grid, ymax_grid, num_y, dtype=np.float32)
 
@@ -838,7 +839,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
         all_vectorfieldsname=[name for name in config.dataset.names]
         all_vectorfieldsname_str=",".join(all_vectorfieldsname)
         timesliceCount=config.dataset.timesliceCount
-        UPsampling=config.dataset.UPsampling
+        UPsampling=int(config.dataset.UPsampling)
         low_res_grid_sampling=float(config.dataset.low_res_grid_sampling)
         max_steps: int=config.pcds.max_iterations
         flowline_dt: float=config.pcds.dt
@@ -911,7 +912,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
                 for time_slice in timeslice:
                     # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
                     low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,low_res_grid_sampling)  
-                    high_res_sampling=UPsampling*low_res_grid_sampling
+                    high_res_sampling=int(UPsampling*low_res_grid_sampling)
                     high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,high_res_sampling)
                     # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
                     # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
@@ -922,8 +923,8 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     # sliding window tiling into patches that fully cover the 2D plane
                     ny_low, nx_low = low_resFTLE_field.shape
                     ny_hi, nx_hi = high_resFTLE_field.shape
-                    ry = float(ny_hi) / float(max(1, ny_low))
-                    rx = float(nx_hi) / float(max(1, nx_low))
+                    ry = UPsampling
+                    rx = UPsampling
 
                     row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
                     col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
@@ -934,8 +935,8 @@ class FTLEUpsamplingTrainDataset(Dataset):
                             j1 = j0 + patch_size
 
                             # map to high-res indices (align last window to boundary)
-                            hi_h = max(1, int(round((i1 - i0) * ry)))
-                            hi_w = max(1, int(round((j1 - j0) * rx)))
+                            hi_h = max(1,patch_size*UPsampling)
+                            hi_w = max(1,patch_size*UPsampling)
                             hi_i0 = int(round(i0 * ry))
                             hi_j0 = int(round(j0 * rx))
                             if i0 == row_starts[-1]:
@@ -961,10 +962,13 @@ class FTLEUpsamplingTrainDataset(Dataset):
                                 continue
                             idx_tensor = torch.as_tensor(idx_list, dtype=torch.long)
                             pl_patch = lowResPathlinesPreprocessed[idx_tensor]
-
-                            FTLE_fieldsLowRes.append(lr_patch)
-                            FTLE_fieldsHighRes.append(hr_patch)
-                            lowResPathlinesData.append(pl_patch)
+                            if pl_patch.shape[0] == lr_patch.shape[0]*lr_patch.shape[1] and lr_patch.shape[1]*UPsampling  == hr_patch.shape[1]and\
+                               lr_patch.shape[0]*UPsampling== hr_patch.shape[0]:
+                                FTLE_fieldsLowRes.append(lr_patch)
+                                FTLE_fieldsHighRes.append(hr_patch)
+                                lowResPathlinesData.append(pl_patch)
+                            else:
+                                logging.warning(f"[FTLEUpsamplingTrainDataset] pl_patch.shape: {pl_patch.shape}, lr_patch.shape: {lr_patch.shape}, hr_patch.shape: {hr_patch.shape}")
                             # itemMap2VectorField.append(vectorfield)
 
             self.lowResFTLE = torch.stack(FTLE_fieldsLowRes)

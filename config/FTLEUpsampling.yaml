@@ -38,10 +38,10 @@ dataset:
   t_start: 0.2 #% for the whole time
   t_target: 0.8
   patchSize: 32
-  patchStride: 16 # when do fast testing or generate traing dataset, real patchStride is patchStride*4(for faster testing and training), only finaly visualize, use patchStride
+  patchStride: 10 # when do fast testing or generate traing dataset, real patchStride is patchStride*4(for faster testing and training), only finaly visualize, use patchStride
   
 test_tasks: test_UpsamplingModel
-test_vectorfield: [cylinder2d,doublegyre2d]
+test_vectorfield: [doublegyre2d,cylinder2d]
 
 
 

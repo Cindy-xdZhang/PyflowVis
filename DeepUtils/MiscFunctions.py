@@ -210,6 +210,7 @@ def argParseAndPrepareConfig():
     parser.add_argument("--pnn_k", type=str, default=None,help="pnn k")
     parser.add_argument("--pnn_stages", type=str, default=None,help="pnn stages")
     parser.add_argument("--pnn_dim", type=str, default=None,help="pnn dim")
+    parser.add_argument("--dataset_UPsampling", type=str, default=None,help="pnn dim")
 
     args = parser.parse_args()
     cfg = EasyConfig()
@@ -240,6 +241,8 @@ def argParseAndPrepareConfig():
         cfg['pnn']['stages'] = args.pnn_stages
     if args.pnn_dim is not None:
         cfg['pnn']['dim'] = args.pnn_dim
+    if args.dataset_UPsampling is not None:
+        cfg['dataset']['UPsampling'] = args.dataset_UPsampling
 
     if 'random_seed' not in cfg:
         cfg['random_seed']=np.random.randint(0,5000)

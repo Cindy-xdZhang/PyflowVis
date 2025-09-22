@@ -170,7 +170,7 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
         if lowResFTLE_all is not None and lowResPathlines_all is not None and highResFTLE_all is not None :
             patch_size = int(getattr(config.dataset, 'patchSize', 32))
             patch_stride = int(getattr(config.dataset, 'patchStride', 2))
-            patch_stride=patch_stride*4 if visualize==False else patch_stride # faster test if not visualize
+            patch_stride=patch_stride*2 if visualize==False else patch_stride # faster test if not visualize
 
             LstepsPerline = int(config.pcds.sampled_points_per_line)
             mse_sum = 0.0
@@ -180,6 +180,7 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
             psnr_bilinear_sum = 0.0
             psnr_cubic_sum = 0.0
             sample_count = int(len(lowResPathlines_all))
+            UPsampling = int(config.dataset.UPsampling)
             for test_i in range(sample_count):
                 low_resFTLE_field = lowResFTLE_all[test_i]
                 high_resFTLE_field =highResFTLE_all[test_i]
@@ -194,8 +195,8 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
 
                 ny_low, nx_low = low_resFTLE_field.shape
                 ny_hi, nx_hi = high_resFTLE_field.shape
-                ry = float(ny_hi) / float(max(1, ny_low))
-                rx = float(nx_hi) / float(max(1, nx_low))
+                ry = UPsampling
+                rx = UPsampling
 
                 row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
                 col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
@@ -209,8 +210,8 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
                         j1 = min(j0 + patch_size, nx_low)
 
                         # map to high-res
-                        hi_h = max(1, int(round((i1 - i0) * ry)))
-                        hi_w = max(1, int(round((j1 - j0) * rx)))
+                        hi_h = max(1,patch_size*UPsampling)
+                        hi_w = max(1,patch_size*UPsampling)
                         hi_i0 = int(round(i0 * ry))
                         hi_j0 = int(round(j0 * rx))
                         if i0 == row_starts[-1]:
@@ -236,6 +237,10 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
                         pred_patch = model(lr_patch_norm, pl_patch).to(device).float()  # [1, hi_h, hi_w]
                         # inverse normalization
                         patch_np = pred_patch.squeeze(0).detach().cpu().numpy()
+                        hi_i0=max(0,hi_i0)
+                        hi_j0=max(0,hi_j0)
+                        hi_i1=min(ny_hi,hi_i1)
+                        hi_j1=min(nx_hi,hi_j1)
                         pred_grid[hi_i0:hi_i1, hi_j0:hi_j1] += patch_np
                         weight_grid[hi_i0:hi_i1, hi_j0:hi_j1] += 1.0
 
