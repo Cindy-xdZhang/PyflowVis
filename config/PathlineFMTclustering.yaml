@@ -1,0 +1,57 @@
+seed: 7068
+epochs: 3
+train_points_count: 72000
+batch_size: 12
+
+model:
+  NAME: FTLEUpsamplingFMT_UnetV2
+
+
+cluster_classes: 2
+
+wandb: False 
+
+dataset:
+  timesliceCount: 1
+  grid_sampling: 0.25 
+  dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
+  # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d  GerrisFlowSolverData/*.am
+  names: [cylinder2d]
+  extension: nc
+  t_start: 0.7 #% for the whole time
+  t_target: 0.8
+  patchSize: 32 #modify this according to low_res_grid_sampling, since low_res_grid_sampling will influence how large the low res ftle grid , it could happen that low res ftle grid is smaller than patchSize
+  patchStride: 10 # when do fast testing or generate traing dataset, real patchStride is patchStride*4(for faster testing and training), only finaly visualize, use patchStride
+  
+# test_tasks: test_UpsamplingModel
+# test_vectorfield: [doublegyre2d,cylinder2d]
+
+encoder:
+  receptive_fields: [1]
+  base_num_stages: 2
+  embed_dim: 24
+  alpha: 1000
+  beta: 19
+
+
+
+# set the params to generate the point clouds
+pathlines:
+  sample_area: full #points full areas
+  line_type: p_line # streamline   p_line-> pathline
+  line_method: RK4 # RK4 Euler
+  dt: 0.01 # flowline integration dt 
+
+  max_iterations: 200 # time step
+  sampled_points_per_line: 25 # samples one the line
+  offset_dist: 0.01 # scale of grid interval
+  num_cross_points_per_seeding: 5 
+
+
+  normalized: False
+  localized: False
+
+  max_seg: 50
+  start_points: [[0.0,0.0]]
+  bbox: [[2.5,0.5],[5.5,1.5]] # [[xmin1,ymin1] [xmax1,ymax1],[xmin2,ymin2],[xmax2,ymax2]]
+

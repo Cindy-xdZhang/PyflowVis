@@ -546,5 +546,3 @@ class UnsteadyVectorField2DTrainable(nn.Module,UnsteadyVectorField2D):
         
 
 
-
-

@@ -2,10 +2,8 @@
 from calendar import c
 import os,random
 import logging
-import hashlib
 import copy
 import numpy as np
-import math
 
 import torch
 import torch.nn as nn
@@ -16,9 +14,9 @@ from DeepUtils.loss import build_criterion_from_cfg
 from DeepUtils.optim import build_optimizer_from_cfg
 from FLowUtils.VectorField2d import *
 from DeepUtils.utils.stable_hash import stable_hash
-from FTLE_fitting_utils import *
+from FMT_Utils.FTLE_fitting_utils import *
 from DeepUtils.MiscFunctions import *
-from model_zoo import *
+from FMT_Utils.model_zoo import *
 import pickle
 import wandb
 GLOBAL_WANDB_PROJECT_NAME="FlowMapTokenizer"
@@ -122,7 +120,7 @@ def build_test_dataset(config):
                 # Preprocessing consistent with training: temporal downsampling and normalization (no FTLE normalization)
                 # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
                 # temporal_sampled_P_all = temporal_downsamplePathlineCrossPrimitiveRegular(lowResPathlines, int(LstepsPerline))
-                temporal_sampled_P_all=PSL(lowResPathlines, int(LstepsPerline))
+                temporal_sampled_P_all=AngleAwareSampling(lowResPathlines, int(LstepsPerline))
 
                 lowResFTLEorFLowMap_list.append(low_resFTLE_field)
                 highResFTLEorFLowMap_list.append(high_resFTLE_field)
@@ -141,7 +139,7 @@ def build_test_dataset(config):
         #             # Preprocessing consistent with training: temporal downsampling and normalization (no FTLE normalization)
         #             # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
         #             # temporal_sampled_P_all = temporal_downsamplePathlineCrossPrimitiveRegular(lowResPathlines, int(LstepsPerline))
-        #             temporal_sampled_P_all=PSL(lowResPathlines, int(LstepsPerline))
+        #             temporal_sampled_P_all=AngleAwareSampling(lowResPathlines, int(LstepsPerline))
 
         #             lowResFTLEorFLowMap_list.append(low_resFTLE_field)
         #             highResFTLEorFLowMap_list.append(high_resFTLE_field)

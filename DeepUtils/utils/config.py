@@ -13,6 +13,10 @@ import logging
 
 
 class EasyConfig(dict):
+    def __init__(self, config_path: str = None):
+        if config_path is not None:
+            self.load(config_path)
+
     def __getattr__(self, key: str) -> Any:
         if key not in self:
             raise AttributeError(f"AttributeError:{key}")

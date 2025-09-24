@@ -3,7 +3,7 @@
 class IVDVortexTrainDataset(Dataset):
     """
     训练集：
-    - 输入：低分辨率 IVD tile + 低分辨率 pathlines tile（PSL 预处理）
+    - 输入：低分辨率 IVD tile + 低分辨率 pathlines AngleAwareSampling 预处理）
     - 标签：高分辨率 IVD 根据 ratio 百分位阈值二值化的 tile（0/1，float）
     - 采样：与 FTLEUpsamplingTrainDataset 一致，滑窗切 tile
     - 归一化：将低分辨率 IVD 使用全数据的 (ivd_min, ivd_max) 归一化到 [0,1]
@@ -106,7 +106,7 @@ class IVDVortexTrainDataset(Dataset):
                     threshold_value = float(np.nanpercentile(high_resIVD_field, self.ratio * 100.0))
 
                     # pathlines 预处理（与 FTLE 一致）
-                    lowResPathlinesPreprocessed = PSL(lowResPathlines, int(LstepsPerline))
+                    lowResPathlinesPreprocessed = AngleAwareSampling(lowResPathlines, int(LstepsPerline))
 
                     for i0 in row_starts:
                         i1 = i0 + patch_size
@@ -194,7 +194,7 @@ class IVDVortexTestDataset(Dataset):
     """
     测试集：
     - 针对每个流场的若干时间切片，生成：
-        低分辨率 IVD 切片、对应的低分辨率 pathlines（PSL 预处理）、高分辨率 IVD 的二值化切片
+        低分辨率 IVD 切片、对应的低分辨率 AngleAwareSampling 预处理）、高分辨率 IVD 的二值化切片
     - 模型测试阶段可按 tile 滑动预测并合并（外部使用与 FTLE 测试相同的滑窗逻辑）
     """
     def __init__(self, config, useCacheSystem: bool = True):
@@ -274,7 +274,7 @@ class IVDVortexTestDataset(Dataset):
                     binary_hi = (high_resIVD_field >= threshold_value).astype(np.float32)
 
                     # pathlines 预处理
-                    lowResPathlinesPreprocessed = PSL(lowResPathlines, int(LstepsPerline))
+                    lowResPathlinesPreprocessed = AngleAwareSampling(lowResPathlines, int(LstepsPerline))
 
                     self.lowResIVD_list.append(low_resIVD_field.astype(np.float32))
                     self.lowResPathlines_list.append(lowResPathlinesPreprocessed)

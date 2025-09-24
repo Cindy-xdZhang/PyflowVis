@@ -1,6 +1,5 @@
 import numpy as np
 import numexpr as ne
-import tqdm
 from numpy import pi
 from .VectorField2d import UnsteadyVectorField2D
 
@@ -152,31 +151,6 @@ def double_gyre_2D(grid_size, timestep,Tmax=10,omega=0.2*np.pi):
     flow_creator = AnalyticalFlowCreator(u_fn, v_fn, parameters={'eps': 0.25, 'A': 0.1, 'omega': omega})
     vectorField2d = flow_creator.create_flow_field(grid_size, timestep, [0.0, 0.0, 0.0], [2.0, 1.0, Tmax])
     return vectorField2d
-
-
-
-
-
-
-
-
-# def test_analytical_flow_creator():
-#     flow_creator = AnalyticalFlowCreator('cos(y)', '-cos(x)')    
-#     vectorField2d = flow_creator.create_flow_field((200, 200), 10)
-#     
-#     parameters = {'a': 0.5, 'b': 1.5}
-#     flow_creator = AnalyticalFlowCreator('a*sin(x)*cos(y)', '-b*cos(x)*sin(y)', parameters=parameters)
-#     vectorField2d = flow_creator.create_flow_field((200, 200), 10)
-#     
-#     new_parameters = {'a': 1.0, 'b': 2.0}
-#     flow_creator.update_parameters(new_parameters)
-#     vectorField2d = flow_creator.create_flow_field((200, 200), 10)
-#     
-#     vectorField2d = rotation_four_center((32,32), 32)
-
-
-
-
 
 
 

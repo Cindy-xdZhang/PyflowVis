@@ -8,8 +8,7 @@ import hashlib
 from DeepUtils.utils.stable_hash import stable_hash
 from FLowUtils.ScalarField2d import ScalarField2D,ScalarFieldManager
 import matplotlib.pyplot as plt
-from pnn.libs.flows import PSL, LocLines, normalizeLines, \
-    temporal_downsamplePathlineCrossPrimitiveRegular
+from FMT_Utils.FlowlinePostProcessing import AngleAwareSampling, LocLines, temporal_downsamplePathlineCrossPrimitiveRegular
 from FLowUtils.flowlineIntegral import batch_pathlineCross_integration_2D_auto
 from FLowUtils.netCDFLoader import *
 from FLowUtils.AnalyticalFlowCreator import *
@@ -235,10 +234,10 @@ def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampl
 
 
 
-def generate_FLowMap_SLICE(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:float,dt:float,maxIterations:int, resolutionUPsampling:float=1.0):
+def generate_FLowMap_SLICE(vectorfield: UnsteadyVectorField2D,physcial_time:float,dt:float,maxIterations:int, offesetDist:float, resolutionUPsampling:float=1.0):
     nerbors=5
-    offset_dist = float(cfg.pcds.offset_dist)
-    max_steps = int(cfg.pcds.max_iterations)
+    offset_dist = float(offesetDist)
+    max_steps = int(maxIterations)
     starts_xy,xs,ys=generate_seedingGrid_2D(vectorfield,resolutionUPsampling)
     ny, nx = len(ys), len(xs)
     Pathline_b, PathlineLength_b = batch_pathlineCross_integration_2D_auto(
@@ -747,45 +746,6 @@ def test_PointWiseFTLE_model(cfg,model: nn.Module, device: str = "cuda", visuali
             "pred_grid": pred_grid
         }
 
-def load_UnsteadyVectorFields_netCDFOrAnalytical(flowDataFolder,vector_field_names: list[str]|str):
-    netCDF = NetCDFLoader()
-    amiraLoader=AmiraLoader()
-    UnsteadyVectorFields=[]
-    vector_field_names = vector_field_names if isinstance(vector_field_names, list) else [vector_field_names]
-    for name in vector_field_names:
-        if name == "beads2d":
-            UnsteadyVectorFields.append(beadsFLow([128,128],32))
-        elif name == "doublegyre2d":
-            UnsteadyVectorFields.append(double_gyre_2D([256,128],64))
-        elif name == "rfc2d":
-            UnsteadyVectorFields.append(rotation_four_center([128,128],32))
-        elif "GerrisFlowSolverData" in name:
-            #laod amira fiels from the folder GerrisFlowSolverData
-            amira_folder=os.path.join(flowDataFolder, name)
-            logging.info(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load amira files from {amira_folder}")
-            am_files_list=[]
-            for file in os.listdir(amira_folder):
-                if file.endswith(".am"):
-                    am_file_path=os.path.join(amira_folder, file)
-                    load_vector_field2d=amiraLoader.load_vector_field2d(am_file_path)
-                    if load_vector_field2d is None:
-                        print(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {file} failed. Skip this field.")
-                        continue
-                    UnsteadyVectorFields.append(load_vector_field2d)
-                    am_files_list.append(file)
-            if len(am_files_list)==0:
-                logging.warning(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] no .am files found in {amira_folder}. Skip this field.")
-            else:
-                logging.info(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {len(am_files_list)} .am files from {amira_folder}: {am_files_list}")
-        else:
-            try:
-                vectorfield_datapath=os.path.join(flowDataFolder, f"{name}.nc")
-                load_vector_field2d=netCDF.load_vector_field2d(vectorfield_datapath)
-                if load_vector_field2d is not None:
-                    UnsteadyVectorFields.append(load_vector_field2d)
-            except Exception as e:
-                print(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {name} failed: {e}. Skip this field.")
-    return UnsteadyVectorFields
 
 # Torch Dataset for training samples generated on-the-fly via generate_training_samples
 class PointWiseFTLETrainDataset(Dataset):
@@ -997,7 +957,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
                     # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
 
-                    lowResPathlinesPreprocessed=PSL(lowResPathlines, LstepsPerline)
+                    lowResPathlinesPreprocessed=AngleAwareSampling(lowResPathlines, LstepsPerline)
                     # lowResPathlinesPreprocessed=preprocess_localization_normalization(temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False ).cpu().float()
 
                     # sliding window tiling into patches that fully cover the 2D plane
@@ -1164,12 +1124,12 @@ class FLowMapUpsamplingTrainDataset(Dataset):
                 timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
                 for time_slice in timeslice:
                     # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
-                    low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FLowMap_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,low_res_grid_sampling)  
-                    high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FLowMap_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,high_res_sampling)
+                    low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FLowMap_SLICE(vectorfield,time_slice,flowline_dt,max_steps,offset_dist,low_res_grid_sampling)  
+                    high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FLowMap_SLICE(vectorfield,time_slice,flowline_dt,max_steps,offset_dist,high_res_sampling)
                     # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
                     # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
 
-                    lowResPathlinesPreprocessed=PSL(lowResPathlines, LstepsPerline)
+                    lowResPathlinesPreprocessed=AngleAwareSampling(lowResPathlines, LstepsPerline)
                     # lowResPathlinesPreprocessed=preprocess_localization_normalization(temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False ).cpu().float()
 
                     # sliding window tiling into patches that fully cover the 2D plane
