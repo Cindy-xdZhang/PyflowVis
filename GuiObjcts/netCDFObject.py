@@ -10,7 +10,7 @@ def path2name(path):
 
 class NetCDFLoaderOBJ(Object):
     def __init__(self):
-        super().__init__("NetCDF")
+        super().__init__("NetCDFLoader")
         self.create_variable_gui("time_step_begin",-1,False, {'widget': 'input'})
         self.create_variable_gui("time_step_end",-1,False)
         # Update the path variable to use a file dialog widget

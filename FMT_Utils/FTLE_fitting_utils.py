@@ -235,6 +235,11 @@ def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampl
 
 
 def generate_FLowMap_SLICE(vectorfield: UnsteadyVectorField2D,physcial_time:float,dt:float,maxIterations:int, offesetDist:float, resolutionUPsampling:float=1.0):
+    """
+    return: Pathline_g shape: (ny*nx, nerbors, max_steps, 3)
+            PathlineLength_b shape: (ny*nx, nerbors)
+            nx,ny: number of grid points in x and y direction
+    """
     nerbors=5
     offset_dist = float(offesetDist)
     max_steps = int(maxIterations)
@@ -252,11 +257,12 @@ def generate_FLowMap_SLICE(vectorfield: UnsteadyVectorField2D,physcial_time:floa
     # y_all=computeFTLEFromPathlineCrossPrimitive(Pathline_g, vectorfield_dt=vectorfield.timeInterval)
 
     keep_groups_full = (PathlineLength_g == max_steps).all(dim=1)
-    true_grid = np.full((ny, nx, 6), 0, dtype=np.float32)
     linear_index=np.arange(nx*ny)
     valid_index=linear_index[keep_groups_full]
     rows=valid_index//nx
     cols=valid_index%nx
+
+    true_grid = np.full((ny, nx, 6), 0, dtype=np.float32)
     centralPointfirt_pos=Pathline_g[valid_index, 0, 0,:]
     centralPointlast_pos=Pathline_g[valid_index, 0, max_steps-1,:]
     #concat centralPointfirt_pos and centralPointlast_pos
@@ -267,7 +273,7 @@ def generate_FLowMap_SLICE(vectorfield: UnsteadyVectorField2D,physcial_time:floa
     flowMap[...,5]=flowMap[...,5]/global_UniformValueTemporal
     true_grid[rows, cols,:] =flowMap.detach().cpu().numpy()
 
-    return true_grid,Pathline_g,nx,ny
+    return true_grid,Pathline_g,PathlineLength_g,nx,ny
 
 
 def generate_FTLE_SLICE(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:float,dt:float,maxIterations:int, resolutionUPsampling:float=1.0):

@@ -28,7 +28,7 @@ dataset:
 
 encoder:
   receptive_fields: [1]
-  base_num_stages: 3
+  base_num_stages: 1
   embed_dim: 24
   alpha: 1000
   beta: 19
@@ -43,8 +43,8 @@ pathlines:
   dt: 0.005 # flowline integration dt 
 
   max_iterations: 300 # time step
-  sampled_points_per_line: 25 # samples one the line
-  offset_dist: 0.05 # scale of grid interval
+  sampled_points_per_line: 30 # samples one the line
+  offset_dist: 0.02 # scale of grid interval
   num_cross_points_per_seeding: 5 
 
 

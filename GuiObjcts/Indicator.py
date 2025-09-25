@@ -55,9 +55,9 @@ class Indicator(Object):
     Indicator object for handling 3D picking and seeding in the visualization.
     Supports multiple seeding groups and robust state management.
     """
-    def __init__(self, name,camera):
-        super().__init__(name)
-        self.camera=camera
+    def __init__(self):
+        super().__init__("Indicator")
+        
 
         def notifySeedingChanged(obj):
             getEngine().eventRegister.notifyEvent("seeding_changed")
@@ -183,9 +183,9 @@ class Indicator(Object):
 
     def handleMouseRayIntersection(self, p, targetObject):
         # p: (x, y) 屏幕坐标
-        width, height = self.camera.width, self.camera.height
+        width, height = self.cameraObject.width, self.cameraObject.height
 
-        ray_origin, ray_dir = screen_to_world_ray(p[0], p[1], self.camera.get_view_matrix(), self.camera.get_projection_matrix())
+        ray_origin, ray_dir = screen_to_world_ray(p[0], p[1], self.cameraObject.get_view_matrix(), self.cameraObject.get_projection_matrix())
 
 
         hit,hit_pos=targetObject.intersect_ray(ray_origin, ray_dir)

@@ -12,6 +12,8 @@ from GuiObjcts.Object import Scene, singleton,getScene
 from GuiObjcts.shaderManager import *
 from GuiObjcts.CameraObject import *
 from DeepUtils.MiscFunctions import initLogging
+
+
 def getEngine():
     return VisualizationEngine({})
 
@@ -104,3 +106,70 @@ class VisualizationEngine:
         self.impl.shutdown()
         pygame.quit()
         
+
+
+
+
+
+
+
+def buildWorkLoads(packageName:str):
+    def __buld_an_object(ObjectName:str):
+        if ObjectName.lower()=="CoordinateSystem".lower():
+            return CoordinateSystem()
+        elif ObjectName.lower()=="PlanarManifold".lower():
+            return PlanarManifold()
+        elif ObjectName.lower()=="ActiveField".lower():
+            return ActiveFieldObj()
+        elif ObjectName.lower()=="VectorGlyph".lower():
+            return VertexArrayVectorGlyph()
+        elif ObjectName.lower()=="Indicator".lower():
+            return Indicator()
+        elif ObjectName.lower()=="NetCDFLoader".lower():
+            return NetCDFLoaderOBJ()
+        elif ObjectName.lower()=="Flowline".lower():
+            return FlowLineObject()
+
+    if packageName=="Basic2DFlow":
+        ObjectsNameList=["CoordinateSystem","PlanarManifold","ActiveField","VectorGlyph","Indicator","NetCDFLoader","Flowline"]
+    elif packageName=="Basic3DFlow":
+        pass
+    else:
+        raise ValueError(f"Invalid package name: {packageName}")
+
+    returnDict={}
+    for ObjectName in ObjectsNameList:
+        obj=__buld_an_object(ObjectName)
+        returnDict[ObjectName]=obj
+    return returnDict
+
+
+def init_render(cfg="config/renderingConfig.yaml"):
+    config = EasyConfig()
+    config.load(cfg, recursive=False)
+    engine=VisualizationEngine(config=config['rendering'])
+    size=config['rendering']["window_size"]
+    camera = Camera(60.0, (0, 0, 10), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
+    engine.addObjects2Scene([camera])
+
+    ObjectNameDict=buildWorkLoads("Basic2DFlow")
+    ObjectList=ObjectNameDict.values()
+    engine.addObjects2Scene(ObjectList)
+    engine.finalizeSettleUp()
+
+    #built-in events
+    engine.eventRegister.register(lambda event: engine.scene.save_state_all() if event.type == pygame.KEYDOWN and event.key == pygame.K_F3 else None)
+    engine.eventRegister.register(lambda event: camera.eventCallBacks(event))
+    if engine.scene.hasObject("Indicator"):
+        indicator=engine.scene.getObject("Indicator")
+        engine.eventRegister.register(lambda event: indicator.eventCallBacks(event))
+    else:
+        logging.getLogger().fatal("No Indicator object found in scene")
+    if engine.scene.hasObject("ActiveField"):
+        actFieldWidget=engine.scene.getObject("ActiveField")        
+    else:
+        logging.getLogger().fatal("No ActiveField object found in scene")
+    return engine,camera,ObjectNameDict
+
+
+

@@ -20,7 +20,7 @@ from GuiObjcts.ActiveFieldObject import *
 
 class FlowLineObject(Object):
     def __init__(self):
-        super().__init__("flowline")
+        super().__init__("Flowline")
         self.engine = getEngine()
         self.parentScene=getScene()
         assert self.parentScene is not None,  "scene is not set"
@@ -48,6 +48,7 @@ class FlowLineObject(Object):
         self.create_variable("zOffset", 0.0,True)
         self.create_variable_gui("uplifting",0.1,True, {'widget': 'slider_float', 'min': 0.0, 'max': 5.0})
         self.create_variable("colorMap",self.engine.getBuiltInTextureNames(),True)
+        self.create_variable_gui("ColorCodingAttribute", ["attrib0", "attrib1"], True)
         self.create_variable("maxIteration", 5000,True)
 
         self.create_variable_callback("integrator", ["RK4","Euler","RK5","dopri5","dopri8","bosh3","fehlberg2","adaptive_heun"],dirtyCallBack,True)#euler,rk4
@@ -81,13 +82,14 @@ class FlowLineObject(Object):
         self.create_variable("SSBOBufferId0",  self.ssbo0_id, False, False)
         self.create_variable("ssbo0_length",  int(0), False, False)
         self.create_variable("worldlineStartPos0", (0.0, 0.0), False, False)
+
         def change_reference_frame_action():
            
             vector_field:UnsteadyVectorField2D = self.activeFieldWidget.getActiveObserverField()
             if vector_field is None or vector_field.getDim() != 2:
                 print("Changing reference frame is only implemented for 2D active field.")
                 return
-            indicator = self.parentScene.getObject("indicator") if self.parentScene.hasObject("indicator") else None
+            indicator = self.parentScene.getObject("Indicator") if self.parentScene.hasObject("Indicator") else None
             if indicator is None:
                 return
             seeds = indicator.getValue("SeedingGroup0")
@@ -125,7 +127,7 @@ class FlowLineObject(Object):
             vector_field:UnsteadyVectorField2D = actFieldWidget.getActiveField()
             if vector_field is None:
                 return
-            self.indicatorObject=self.parentScene.getObject("indicator") if self.parentScene.hasObject("indicator") else None
+            self.indicatorObject=self.parentScene.getObject("Indicator") if self.parentScene.hasObject("Indicator") else None
             if self.indicatorObject is None:
                 return
             
@@ -325,7 +327,7 @@ class FlowLineObject(Object):
         if not hasattr(self, 'streamline_dirty') or not self.streamline_dirty:
             return
 
-        self.indicatorObject=self.parentScene.getObject("indicator") if self.parentScene.hasObject("indicator") else None
+        self.indicatorObject=self.parentScene.getObject("Indicator") if self.parentScene.hasObject("Indicator") else None
         if self.indicatorObject is None:
             return
 
@@ -367,7 +369,7 @@ class FlowLineObject(Object):
 
         if not hasattr(self, 'pathline_dirty') or not self.pathline_dirty:
             return
-        self.indicatorObject=self.parentScene.getObject("indicator") if self.parentScene.hasObject("indicator") else None
+        self.indicatorObject=self.parentScene.getObject("Indicator") if self.parentScene.hasObject("Indicator") else None
         if self.indicatorObject is None:
             return
         actFieldWidget = self.parentScene.getObject("ActiveField")
@@ -405,7 +407,39 @@ class FlowLineObject(Object):
             self.MappingFlowlineAsRenderingVAO(self.pathline_cache)
             self.pathline_dirty = False
 
+    def __numpy_vec3Arrays_to_pathlines2D(self, numpy_pathlines:np.ndarray):
+        """
+        numpy_pathline: np.ndarray, shape=(B,L, 3), float32
+        """
+        
+        assert numpy_pathlines.ndim == 3 and numpy_pathlines.shape[2] == 3
+        paths = []
+        for i in range(numpy_pathlines.shape[0]):
+            path = []
+            for j in range(numpy_pathlines.shape[1]):
+                pos = np.array(numpy_pathlines[i, j][:2])
+                time = numpy_pathlines[i, j][2]
+                path.append((pos, time))
+            paths.append(path)
+        return paths
 
+
+
+    def RendExternalPathline(self, external_pathline, labels=None):
+        """
+        Instead of integrating the pathline, we just render the external pathline directly.
+        external_pathline: List[np.ndarray, float]
+        """
+        self.pathline_cache=self.__numpy_vec3Arrays_to_pathlines2D(external_pathline)
+        # convert labels from 1D array to list
+        if labels is not None:
+            labels = labels.tolist()
+        self.MappingFlowlineAsRenderingVAO(self.pathline_cache, labels)
+        self.pathline_dirty = False
+   
+
+
+        
 
     def updateMultiDrawIndices(self,line_offset_indices,line_sizes):
         #const std::vector<GLint>& offsetIndices, const std::vector<GLsizei>& sizes
@@ -425,11 +459,12 @@ class FlowLineObject(Object):
         gl.glBindVertexArray(0)
 
     
-    def MappingFlowlineAsRenderingVAO(self, pathline_cache, scalar_field_appending=None):
+    def MappingFlowlineAsRenderingVAO(self, pathline_cache, label_appending=None):
         """
-        pathline_cache: List[np.ndarray, floa]]
-            每个元素是一条 pathline，pathline 是 (pos3d, t) 的 list
-        scalar_field_appending: 可选，支持 None 或有 get_value(pos, t) 方法的对象
+        pathline_cache: List[],每个元素是一条 pathline, pathline 是 (pos3d(x,y,z), t) 的 list
+        or
+        pathline_cache: List[np.ndarray, float],每个元素是一条 pathline, pathline 是 (pos2d(x,y), t) 的 list
+        label_appending: 可选,label of pathline transfer to attrib2(float) of vertex
         """
         # 获取时间范围
         if not pathline_cache or not pathline_cache[0]:
@@ -444,9 +479,17 @@ class FlowLineObject(Object):
         pathline_sizes = []
         offset_counter = 0
         pathline_vertices = []
-        posIs3d=False
-        if pathline_cache[0][0][0].shape[-1] == 3:
-            for path in pathline_cache:
+        PathlineIs3d=pathline_cache[0][0][0].shape[-1] == 3
+        appendLabel=label_appending is not None and len(label_appending) == len(pathline_cache)
+        if appendLabel:
+            label_min_value=min(label_appending)
+            label_max_value=max(label_appending)
+            label_range=label_max_value-label_min_value
+            label_inverse_range=1.0/label_range
+
+
+        if PathlineIs3d:
+            for lineID, path in enumerate(pathline_cache):
                 # Skip empty pathlines
                 if not path or len(path) < 2:
                     continue
@@ -466,10 +509,10 @@ class FlowLineObject(Object):
                     attrib0_time = (t - min_time) * inverse_time_range
                     pathline_vertices.append([
                         pos3d[0], pos3d[1], pos3d[2],
-                        attrib0_time, 0.0
+                        attrib0_time, 0.0 if not appendLabel else (label_appending[lineID]-label_min_value)*label_inverse_range
                     ])
         else:
-            for path in pathline_cache:
+            for lineID, path in enumerate(pathline_cache):
                 # Skip empty pathlines
                 if not path or len(path) < 2:
                     continue
@@ -489,7 +532,7 @@ class FlowLineObject(Object):
                     attrib0_time = (t - min_time) * inverse_time_range
                     pathline_vertices.append([
                         pos3d[0], pos3d[1],0.0,
-                        attrib0_time, 0.0
+                        attrib0_time, 0.0 if not appendLabel else (label_appending[lineID]-label_min_value)*label_inverse_range
                     ])
         
         if not pathline_vertices:

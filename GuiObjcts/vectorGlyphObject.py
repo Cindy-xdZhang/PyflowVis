@@ -149,6 +149,9 @@ class VertexArrayVectorGlyph(VertexArrayObject):
         self.create_variable_callback("height",0.1,dirtyCallBack,False)
         self.create_variable_callback_with_gui_customization("sampling",1.5,dirtyCallBack,False, {'widget': 'slider_float', 'min': 0.01, 'max': 5.0})
         self.create_variable_gui("color",(0.2,-.2,0.2),False,{'widget': 'color_picker'})
+        shaderManager=getShaderManager()
+        defaultMat=shaderManager.getMaterial()
+        self.setMaterial(defaultMat)
 
     def postInit(self):
         super().postInit()

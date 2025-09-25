@@ -35,7 +35,7 @@ class ActiveFieldObj(Object):
             vectorGlyph=obj.parentScene.getObject("vectorGlyph")
             if vectorGlyph is not None:
                 vectorGlyph.dirty=True
-            flowlineOBj=obj.parentScene.getObject("flowline")
+            flowlineOBj=obj.parentScene.getObject("Flowline")
           
             if flowlineOBj is not None and flowlineOBj.getValue("streamline_active"):
                 flowlineOBj.streamline_dirty=True

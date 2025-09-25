@@ -185,8 +185,8 @@ class GeometryRenderObject(VertexArrayObject):
     def postInit(self):
         super().postInit()
         self.actFieldObject=self.parentScene.getObject("ActiveField") if self.parentScene.hasObject("ActiveField") else None
-        self.flowlineObject=self.parentScene.getObject("flowline") if self.parentScene.hasObject("flowline") else None
-        self.indicatorObject=self.parentScene.getObject("indicator") if self.parentScene.hasObject("indicator") else None
+        self.flowlineObject=self.parentScene.getObject("Flowline") if self.parentScene.hasObject("Flowline") else None
+        self.indicatorObject=self.parentScene.getObject("Indicator") if self.parentScene.hasObject("Indicator") else None
 
     
     def add_curve(self, name, points, segments=8,instanceType:str="curve_2D"):
