@@ -401,7 +401,21 @@ class UnsteadyVectorField2D(IDiscreteField2D):
         elif isinstance(self.field, np.ndarray):
             steadyVectorField2D.field=self.field[timeSlice,:,:,:]
         return steadyVectorField2D
-    
+
+    def getSliceAtPhysicalTime(self, physicaltimeSlice:float) -> SteadyVectorField2D:
+        # 提供一张基于解析表达式采样的切片（采样在栅格点上）
+        sf = SteadyVectorField2D(self.Xdim, self.Ydim, self.domainMinBoundary, [self.domainMaxBoundary[0], self.domainMaxBoundary[1], 0.0])
+        Y, X = self.Ydim, self.Xdim
+        out = np.zeros((Y, X, 2), dtype=np.float32)
+        for iy in range(Y):
+            for ix in range(X):
+                px, py = self.convert_grid_pos_2_physical_pos(ix, iy)
+                vx, vy = self.get_vector(px, py, physicaltimeSlice)
+                out[iy, ix, 0] = vx
+                out[iy, ix, 1] = vy
+        sf.field = out
+        return sf
+
     def getDataAsNumpy(self):
         # if self.field is torch tensor
         if isinstance(self.field, torch.Tensor) :

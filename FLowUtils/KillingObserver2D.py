@@ -40,7 +40,7 @@ class TimeDependentKilling2D(UnsteadyVectorField2D):
 		self._b = b
 		self._c = c
 
-	def getSlice(self, timeSlice) -> SteadyVectorField2D:
+	def getSlice(self, timeSlice:int) -> SteadyVectorField2D:
 		# 提供一张基于解析表达式采样的切片（采样在栅格点上）
 		sf = SteadyVectorField2D(self.Xdim, self.Ydim, self.domainMinBoundary, [self.domainMaxBoundary[0], self.domainMaxBoundary[1], 0.0])
 		Y, X = self.Ydim, self.Xdim
@@ -54,6 +54,7 @@ class TimeDependentKilling2D(UnsteadyVectorField2D):
 				out[iy, ix, 1] = vy
 		sf.field = out
 		return sf
+
 
 	def _eval(self, x:float, y:float, t:float) -> Tuple[float, float]:
 		a_t = float(self._a(t))

@@ -18,7 +18,7 @@ dataset:
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d  GerrisFlowSolverData/*.am
   names: [cylinder2d]
   extension: nc
-  t_start: 0.7 #% for the whole time
+  t_start: 0.6 #% for the whole time
   t_target: 0.8
   patchSize: 32 #modify this according to low_res_grid_sampling, since low_res_grid_sampling will influence how large the low res ftle grid , it could happen that low res ftle grid is smaller than patchSize
   patchStride: 10 # when do fast testing or generate traing dataset, real patchStride is patchStride*4(for faster testing and training), only finaly visualize, use patchStride
@@ -28,7 +28,7 @@ dataset:
 
 encoder:
   receptive_fields: [1]
-  base_num_stages: 2
+  base_num_stages: 3
   embed_dim: 24
   alpha: 1000
   beta: 19
@@ -40,11 +40,11 @@ pathlines:
   sample_area: full #points full areas
   line_type: p_line # streamline   p_line-> pathline
   line_method: RK4 # RK4 Euler
-  dt: 0.01 # flowline integration dt 
+  dt: 0.005 # flowline integration dt 
 
-  max_iterations: 200 # time step
+  max_iterations: 300 # time step
   sampled_points_per_line: 25 # samples one the line
-  offset_dist: 0.01 # scale of grid interval
+  offset_dist: 0.05 # scale of grid interval
   num_cross_points_per_seeding: 5 
 
 

@@ -393,7 +393,7 @@ def multi_lines_vis_fast(
     
 def multi_points_vis_fast(
     field, streamline_points_list, labels_list,
-    time_index=0, nerbos=5, max_step=100, scale=50,
+    time_index=None,time=None, nerbos=5, max_step=100, scale=50,
     title=("Test",), layout=(1,2),
     max_quiver=64, show_quiver=True,
     cmap_bg="binary",
@@ -410,6 +410,13 @@ def multi_points_vis_fast(
           ('step', k)  : 每条线取第 k 个时间步位置（0..max_step），组内全部线
     """
 
+    if time_index is not None:
+        slice_data = field.getSlice(time_index).field
+    elif time is not None:
+        slice_data = field.getSliceAtPhysicalTime(time).field  # (H,W,2)
+    else:
+        raise ValueError("time_index or time must be provided")
+
     rows, cols = layout
     fig, axes = plt.subplots(rows, cols, figsize=(16*cols, 6*(rows+0.5)),
                              constrained_layout=True)
@@ -422,7 +429,6 @@ def multi_points_vis_fast(
     xmax, ymax = field.domainMaxBoundary[0:2]
 
     # 背景与归一化（一次）
-    slice_data = field.getSlice(time_index).field  # (H,W,2)
     speed = np.hypot(slice_data[...,0], slice_data[...,1])
     vmin, vmax = np.nanpercentile(speed, (2, 98))
     norm = colors.Normalize(vmin=vmin, vmax=vmax)
@@ -478,16 +484,22 @@ def multi_points_vis_fast(
 
         if isinstance(sl_points, torch.Tensor):
             sl_points = sl_points.detach().cpu().numpy()
-        N, P, D = sl_points.shape
-        L = max_step + 1
-
-        # 推断每组线数 k（可能是 5 或 4 或 1）
-        if P == L:
-            k = 1
-        elif P % L == 0:
-            k = P // L
-        else:
-            raise ValueError(f"P={P} not divisible by L={L}")
+        pts,N,k,L,D = None,None,None,None,None
+        if sl_points.ndim == 3:
+            N, P, D = sl_points.shape
+            L = max_step + 1
+            # 推断每组线数 k（可能是 5 或 4 或 1）
+            if P == L:
+                k = 1
+            elif P % L == 0:
+                k = P // L
+            else:
+                raise ValueError(f"P={P} not divisible by L={L}")
+            pts = sl_points.reshape(N, k, L, D)
+        elif sl_points.ndim == 4:
+            N, k, L, D = sl_points.shape
+            pts = sl_points
+         
 
         # 背景
         ax.imshow(speed, origin='lower', cmap=cmap, norm=norm,
@@ -500,8 +512,7 @@ def multi_points_vis_fast(
                       linewidth=0.5, color='grey', alpha=0.5)
 
         # ---- 选点逻辑（一次性取出并扁平化） ----
-        # 形状调整：[N,k,L,D]
-        pts = sl_points.reshape(N, k, L, D)
+       
 
         if pick == 'seed':
             # 每组 第0条线 的 起点
