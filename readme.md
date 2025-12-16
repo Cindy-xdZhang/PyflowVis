@@ -1,27 +1,42 @@
-# PyFlowVis
+# PyFlowVis：CUDA-Accelerated High-Performance Flow Visualization Framework
 
 <img src="assets/readmePics/framework.png" alt="alt text" width="720"/>
 
-This repository is a hybrid C++ Python framework for flow visualization, containing:
-A simplified Python fluid visualization renderer and GUI based on imgui, possibly with several projects related to flow visualization.
-## Basic Features of PyFlowVis
+This repository is a hybrid C++/Python/CUDA framework for realtime high-performance flow visualization, containing:
+1. A streamlined Python-based fluid visualization renderer and GUI built with ImGui.
+2. Multiple projects focused on flow analysis and visualization, with an emphasis on CUDA acceleration and computational performance
 
-
-### 2D Vector Field Visualization
+## Functionalities of PyFlowVis
+### Basic Vector Field Visualization
 - **Vector Glyph**: Visualizes the direction and magnitude of the vector field at sampled grid points using arrows or glyphs.
 - **Indicator (Seeding of Flowline)**: Allows interactive placement of seed points for flowline/pathline integration and visualization.
-- **Streamline/Pathline**: Integrates and visualizes flowlines (streamlines at a fixed time) and pathlines (trajectories over time) from user-defined seeds. We support multiple integrators:
->  + Python based Ruler/Rk4/Rk5 integrator, with numba (njit) accerlated vector value query.
->  + CUDA based Ruler/Rk4 integrator
->  + Differentiable ODE solver(torchdiffeq) based integrator: "dopri5","dopri8","bosh3","fehlberg2","adaptive_heun".
 - **Coreline**: coreline (of 2D unsteady field) extraction based on q-crterion/jacobian/velocity critical points.
 - **Scalar Field**: Supports visualization of scalar fields (e.g., magnitude, vorticity) as color maps or overlays.
-- **FTLE**: Computes 2D FTLE using a CUDA kernel. To use this feature, ensure you have a working PyCUDA environment. You can first run [`TestPyCUDA.py`](misc/TestPyCUDA.py) to verify your setup.
-- **Field IO**: NetCDF loader for unsteady 2D/3D vector fields; ['Johns Hopkins Turbulence Databases'](https://turbulence.idies.jhu.edu/database) loader for turbelent flow.
+- **Field IO**: 
+> - NetCDF loader for unsteady 2D/3D vector fields; 
+> - Amira loader for unsteady 2D/3D vector fields; 
+> - ['Johns Hopkins Turbulence Databases'](https://turbulence.idies.jhu.edu/database) loader for turbelent flow.
+
+### CUDA based High-Performance Vector Field Visualization
+PyFlowVis accelerates the most demanding algorithms—pathline integration (first-order ODE solving), flowmap and FTLE computation, and optimal reference frame optimization (via least squares)—using custom-designed CUDA kernels that feature optimized <font color=#FFFF00>warp scheduling and shared memory access. (Nsight Compute report avaible)</font>
+
+You can first run [`TestPyCUDA.py`](misc/TestPyCUDA.py) to verify your setup.
 
 
-### 3D Vector Field Visualization
-- **Basic:** 3 D vector glyphs, 3D pathlines,streamlines,coreline using vtkVortexCore lower Order(v||a).
+- **Streamline/Pathline Integration**: We implement multiple optimized integrators for computing flow trajectories, focusing on <font color=#FFFF00>__load balancing and efficient GPU utilization__</font>:
+>  + CPU (Numba-accelerated): Python-based Euler, RK4, and RK5 integrators with @njit acceleration for fast vector field queries.
+>  + CUDA Kernels:  Euler and RK4 integrators fully implemented on GPU.
+>  + Differentiable Solvers: Integration via torchdiffeq (dopri5, dopri8, bosh3, fehlberg2, adaptive_heun) for gradient-based applications.   
+- **FTLE**: Computes 2D FTLE using a CUDA kernel. See [FTLE_CUDA.cu](assets\cuda_kernal\FTLE_CUDA.cu). 
+- **Optimal Reference Optimization** : we implement the algorithm of paper "Generic objective vortices for flow visualization"[ Günther et al 2017] for unsteady 2D/3D field using cuda.
+  
+<img src="assets/readmePics/cudakernal.png" alt="alt text" width="720"/>
+
+
+
+
+### wip: 3D Vector Field Visualization
+- **Basic:** 3 D vector glyphs, 3D pathlines,streamlines,coreline using vtkVortexCore lower Order(v||a) implemented as demonstrated above.
 - **(wip)**: Other 3D features are under development. Planned features include iso-surface rendering, volume rendering of scalar field, observer-relative isosurface/pathline filtering, etc.
 
 
@@ -150,9 +165,7 @@ The implementation relies on several utility classes and interfaces defined in:
 For a complete understanding of the algorithms, please refer to the supplementary materials of our paper which include detailed pseudocode for all core components.
 Our code relies on VTK-9.4.1.
 
-***Note*** : We will gradually migrate these C++ code to PyFlowVis. Once done, you will see specification and links to python files.
-
-
+***Note*** : We will gradually migrate these C++ code from our closed source engine to PyFlowVis. Once done, you will see specification and links to python files.
 
 
 ---
@@ -163,7 +176,7 @@ This project is licensed under the Apache License, Version 2.0. See the
 [NOTICE](./NOTICE).
 
 ## Citation
-If you use PyFlowVis, or its components (including the VortexTransformer and the 3D observer-space interaction algorithms), in your research, please cite one of the following :
+If you use PyFlowVis, or its components in your research, please cite one of the following :
 
 - Software:
   Zhang, Xingdi. PyFlowVis (2024). DOI:  10.5281/zenodo.17045687
