@@ -16,7 +16,8 @@ This repository provides **<font color=#FFFF00>PyFlowVis</font>**, which is a **
 Built on top of this `pyflowvis` infrastructure are **multiple flow analysis and visualization projects**:
 1. VortexTransformer: End‐to‐End Objective Vortex Detection in 2D Unsteady Flow Using Transformers
 2. Exploring 3D Unsteady Flow with 6D Observer-Space Interactions
-
+3. FMT: TRAINING-FREE OBJECTIVE FLOWMAP TOK-
+ENIZER
 #### Platform & Requirement:  
 All the cuda implementation have been tested on Windows 10/11 with CUDA versions 11.8 and 12.6. Before using our CUDA implementation, you need to first run [`TestPyCUDA.py`](misc/TestPyCUDA.py) to verify your setup. If the CUDA implementation is unavailable, function call will fallback to the CPU implementation.
 
@@ -24,7 +25,7 @@ All the cuda implementation have been tested on Windows 10/11 with CUDA versions
 ## Functionalities of PyFlowVis
 ### Basic Vector Field Visualization
 - **Vector Glyph**: Visualizes the direction and magnitude of the vector field at sampled grid points using arrows or glyphs.
-- **LIC Computation**:
+- **LIC Texture**: C++ implementation of offline LIC texture computation.
 - **Indicator (Seeding of Flowline)**: Allows interactive placement of seed points for flowline/pathline integration and visualization.
 - **Coreline**: coreline (of 2D unsteady field) extraction based on q-crterion/jacobian/velocity critical points.
 - **Scalar Field**: Supports visualization of scalar fields (e.g., magnitude, vorticity) as color maps or overlays.
@@ -70,6 +71,7 @@ python main.py
 ## Developer Instructions
 
 PyFlowVis utilizes an engine-plugin architecture. You can define custom objects with their own variables and UI elements and integrate them into the system as ImGui panels.
+#### Note: For the detail, please see our [documentation](documentation_1.md), it's not finished, but provide some instructions.
 
 For example:
 ```python
@@ -105,7 +107,7 @@ class GuiTest(Object):
 3. **Standalone C++ Programs**: For pure C++ applications, such as the Vatistas data generator, place the source code in the `CppProjects` folder and build it using CMake.
 
 
-
+---
 
 # Project 1: VortexTransformer
 End‐to‐End Objective Vortex Detection in 2D Unsteady Flow Using Transformers
@@ -154,7 +156,7 @@ python train.py --config config/classification/vortex_viz.yaml --data_dir "PATH_
 python train.py --config config/segmentation/mvu_net.yaml --data_dir "PATH_TO_DATASET"
 ```
 
-
+---
 
 # Project 2: Exploring 3D Unsteady Flow with 6D Observer-Space Interactions
 
