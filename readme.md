@@ -2,13 +2,29 @@
 
 <img src="assets/readmePics/framework.png" alt="alt text" width="720"/>
 
-This repository is a hybrid C++/Python/CUDA framework for realtime high-performance flow visualization, containing:
-1. A streamlined Python-based fluid visualization renderer and GUI built with ImGui.
-2. Multiple projects focused on flow analysis and visualization, with an emphasis on CUDA acceleration and computational performance
+This repository provides **<font color=#FFFF00>PyFlowVis</font>**, which is a **flow visualization infrastructure**. It is a <font color=#FFFF00>hybrid C++/Python/CUDA framework</font> for real-time high-performance flow visualization with an emphasis on CUDA acceleration and computational performance.
+
+## Architecture Overview
+
+1. **Front-end User Interface (python)**: Implemented with <font color=#0CBCED>ImGui</font>, featuring an engine-plugin system that is developer-friendly for implementing custom objects, functionality, and extensions.
+
+2. **Rendering Backend**: Based on <font color=#0CBCED>PyOpenGL</font> for efficient graphics rendering.
+
+3. **Computation Backend**: Supports  <font color=#0CBCED>numba+njit</font>, C++ (via <font color=#0CBCED>PyBind</font>) and <font color=#0CBCED>CUDA</font> implementations for maximum performance flexibility.
+
+
+Built on top of this `pyflowvis` infrastructure are **multiple flow analysis and visualization projects**:
+1. VortexTransformer: End‐to‐End Objective Vortex Detection in 2D Unsteady Flow Using Transformers
+2. Exploring 3D Unsteady Flow with 6D Observer-Space Interactions
+
+#### Platform & Requirement:  
+All the cuda implementation have been tested on Windows 10/11 with CUDA versions 11.8 and 12.6. Before using our CUDA implementation, you need to first run [`TestPyCUDA.py`](misc/TestPyCUDA.py) to verify your setup. If the CUDA implementation is unavailable, function call will fallback to the CPU implementation.
+
 
 ## Functionalities of PyFlowVis
 ### Basic Vector Field Visualization
 - **Vector Glyph**: Visualizes the direction and magnitude of the vector field at sampled grid points using arrows or glyphs.
+- **LIC Computation**:
 - **Indicator (Seeding of Flowline)**: Allows interactive placement of seed points for flowline/pathline integration and visualization.
 - **Coreline**: coreline (of 2D unsteady field) extraction based on q-crterion/jacobian/velocity critical points.
 - **Scalar Field**: Supports visualization of scalar fields (e.g., magnitude, vorticity) as color maps or overlays.
@@ -20,7 +36,6 @@ This repository is a hybrid C++/Python/CUDA framework for realtime high-performa
 ### CUDA based High-Performance Vector Field Visualization
 PyFlowVis accelerates the most demanding algorithms—pathline integration (first-order ODE solving), flowmap and FTLE computation, and optimal reference frame optimization (via least squares)—using custom-designed CUDA kernels that feature optimized <font color=#FFFF00>warp scheduling and shared memory access. (Nsight Compute report avaible)</font>
 
-You can first run [`TestPyCUDA.py`](misc/TestPyCUDA.py) to verify your setup.
 
 
 - **Streamline/Pathline Integration**: We implement multiple optimized integrators for computing flow trajectories, focusing on <font color=#FFFF00>__load balancing and efficient GPU utilization__</font>:
@@ -31,7 +46,6 @@ You can first run [`TestPyCUDA.py`](misc/TestPyCUDA.py) to verify your setup.
 - **Optimal Reference Optimization** : we implement the algorithm of paper "Generic objective vortices for flow visualization"[ Günther et al 2017] for unsteady 2D/3D field using cuda.
   
 <img src="assets/readmePics/cudakernal.png" alt="alt text" width="720"/>
-
 
 
 
@@ -66,7 +80,6 @@ class GuiTest(Object):
         self.create_variable_gui("boolean_var", True, False,{'widget': 'checkbox'})
         self.create_variable_gui("checkbox_int",1,False,{'widget': 'checkbox'})
         self.create_variable_gui("input_int",1,False, {'widget': 'input'})
-        self.create_variable_gui("default_int",1,False)
         self.create_variable_gui("slider_float",0.5,False, {'widget': 'slider_float', 'min': 0.0, 'max': 1.0})
         self.create_variable_gui("color_vec3", (255.0, 0.0, 0.0), False,{'widget': 'color_picker'})
         self.create_variable("input_vec4", [1, 1, 1, 1])        
@@ -163,7 +176,7 @@ The implementation relies on several utility classes and interfaces defined in:
 - [`Discrete3DFlowField.h/cpp`](./CppProjects/src/explore_3d_vector_field/Discrete3DFlowField.cpp): 3D vector field data structures, pathine, streamline integration.
 
 For a complete understanding of the algorithms, please refer to the supplementary materials of our paper which include detailed pseudocode for all core components.
-Our code relies on VTK-9.4.1.
+Our code relies on  <font color=#0CBCED>VTK-9.4.1</font>.
 
 ***Note*** : We will gradually migrate these C++ code from our closed source engine to PyFlowVis. Once done, you will see specification and links to python files.
 
@@ -178,11 +191,11 @@ This project is licensed under the Apache License, Version 2.0. See the
 ## Citation
 If you use PyFlowVis, or its components in your research, please cite one of the following :
 
-- Software:
-  Zhang, Xingdi. PyFlowVis (2024). DOI:  10.5281/zenodo.17045687
+- Software:  
+  Zhang, Xingdi. PyFlowVis (2025).  [DOI 10.5281/zenodo.17045686](https://zenodo.org/records/17045687)
 
 - Paper (VortexTransformer):
-```bibtex
+```bibtexW
 @inproceedings{zhang2025vortextransformer,
   title={VortexTransformer: End-to-End Objective Vortex Detection in 2D Unsteady Flow Using Transformers},
   author={Zhang, Xingdi and Rautek, Peter and Hadwiger, Markus},
