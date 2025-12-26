@@ -11,28 +11,29 @@ def benchMarkFTLE_CompuationPerformance():
     
     # 1. Create Synthetic Data
     # Dimensions
-    T, H, W = 64, 128, 256
+    T, H, W = 8, 256, 256
     # T, H, W = 10, 1024, 2048 # Larger for better GPU saturation check?
     
     print(f"Vector Field Size: T={T}, H={H}, W={W}")
     
     # Random vector field
     # smooth it a bit so lookups aren't random noise (though doesn't matter for perf)
-    data = np.random.rand(T, H, W, 2).astype(np.float32)
+    data = np.random.rand(T, H, W, 2).astype(np.float32)*0.1
     
     # Create VectorField object
-    vf = load_UnsteadyVectorFields_netCDFOrAnalytical("","doublegyre2d")[0]
-    
+    vf = UnsteadyVectorField2D(W, H, T, [0,0,0], [W*0.1,H*0.1,T*0.05])   
+    vf.field = data
+
     # Params
     ftle_t = 0.5
     step_size = 0.005
     max_iter = 1000
-    upSampling = 4
+    upSampling = 8
     
     # Warmup
     print("Warming up CUDA...")
-    _ = compute_FTLE_2D_CUDA_oneSlice(vf, ftle_t, step_size, 10, upSampling=1)
-    _ = compute_FTLE_2D_CUDA_SM_oneSlice(vf, ftle_t, step_size, 10, upSampling=1)
+    _ = compute_FTLE_2D_CUDA_oneSlice(vf, ftle_t, step_size, 10, upSampling=upSampling)
+    _ = compute_FTLE_2D_CUDA_SM_oneSlice(vf, ftle_t, step_size, 10, upSampling=upSampling)
 
     # Helper to measure time
     def measure(func, name):

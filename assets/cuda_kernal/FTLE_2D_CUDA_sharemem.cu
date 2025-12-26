@@ -10,33 +10,19 @@ __device__ inline bool is_inbounds_2D_vertex_device(int width, int height, doubl
     return (p.x > 0.0) && (p.x < (width - 1)*dx) && (p.y > 0.0) && (p.y < (height - 1)*dy);
 }
 
-// Metadata for the preloaded sub-tile
+// Metadata for the preloaded sub-tile (Volume)
 struct TileDesc {
-    int ox; // start x index
-    int oy; // start y index
-    int ot; // start t index
+    int ox; // start x index (global)
+    int oy; // start y index (global)
+    int ot; // start t index (global)
     int sx; // tile width  (#samples in x)
     int sy; // tile height (#samples in y)
     int st; // tile time length (#timesteps)
 };
 
-__device__ inline bool tile_has_data(const TileDesc& tile){
-    return tile.sx > 0 && tile.sy > 0 && tile.st > 0;
-}
-
-__device__ inline bool tile_contains(const TileDesc& tile, int ix, int iy, int it){
-    return (ix >= tile.ox && ix < tile.ox + tile.sx) &&
-           (iy >= tile.oy && iy < tile.oy + tile.sy) &&
-           (it >= tile.ot && it < tile.ot + tile.st);
-}
-
-// Linear index inside the shared-memory tile
-__device__ inline int tile_linear_idx(const TileDesc& tile, int ix, int iy, int it){
-    int lx = ix - tile.ox;
-    int ly = iy - tile.oy;
-    int lt = it - tile.ot;
-    return lt*tile.sy*tile.sx + ly*tile.sx + lx;
-}
+// --------------------------------------------------------------------------
+// Non-tiled (Global Memory) Implementation - Used as fallback and for baseline
+// --------------------------------------------------------------------------
 
 __device__ double2 SpatialInterpolate2DUnsteadyField_device(float* u, float* v, double2 pos, int width, int height, int TotalTimeSteps, double dx, double dy, int it){
     int ix = pos_to_prev_idx_vertex_device(pos.x, dx);
@@ -60,43 +46,6 @@ __device__ double2 SpatialInterpolate2DUnsteadyField_device(float* u, float* v, 
     return d2_add(d2_smul(1.0 - y_alpha, top), d2_smul(y_alpha, bot));
 }
 
-// Interpolate using the shared-memory tile when available; otherwise fall back to global
-__device__ double2 SpatialInterpolate2DUnsteadyField_device_tiled(float* u, float* v, const TileDesc& tile,
-    float* tile_u, float* tile_v, double2 pos, int width, int height, int TotalTimeSteps, double dx, double dy, int it){
-
-    int ix = pos_to_prev_idx_vertex_device(pos.x, dx);
-    int iy = pos_to_prev_idx_vertex_device(pos.y, dy);
-
-    // Fallback if neighbors are missing from tile
-    if (tile_has_data(tile) && 
-        (ix >= tile.ox) && (ix < tile.ox + tile.sx - 1) &&
-        (iy >= tile.oy) && (iy < tile.oy + tile.sy - 1) &&
-        (it >= tile.ot) && (it < tile.ot + tile.st)) {
-
-        int ix1 = ix + 1; 
-        int iy1 = iy + 1;
-
-        int tl_idx = tile_linear_idx(tile, ix,  iy,  it);
-        int tr_idx = tile_linear_idx(tile, ix1, iy,  it);
-        int bl_idx = tile_linear_idx(tile, ix,  iy1, it);
-        int br_idx = tile_linear_idx(tile, ix1, iy1, it);
-
-        double2 v_tl = make_d2(tile_u[tl_idx], tile_v[tl_idx]);
-        double2 v_tr = make_d2(tile_u[tr_idx], tile_v[tr_idx]);
-        double2 v_bl = make_d2(tile_u[bl_idx], tile_v[bl_idx]);
-        double2 v_br = make_d2(tile_u[br_idx], tile_v[br_idx]);
-
-        double x_alpha = (pos.x - ix*dx) / dx;
-        double y_alpha = (pos.y - iy*dy) / dy;
-        double2 top = d2_add(d2_smul(1.0 - x_alpha, v_tl), d2_smul(x_alpha, v_tr));
-        double2 bot = d2_add(d2_smul(1.0 - x_alpha, v_bl), d2_smul(x_alpha, v_br));
-        return d2_add(d2_smul(1.0 - y_alpha, top), d2_smul(y_alpha, bot));
-    }
-    
-    // Fallback to global memory
-    return SpatialInterpolate2DUnsteadyField_device(u, v, pos, width, height, TotalTimeSteps, dx, dy, it);
-}
-
 __device__ double2 Interpolate2DUnsteadyField_device(float* u, float* v, double2 pos, int width, int height, int TotalTimeSteps, double dx, double dy, double dt, double t){
     if (t < 0.0){ if (fabs(t) < 1e-9) t = 0.0; }
     int t_1 = pos_to_prev_idx_vertex_device(t, dt);
@@ -104,19 +53,6 @@ __device__ double2 Interpolate2DUnsteadyField_device(float* u, float* v, double2
         return SpatialInterpolate2DUnsteadyField_device(u, v, pos, width, height, TotalTimeSteps, dx, dy, TotalTimeSteps - 1);
     double2 v_1 = SpatialInterpolate2DUnsteadyField_device(u, v, pos, width, height, TotalTimeSteps, dx, dy, t_1);
     double2 v_2 = SpatialInterpolate2DUnsteadyField_device(u, v, pos, width, height, TotalTimeSteps, dx, dy, t_1 + 1);
-    double t_alpha = (t - t_1*dt) / dt;
-    return d2_add(d2_smul(1.0 - t_alpha, v_1), d2_smul(t_alpha, v_2));
-}
-
-__device__ double2 Interpolate2DUnsteadyField_device_tiled(float* u, float* v, const TileDesc& tile,
-    float* tile_u, float* tile_v, double2 pos, int width, int height, int TotalTimeSteps, double dx, double dy, double dt, double t){
-    if (t < 0.0){ if (fabs(t) < 1e-9) t = 0.0; }
-    int t_1 = pos_to_prev_idx_vertex_device(t, dt);
-    if (t_1 >= (TotalTimeSteps - 1))
-        return SpatialInterpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, pos, width, height, TotalTimeSteps, dx, dy, TotalTimeSteps - 1);
-
-    double2 v_1 = SpatialInterpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, pos, width, height, TotalTimeSteps, dx, dy, t_1);
-    double2 v_2 = SpatialInterpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, pos, width, height, TotalTimeSteps, dx, dy, t_1 + 1);
     double t_alpha = (t - t_1*dt) / dt;
     return d2_add(d2_smul(1.0 - t_alpha, v_1), d2_smul(t_alpha, v_2));
 }
@@ -137,38 +73,6 @@ __device__ double2 advect_pathline_2D_rk4_device(float* u, float* v, int w, int 
         double2 c = Interpolate2DUnsteadyField_device(u, v, step2, w, h, TotalTimeSteps, dx, dy, dt, current_time + FTLE_dt*0.5);
         double2 step3 = d2_add(p, d2_smul(0.5*FTLE_dt, c));
         double2 d = Interpolate2DUnsteadyField_device(u, v, step3, w, h, TotalTimeSteps, dx, dy, dt, current_time + FTLE_dt);
-        double2 step4 = d2_add(p, d2_smul(FTLE_dt, d));
-
-        if (!is_inbounds_2D_vertex_device(w, h, dx, dy, step1)
-        || !is_inbounds_2D_vertex_device(w, h, dx, dy, step2)
-        || !is_inbounds_2D_vertex_device(w, h, dx, dy, step3)
-        || !is_inbounds_2D_vertex_device(w, h, dx, dy, step4)) 
-        return make_d2(-999.0, -999.0);
-
-        double2 incr = d2_smul(FTLE_dt*(1.0/6.0), d2_add(a, d2_add(d2_smul(2.0, b), d2_add(d2_smul(2.0, c), d))));
-        double2 p_new = d2_add(p, incr);
-        if (!is_inbounds_2D_vertex_device(w, h, dx, dy, p_new)) return make_d2(-999.0, -999.0);
-        p = p_new;
-    }
-    return p;
-}
-
-__device__ double2 advect_pathline_2D_rk4_device_tiled(float* u, float* v, const TileDesc& tile, float* tile_u, float* tile_v,
-    int w, int h, int TotalTimeSteps, double dx, double dy, double dt, double x0, double y0, double t_i, double FTLE_dt, int FTLE_steps){
-
-    double2 p = make_d2(x0, y0);
-
-    for (int k = 0; k < FTLE_steps; ++k){
-        double current_time = t_i + k*FTLE_dt;
-        if (current_time < 1e-15 && FTLE_dt < 0) return p;
-
-        double2 a = Interpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, p, w, h, TotalTimeSteps, dx, dy, dt, current_time);
-        double2 step1 = d2_add(p, d2_smul(0.5*FTLE_dt, a));
-        double2 b = Interpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, step1, w, h, TotalTimeSteps, dx, dy, dt, current_time + FTLE_dt*0.5);
-        double2 step2 = d2_add(p, d2_smul(0.5*FTLE_dt, b));
-        double2 c = Interpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, step2, w, h, TotalTimeSteps, dx, dy, dt, current_time + FTLE_dt*0.5);
-        double2 step3 = d2_add(p, d2_smul(0.5*FTLE_dt, c));
-        double2 d = Interpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, step3, w, h, TotalTimeSteps, dx, dy, dt, current_time + FTLE_dt);
         double2 step4 = d2_add(p, d2_smul(FTLE_dt, d));
 
         if (!is_inbounds_2D_vertex_device(w, h, dx, dy, step1)
@@ -210,6 +114,116 @@ __device__ double FTLE_device(float* u, float* v, int w, int h, int TotalTimeSte
     return (1.0 / fabs(T))*0.5*log(lambda_max);
 }
 
+// --------------------------------------------------------------------------
+// Tiled (Shared Memory) Implementation - Optimized for 3D Volume
+// --------------------------------------------------------------------------
+
+// Optimized 3D interpolation using shared memory volume
+__device__ double2 Interpolate2DUnsteadyField_device_tiled(
+    float* u, float* v,                             // Global memory pointers (fallback)
+    const TileDesc& tile,                           // Tile metadata
+    float* tile_u, float* tile_v,                   // Shared memory pointers
+    double2 pos,                                    // Position (x, y)
+    int width, int height, int TotalTimeSteps,      // Field dimensions
+    double dx, double dy, double dt,                // Grid spacing
+    double t                                        // Current time
+){
+    // 1. Time clamping and index
+    if (t < 0.0){ if (fabs(t) < 1e-9) t = 0.0; }
+    int t_idx = pos_to_prev_idx_vertex_device(t, dt);
+
+    // 2. Spatial indices
+    int ix = pos_to_prev_idx_vertex_device(pos.x, dx);
+    int iy = pos_to_prev_idx_vertex_device(pos.y, dy);
+
+    // 3. Check if the required Neighborhood (2 spatial x 2 temporal) is in Shared Memory
+    bool in_tile = (ix >= tile.ox) && (ix < tile.ox + tile.sx - 1) &&
+                   (iy >= tile.oy) && (iy < tile.oy + tile.sy - 1) &&
+                   (t_idx >= tile.ot) && (t_idx + 1 < tile.ot + tile.st);
+
+    if (in_tile) {
+        // --- Shared Memory Access ---
+        int lx = ix - tile.ox;
+        int ly = iy - tile.oy;
+        int lt1 = t_idx - tile.ot;
+        int lt2 = lt1 + 1;
+
+        int sx = tile.sx;
+        int s_slice = tile.sx * tile.sy;
+        int off_t1 = lt1 * s_slice;
+        int off_t2 = lt2 * s_slice;
+        int idx_tl = ly * sx + lx;
+        
+        // --- Fetch & Bilinear Interpolate T1 ---
+        double2 v1_tl = make_d2(tile_u[off_t1 + idx_tl], tile_v[off_t1 + idx_tl]);
+        double2 v1_tr = make_d2(tile_u[off_t1 + idx_tl + 1], tile_v[off_t1 + idx_tl + 1]);
+        double2 v1_bl = make_d2(tile_u[off_t1 + idx_tl + sx], tile_v[off_t1 + idx_tl + sx]);
+        double2 v1_br = make_d2(tile_u[off_t1 + idx_tl + sx + 1], tile_v[off_t1 + idx_tl + sx + 1]);
+
+        double x_alpha = (pos.x - ix*dx) / dx;
+        double y_alpha = (pos.y - iy*dy) / dy;
+        double inv_x = 1.0 - x_alpha;
+        double inv_y = 1.0 - y_alpha;
+
+        double2 top1 = d2_add(d2_smul(inv_x, v1_tl), d2_smul(x_alpha, v1_tr));
+        double2 bot1 = d2_add(d2_smul(inv_x, v1_bl), d2_smul(x_alpha, v1_br));
+        double2 val1 = d2_add(d2_smul(inv_y, top1), d2_smul(y_alpha, bot1));
+
+        // --- Fetch & Bilinear Interpolate T2 ---
+        double2 v2_tl = make_d2(tile_u[off_t2 + idx_tl], tile_v[off_t2 + idx_tl]);
+        double2 v2_tr = make_d2(tile_u[off_t2 + idx_tl + 1], tile_v[off_t2 + idx_tl + 1]);
+        double2 v2_bl = make_d2(tile_u[off_t2 + idx_tl + sx], tile_v[off_t2 + idx_tl + sx]);
+        double2 v2_br = make_d2(tile_u[off_t2 + idx_tl + sx + 1], tile_v[off_t2 + idx_tl + sx + 1]);
+
+        double2 top2 = d2_add(d2_smul(inv_x, v2_tl), d2_smul(x_alpha, v2_tr));
+        double2 bot2 = d2_add(d2_smul(inv_x, v2_bl), d2_smul(x_alpha, v2_br));
+        double2 val2 = d2_add(d2_smul(inv_y, top2), d2_smul(y_alpha, bot2));
+
+        // --- Linear Time Interpolation ---
+        double t_alpha = (t - t_idx*dt) / dt;
+        return d2_add(d2_smul(1.0 - t_alpha, val1), d2_smul(t_alpha, val2));
+    }
+
+    // Fallback to Global Memory
+    return Interpolate2DUnsteadyField_device(u, v, pos, width, height, TotalTimeSteps, dx, dy, dt, t);
+}
+
+__device__ double2 advect_pathline_2D_rk4_device_tiled(float* u, float* v, const TileDesc& tile, float* tile_u, float* tile_v,
+    int w, int h, int TotalTimeSteps, double dx, double dy, double dt, double x0, double y0, double t_i, double FTLE_dt, int FTLE_steps){
+
+    double2 p = make_d2(x0, y0);
+
+    for (int k = 0; k < FTLE_steps; ++k){
+        double current_time = t_i + k*FTLE_dt;
+        if (current_time < 1e-15 && FTLE_dt < 0) return p;
+
+        double2 a = Interpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, p, w, h, TotalTimeSteps, dx, dy, dt, current_time);
+        
+        double2 step1 = d2_add(p, d2_smul(0.5*FTLE_dt, a));
+        double2 b = Interpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, step1, w, h, TotalTimeSteps, dx, dy, dt, current_time + FTLE_dt*0.5);
+        
+        double2 step2 = d2_add(p, d2_smul(0.5*FTLE_dt, b));
+        double2 c = Interpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, step2, w, h, TotalTimeSteps, dx, dy, dt, current_time + FTLE_dt*0.5);
+        
+        double2 step3 = d2_add(p, d2_smul(0.5*FTLE_dt, c));
+        double2 d = Interpolate2DUnsteadyField_device_tiled(u, v, tile, tile_u, tile_v, step3, w, h, TotalTimeSteps, dx, dy, dt, current_time + FTLE_dt);
+        
+        double2 step4 = d2_add(p, d2_smul(FTLE_dt, d));
+
+        if (!is_inbounds_2D_vertex_device(w, h, dx, dy, step1)
+        || !is_inbounds_2D_vertex_device(w, h, dx, dy, step2)
+        || !is_inbounds_2D_vertex_device(w, h, dx, dy, step3)
+        || !is_inbounds_2D_vertex_device(w, h, dx, dy, step4)) 
+        return make_d2(-999.0, -999.0);
+
+        double2 incr = d2_smul(FTLE_dt*(1.0/6.0), d2_add(a, d2_add(d2_smul(2.0, b), d2_add(d2_smul(2.0, c), d))));
+        double2 p_new = d2_add(p, incr);
+        if (!is_inbounds_2D_vertex_device(w, h, dx, dy, p_new)) return make_d2(-999.0, -999.0);
+        p = p_new;
+    }
+    return p;
+}
+
 __device__ double FTLE_device_tiled(float* u, float* v, const TileDesc& tile, float* tile_u, float* tile_v,
     int w, int h, int TotalTimeSteps, double dx, double dy, double dt, double x0, double y0, double t_i, double FTLE_dt, int FTLE_steps){
 
@@ -236,16 +250,10 @@ __device__ double FTLE_device_tiled(float* u, float* v, const TileDesc& tile, fl
     return (1.0 / fabs(T))*0.5*log(lambda_max);
 }
 
+// --------------------------------------------------------------------------
+// Kernels
+// --------------------------------------------------------------------------
 
-//no need to pass min_x,min_y:
-//pos_x=minx+idx*dx, pos_x->float_idx: (pos_x-minx)/dx
-//pos_y=miny+idy*dy, pos_y->float_idx: (pos_y-miny)/dy
-//this is equivalent to:
-//pos_x=idx*dx, pos_x->float_idx: pos_x/dx
-//pos_y=idy*dy, pos_y->float_idx: pos_y/dy
-//same in time resolution
-//the input t_i is relative time instead of physical time, i.e. t_i*v_dt+vector_field.tmin is the physical time
-//we don't need to pass min_t or compute physical time, since we can query grid by floorIndex=floor(t_i/dt) ceilIndex=floorIndex+1
 __global__ void compute_FTLE_image_kernel(float* field_u, float* field_v, int v_width, int v_height, int TotalTimeSteps, double v_dx, double v_dy, double v_dt,
     double* FTLE_field, int FTLE_size_x, int FTLE_size_y, double FTLE_dx, double FTLE_dy, double t_i, double FTLE_dt, int FTLE_steps){
     int ix = blockIdx.x*blockDim.x + threadIdx.x;
@@ -264,81 +272,65 @@ __global__ void compute_FTLE_image_kernel(float* field_u, float* field_v, int v_
 // Shared-memory accelerated variant.
 // Callers must provide dynamic shared memory:
 // shared_bytes = 2 * tile_w * tile_h * tile_t * sizeof(float)
-// and pass tile origin/size (tile_w/tile_h/tile_t).
-
-// Shared-memory accelerated variant.
-// Callers must provide dynamic shared memory:
-// shared_bytes = 2 * tile_w * tile_h * tile_t * sizeof(float)
-// Note: tile_w and tile_h depend on block size, upsampling ratio, and halo.
-// Since size must be uniform for the kernel launch, the host must calculate the *maximum* possible tile size
-// effectively: max_tile_w = ceil(blockDim.x * FTLE_dx / v_dx) + 2*halo
-// This kernel assumes blockDim is roughly consistent with the max_tile_w calculation.
-
+// The tile_w and tile_h are now Hyperparameters passed from host.
 __global__ void compute_FTLE_image_kernel_tiled(float* field_u, float* field_v, int v_width, int v_height, int TotalTimeSteps, double v_dx, double v_dy, double v_dt,
     double* FTLE_field, int FTLE_size_x, int FTLE_size_y, double FTLE_dx, double FTLE_dy, double t_i, double FTLE_dt, int FTLE_steps,
-    int halo, int tile_t_start, int tile_t_count){
+    int tile_w, int tile_h, int tile_t_start, int tile_t_count){
 
     int ix = blockIdx.x*blockDim.x + threadIdx.x;
     int iy = blockIdx.y*blockDim.y + threadIdx.y;
 
     // 1. Calculate the spatial extent of this block in the VECTOR FIELD domain
-    // The block covers FTLE indices [blockIdx.x * blockDim.x, (blockIdx.x+1)*blockDim.x - 1]
-    // We map the start and end of the block to Vector Field indices.
-    
-    // Start of block in physical coords
     double block_x_min = (blockIdx.x * blockDim.x) * FTLE_dx;
     double block_y_min = (blockIdx.y * blockDim.y) * FTLE_dy;
     
-    // End of block in physical coords (inclusive of the last pixel covered by the block)
-    // Note: purely for coverage calculation.
-    double block_x_max = ((blockIdx.x + 1) * blockDim.x - 1) * FTLE_dx; // approximate last pixel center? or bound. 
-    double block_y_max = ((blockIdx.y + 1) * blockDim.y - 1) * FTLE_dy;
-
-    // Convert to Vector Field indices
-    // index = floor(pos / v_dx)
+    // We only need the top-left (start) of the block in VF coords to anchor our tile.
     int v_ix_min = (int)floor(block_x_min / v_dx);
     int v_iy_min = (int)floor(block_y_min / v_dy);
-     
-    // We need up to the index covering block_x_max.
-    // actually spatial interpolate needs data at floor(pos/dx) and floor()+1.
-    // so we need floor(max_pos/dx) + 1 basically.
+    
+    // Calculate the Vector Field extent covered by the block (approximation)
+    double block_x_max = ((blockIdx.x + 1) * blockDim.x - 1) * FTLE_dx;
+    double block_y_max = ((blockIdx.y + 1) * blockDim.y - 1) * FTLE_dy;
     int v_ix_max = (int)floor(block_x_max / v_dx) + 1;
     int v_iy_max = (int)floor(block_y_max / v_dy) + 1;
-
-    // Apply Halo
-    int tile_ox = v_ix_min - halo;
-    int tile_oy = v_iy_min - halo;
-    int tile_ex = v_ix_max + halo; // exclusive end
-    int tile_ey = v_iy_max + halo;
-
-    int tile_w = tile_ex - tile_ox;
-    int tile_h = tile_ey - tile_oy;
     
+    int block_vf_w = v_ix_max - v_ix_min;
+    int block_vf_h = v_iy_max - v_iy_min;
+
+    // Center the tile around the block's required region
+    // tile_ox = v_ix_min - margin_x
+    // margin_x = (tile_w - block_vf_w) / 2
+    int margin_x = (tile_w - block_vf_w) / 2;
+    int margin_y = (tile_h - block_vf_h) / 2;
+    
+    // If tile is smaller than block, margin might be negative, which means we crop. 
+    // Ideally tile_w >> block_vf_w.
+    
+    int tile_ox = v_ix_min - margin_x;
+    int tile_oy = v_iy_min - margin_y;
+
     // Time tiling
     int tile_t0 = tile_t_start;
-    int tile_t  = tile_t_count;
-
+    
     TileDesc tile;
     tile.ox = tile_ox; tile.oy = tile_oy; tile.ot = tile_t0;
-    tile.sx = tile_w;  tile.sy = tile_h;  tile.st = tile_t;
+    tile.sx = tile_w;  tile.sy = tile_h;  tile.st = tile_t_count;
 
     float* tile_u = nullptr;
     float* tile_v = nullptr;
 
     extern __shared__ float shmem[];
-    // Memory layout: [tile_t * tile_h * tile_w] for U, then for V.
+    // Memory layout: [tile_t * tile_slice] for U, then for V.
     
     int tile_slice = tile_w * tile_h;
-    int total_elems_per_comp = tile_slice * tile_t;
+    int total_elems_per_comp = tile_slice * tile_t_count;
     tile_u = shmem;
     tile_v = shmem + total_elems_per_comp;
 
     int linear_idx = threadIdx.y * blockDim.x + threadIdx.x;
     int stride = blockDim.x * blockDim.y;
     
-    // Preload loop
-    // Note: total_elems_per_comp might be larger than stride. Cooperatively load.
-    // Also need to handle bounds checking against global dimensions (v_width, v_height, TotalTimeSteps)
+    // Preload loop (Collaborative loading of Volume)
     for (int idx = linear_idx; idx < total_elems_per_comp; idx += stride){
         int lt = idx / tile_slice;
         int rem = idx - lt * tile_slice;
@@ -359,11 +351,6 @@ __global__ void compute_FTLE_image_kernel_tiled(float* field_u, float* field_v, 
             tile_u[idx] = field_u[g_idx];
             tile_v[idx] = field_v[g_idx];
         } else {
-            // Out of bounds load -> 0.0 or clamp?
-            // Interpolation logic handles out of bounds by returning 0 usually if pos is out of bounds.
-            // But if we are Interpolating *using* the tile, and the tile has 0 for out-of-bounds neighbors, 
-            // it will interpolate to 0 at the edge, which mimicks `SpatialInterpolate2DUnsteadyField_device` boundary check (lines 44 returns 0).
-            // So 0 is correct.
             tile_u[idx] = 0.0f;
             tile_v[idx] = 0.0f;
         }

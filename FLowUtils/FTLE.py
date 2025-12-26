@@ -186,50 +186,40 @@ def compute_FTLE_2D_CUDA_SM_oneSlice(vector_field:UnsteadyVectorField2D,  time:f
     block = (16, 16, 1)
     grid = ((FTLE_size_x + block[0] - 1) // block[0], (FTLE_size_y + block[1] - 1) // block[1], 1)
     
-    # Calculate shared memory requirement
-    # max_tile_w = ceil(blockDim.x * FTLE_dx / v_dx) + 2*halo
-    # FTLE_dx / v_dx is approx 1/upSampling
-    halo = 2
-    # Conservative estimate:
-    # block cover in physical: blockDim * FTLE_dx
-    # block cover in vector index: ceil(blockDim * FTLE_dx / v_dx) + 1 (for interpolation interp)
-    # Actually floor(end)+1 - floor(start)
-    # Approx: ceil(block.x / upSampling) + 2 or so.
-    # To be safe and since upSampling can be < 1 (super resolution FTLE), 
-    # v_width_covered = ceil(32 * FTLE_dx / v_dx) + 1
-    # Let's compute exact max possible tile width for this grid setup
+    # Calculate shared memory requirement w/ Fixed Tile Size
+    # User requested hyperparameter-based tile size.
+    # We choose a reasonable default that fits in Shared Memory.
+    # 64x64 spatial * 8 temporal * 8 bytes = 256KB? Too big.
+    # Max shared mem per block is usually 48KB or 64KB (or up to 100KB on newer archs).
+    # Let's try 32x32 spatial * 8 temporal * 8 bytes = 64KB. This is safe for many GPUs.
+    # Or reduce temporal if needed.
     
-    ratio_x = FTLE_dx / v_dx
-    ratio_y = FTLE_dy / v_dy
+    tile_w_shared = 16
+    tile_h_shared = 16
     
-    # Max possible width in vector field indices for a block of size 32
-    # 32 * ratio_x + small_eps
-    max_v_w = int(np.ceil(block[0] * ratio_x)) + 2 # +1 for interpolation right edge, +1 for safety?
-    max_v_h = int(np.ceil(block[1] * ratio_y)) + 2
-    
-    tile_w_shared = max_v_w + 2*halo
-    tile_h_shared = max_v_h + 2*halo
-    
-    # Time tile: load 2 frames (current and next) to handle initial steps.
-    # If t_i is between t_idx and t_idx+1, we need both.
+    # Time tile: load 8 frames
     tile_t_start = int(np.floor(t_i / v_dt))
-    tile_t_count = 2
+    tile_t_count = 8
     
     # Ensure tile_t_start is valid
+    if tile_t_start >= TotalTimeSteps - 1: 
+        tile_t_start = max(0, TotalTimeSteps - tile_t_count)
     if tile_t_start < 0: tile_t_start = 0
-    if tile_t_start >= TotalTimeSteps - 1: tile_t_start = TotalTimeSteps - 2 # if possible
-    # if TotalTimeSteps is 1, tile_t_count=1? logic handles bounds.
+
     
     shared_mem_size = tile_w_shared * tile_h_shared * tile_t_count * 4 * 2 # 4 bytes float, 2 fields U,V
     
     # print(f"Shared Mem Launch: tile_w={tile_w_shared}, tile_h={tile_h_shared}, size={shared_mem_size} bytes")
+    # compute_ftle_kernel_tiled(float* field_u, float* field_v, int v_width, int v_height, int TotalTimeSteps, double v_dx, double v_dy, double v_dt,
+    #     double* FTLE_field, int FTLE_size_x, int FTLE_size_y, double FTLE_dx, double FTLE_dy, double t_i, double FTLE_dt, int FTLE_steps,
+    #     int tile_w, int tile_h, int tile_t_start, int tile_t_count){..}
 
     # Launch kernel
     compute_ftle_kernel_tiled(
         u_gpu, v_gpu,
         np.int32(v_width), np.int32(v_height), np.int32(TotalTimeSteps), np.float64(v_dx), np.float64(v_dy), np.float64(v_dt),
         FTLE_gpu, np.int32(FTLE_size_x), np.int32(FTLE_size_y), np.float64(FTLE_dx), np.float64(FTLE_dy), np.float64(t_i), np.float64(FTLE_dt), np.int32(max_iteration),
-        np.int32(halo), np.int32(tile_t_start), np.int32(tile_t_count),
+        np.int32(tile_w_shared), np.int32(tile_h_shared), np.int32(tile_t_start), np.int32(tile_t_count),
         block=block, grid=grid, shared=shared_mem_size
     )
 
