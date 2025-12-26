@@ -43,8 +43,9 @@ PyFlowVis accelerates the most demanding algorithms—pathline integration (firs
 >  + CPU (Numba-accelerated): Python-based Euler, RK4, and RK5 integrators with @njit acceleration for fast vector field queries.
 >  + CUDA Kernels:  Euler and RK4 integrators fully implemented on GPU.
 >  + Differentiable Solvers: Integration via torchdiffeq (dopri5, dopri8, bosh3, fehlberg2, adaptive_heun) for gradient-based applications.   
-- **FTLE**: Computes 2D FTLE using a CUDA kernel. See [FTLE_CUDA.cu](assets\cuda_kernal\FTLE_CUDA.cu). 
-- **Optimal Reference Optimization** : we implement the algorithm of paper "Generic objective vortices for flow visualization"[ Günther et al 2017] for unsteady 2D/3D field using cuda.
+- **FTLE**: Computes 2D FTLE using custom CUDA kernels. Includes a baseline implementation ([FTLE_2D_CUDA.cu](assets/cuda_kernal/FTLE_2D_CUDA.cu)) and an optimized version leveraging <font color=#FFFF00>shared memory</font> ([FTLE_2D_CUDA_sharemem.cu](assets/cuda_kernal/FTLE_2D_CUDA_sharemem.cu)) for maximum performance. We try benckmark and optimize this code for <font color=#FFFF00>H100(compute capbitiy 9.0/cuda 12.6) and 3090 (CC 8.6/cuda 12.6) </font>.
+
+- **Optimal Reference Optimization** : we implement the algorithm of paper "Generic objective vortices for flow visualization"[ Günther et al 2017] for unsteady 2D/3D field using cuda.(wip)
   
 <img src="assets/readmePics/cudakernal.png" alt="alt text" width="720"/>
 

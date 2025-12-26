@@ -67,11 +67,14 @@ __device__ double2 SpatialInterpolate2DUnsteadyField_device_tiled(float* u, floa
     int ix = pos_to_prev_idx_vertex_device(pos.x, dx);
     int iy = pos_to_prev_idx_vertex_device(pos.y, dy);
 
-    // Try the shared-memory tile first
-    if (tile_has_data(tile) && tile_contains(tile, ix, iy, it)){
-        // Neighbor vertex indices with boundary handling
-        int ix1 = cuda_min(ix + 1, tile.ox + tile.sx - 1);
-        int iy1 = cuda_min(iy + 1, tile.oy + tile.sy - 1);
+    // Fallback if neighbors are missing from tile
+    if (tile_has_data(tile) && 
+        (ix >= tile.ox) && (ix < tile.ox + tile.sx - 1) &&
+        (iy >= tile.oy) && (iy < tile.oy + tile.sy - 1) &&
+        (it >= tile.ot) && (it < tile.ot + tile.st)) {
+
+        int ix1 = ix + 1; 
+        int iy1 = iy + 1;
 
         int tl_idx = tile_linear_idx(tile, ix,  iy,  it);
         int tr_idx = tile_linear_idx(tile, ix1, iy,  it);
@@ -89,7 +92,7 @@ __device__ double2 SpatialInterpolate2DUnsteadyField_device_tiled(float* u, floa
         double2 bot = d2_add(d2_smul(1.0 - x_alpha, v_bl), d2_smul(x_alpha, v_br));
         return d2_add(d2_smul(1.0 - y_alpha, top), d2_smul(y_alpha, bot));
     }
-
+    
     // Fallback to global memory
     return SpatialInterpolate2DUnsteadyField_device(u, v, pos, width, height, TotalTimeSteps, dx, dy, it);
 }
@@ -262,52 +265,120 @@ __global__ void compute_FTLE_image_kernel(float* field_u, float* field_v, int v_
 // Callers must provide dynamic shared memory:
 // shared_bytes = 2 * tile_w * tile_h * tile_t * sizeof(float)
 // and pass tile origin/size (tile_w/tile_h/tile_t).
+
+// Shared-memory accelerated variant.
+// Callers must provide dynamic shared memory:
+// shared_bytes = 2 * tile_w * tile_h * tile_t * sizeof(float)
+// Note: tile_w and tile_h depend on block size, upsampling ratio, and halo.
+// Since size must be uniform for the kernel launch, the host must calculate the *maximum* possible tile size
+// effectively: max_tile_w = ceil(blockDim.x * FTLE_dx / v_dx) + 2*halo
+// This kernel assumes blockDim is roughly consistent with the max_tile_w calculation.
+
 __global__ void compute_FTLE_image_kernel_tiled(float* field_u, float* field_v, int v_width, int v_height, int TotalTimeSteps, double v_dx, double v_dy, double v_dt,
     double* FTLE_field, int FTLE_size_x, int FTLE_size_y, double FTLE_dx, double FTLE_dy, double t_i, double FTLE_dt, int FTLE_steps,
-    int tile_x0, int tile_y0, int tile_t0, int tile_w, int tile_h, int tile_t){
+    int halo, int tile_t_start, int tile_t_count){
 
     int ix = blockIdx.x*blockDim.x + threadIdx.x;
     int iy = blockIdx.y*blockDim.y + threadIdx.y;
-    if (ix >= FTLE_size_x || iy >= FTLE_size_y) { return; }
-    if (ix < 2 || iy < 2 || ix >= FTLE_size_x-2 || iy >= FTLE_size_y-2) { FTLE_field[ix + iy*FTLE_size_x] = 0.0; return; }
+
+    // 1. Calculate the spatial extent of this block in the VECTOR FIELD domain
+    // The block covers FTLE indices [blockIdx.x * blockDim.x, (blockIdx.x+1)*blockDim.x - 1]
+    // We map the start and end of the block to Vector Field indices.
+    
+    // Start of block in physical coords
+    double block_x_min = (blockIdx.x * blockDim.x) * FTLE_dx;
+    double block_y_min = (blockIdx.y * blockDim.y) * FTLE_dy;
+    
+    // End of block in physical coords (inclusive of the last pixel covered by the block)
+    // Note: purely for coverage calculation.
+    double block_x_max = ((blockIdx.x + 1) * blockDim.x - 1) * FTLE_dx; // approximate last pixel center? or bound. 
+    double block_y_max = ((blockIdx.y + 1) * blockDim.y - 1) * FTLE_dy;
+
+    // Convert to Vector Field indices
+    // index = floor(pos / v_dx)
+    int v_ix_min = (int)floor(block_x_min / v_dx);
+    int v_iy_min = (int)floor(block_y_min / v_dy);
+     
+    // We need up to the index covering block_x_max.
+    // actually spatial interpolate needs data at floor(pos/dx) and floor()+1.
+    // so we need floor(max_pos/dx) + 1 basically.
+    int v_ix_max = (int)floor(block_x_max / v_dx) + 1;
+    int v_iy_max = (int)floor(block_y_max / v_dy) + 1;
+
+    // Apply Halo
+    int tile_ox = v_ix_min - halo;
+    int tile_oy = v_iy_min - halo;
+    int tile_ex = v_ix_max + halo; // exclusive end
+    int tile_ey = v_iy_max + halo;
+
+    int tile_w = tile_ex - tile_ox;
+    int tile_h = tile_ey - tile_oy;
+    
+    // Time tiling
+    int tile_t0 = tile_t_start;
+    int tile_t  = tile_t_count;
 
     TileDesc tile;
-    tile.ox = tile_x0; tile.oy = tile_y0; tile.ot = tile_t0;
+    tile.ox = tile_ox; tile.oy = tile_oy; tile.ot = tile_t0;
     tile.sx = tile_w;  tile.sy = tile_h;  tile.st = tile_t;
 
     float* tile_u = nullptr;
     float* tile_v = nullptr;
 
     extern __shared__ float shmem[];
-    if (tile_has_data(tile)){
-        int tile_slice = tile_w * tile_h;
-        int total_elems = tile_slice * tile_t;
-        tile_u = shmem;
-        tile_v = shmem + total_elems;
+    // Memory layout: [tile_t * tile_h * tile_w] for U, then for V.
+    
+    int tile_slice = tile_w * tile_h;
+    int total_elems_per_comp = tile_slice * tile_t;
+    tile_u = shmem;
+    tile_v = shmem + total_elems_per_comp;
 
-        int linear_idx = threadIdx.y * blockDim.x + threadIdx.x;
-        int stride = blockDim.x * blockDim.y;
-        // Preload the tile (u, v) into shared memory
-        for (int idx = linear_idx; idx < total_elems; idx += stride){
-            int lt = idx / tile_slice;
-            int rem = idx - lt * tile_slice;
-            int ly = rem / tile_w;
-            int lx = rem - ly * tile_w;
+    int linear_idx = threadIdx.y * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * blockDim.y;
+    
+    // Preload loop
+    // Note: total_elems_per_comp might be larger than stride. Cooperatively load.
+    // Also need to handle bounds checking against global dimensions (v_width, v_height, TotalTimeSteps)
+    for (int idx = linear_idx; idx < total_elems_per_comp; idx += stride){
+        int lt = idx / tile_slice;
+        int rem = idx - lt * tile_slice;
+        int ly = rem / tile_w;
+        int lx = rem - ly * tile_w;
 
-            int gx = tile_x0 + lx;
-            int gy = tile_y0 + ly;
-            int gt = tile_t0 + lt;
+        int gx = tile_ox + lx;
+        int gy = tile_oy + ly;
+        int gt = tile_t0 + lt;
+
+        // Check global bounds
+        bool valid = (gx >= 0 && gx < v_width) && 
+                     (gy >= 0 && gy < v_height) && 
+                     (gt >= 0 && gt < TotalTimeSteps);
+
+        if (valid) {
             int g_idx = gt * v_height * v_width + gy * v_width + gx;
-
             tile_u[idx] = field_u[g_idx];
             tile_v[idx] = field_v[g_idx];
+        } else {
+            // Out of bounds load -> 0.0 or clamp?
+            // Interpolation logic handles out of bounds by returning 0 usually if pos is out of bounds.
+            // But if we are Interpolating *using* the tile, and the tile has 0 for out-of-bounds neighbors, 
+            // it will interpolate to 0 at the edge, which mimicks `SpatialInterpolate2DUnsteadyField_device` boundary check (lines 44 returns 0).
+            // So 0 is correct.
+            tile_u[idx] = 0.0f;
+            tile_v[idx] = 0.0f;
         }
-        __syncthreads();
+    }
+    __syncthreads();
+
+    // Computation
+    if (ix >= FTLE_size_x || iy >= FTLE_size_y) { return; }
+    // Edges
+    if (ix < 2 || iy < 2 || ix >= FTLE_size_x-2 || iy >= FTLE_size_y-2) { 
+        FTLE_field[ix + iy*FTLE_size_x] = 0.0; return; 
     }
 
     double x0 = ix*FTLE_dx;
     double y0 = iy*FTLE_dy;
     double ftle = FTLE_device_tiled(field_u, field_v, tile, tile_u, tile_v, v_width, v_height, TotalTimeSteps, v_dx, v_dy, v_dt, x0, y0, t_i, FTLE_dt, FTLE_steps);
     FTLE_field[ix + iy*FTLE_size_x] = cuda_max(0.0, ftle);
-    return;
 }

@@ -8,12 +8,17 @@ from FLowUtils.netCDFLoader import load_UnsteadyVectorFields_netCDFOrAnalytical
 from FMT_Utils.FTLE_fitting_utils import generate_FLowMap_SLICE
 from FMT_Utils.FlowlinePostProcessing import AngleAwareSampling
 from FMT_Utils.FMT_encoder import HierachyFMT_encoder
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN
 from DeepUtils.utils import EasyConfig
 from FMT_Utils.FlowlinePostProcessing import LocLines,normalizeLines
 from pnn.libs.flows import multi_points_vis_fast
 from GuiObjcts.FlowLineRenderObject import FlowLineObject
 from main import init_render
+
+
+def DBSCAN_clustering(point_features:np.ndarray,eps:float,min_samples:int):
+    pass
+
 
 def buld_FMT_encoder(config):
     encoderConfig=config.encoder
@@ -28,6 +33,11 @@ def render_pathlines_labels(pathlines:np.ndarray,labels:np.ndarray):
     flowlineObject.RendExternalPathline(pathlines,labels)
     engine.MainLoop()
     engine.impl.shutdown()
+
+def DBSCAN_clustering(features, eps=0.5, min_samples=5):
+    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(features)
+    labels = clustering.labels_
+    return labels
 
 def cluster_pathlines_experiment(config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -83,9 +93,10 @@ def cluster_pathlines_experiment(config):
                     point_features_ori_rk4=point_features_ori_rk4.reshape(nx*ny,-1)
                     #now throw away the pathline whose valid length is not equal to max_steps
                     point_features_ori_rk4=point_features_ori_rk4[valid_index]
-                    kmeans = KMeans(n_clusters=config.cluster_classes, init="k-means++",random_state=0,max_iter=1000)
-                    kmeans.fit(point_features_ori_rk4)
-                    labels_ori_rk4=kmeans.labels_
+                    # kmeans = KMeans(n_clusters=config.cluster_classes, init="k-means++",random_state=0,max_iter=1000)
+                    # kmeans.fit(point_features_ori_rk4)
+                    # labels_ori_rk4=kmeans.labels_
+                    labels_ori_rk4 = DBSCAN_clustering(point_features_ori_rk4, eps=0.5, min_samples=5)
                     labelsList.append(labels_ori_rk4)
 
                 #before rendering, we need to throw away the pathline whose valid length is not equal to max_steps
