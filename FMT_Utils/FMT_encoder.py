@@ -92,7 +92,6 @@ Our data is not unordered points, KNN dosn't make sense. and it's also time cons
 how to describe shape of pathlineCluster in an objective way? 
 pathlines shape [B, N=neighbors*Ltimestep,3])->reshape as  [B, neighbors,Ltimestep,3]) and every point only pick nearby points at the same timestep as it's neighbor..
 """
-
 class GeoLinePicker(nn.Module):
     def __init__(self, LSteps:int):
         super().__init__()
@@ -136,9 +135,6 @@ class GeoLinePicker(nn.Module):
 
 
 
-
-
-
 # Pooling
 class Pooling(nn.Module):
     def __init__(self, out_dim):
@@ -168,7 +164,7 @@ class PosE_Initial(nn.Module):
         B, _, N = xyz.shape    
         feat_dim = self.out_dim // (self.in_dim * 2)
         
-        feat_range = torch.arange(feat_dim).float().cuda()     
+        feat_range = torch.arange(feat_dim, device=xyz.device, dtype=torch.float32)
         dim_embed = torch.pow(self.alpha, feat_range / feat_dim)
         div_embed = torch.div(self.beta * xyz.unsqueeze(-1), dim_embed)
 
@@ -192,7 +188,7 @@ class PosE_Geo(nn.Module):
         B, _, G, K = knn_xyz.shape
         feat_dim = self.out_dim // (self.in_dim * 2)
 
-        feat_range = torch.arange(feat_dim).float().cuda()     
+        feat_range = torch.arange(feat_dim, device=knn_xyz.device, dtype=torch.float32)
         dim_embed = torch.pow(self.alpha, feat_range / feat_dim)
         div_embed = torch.div(self.beta * knn_xyz.unsqueeze(-1), dim_embed)
 
@@ -239,15 +235,59 @@ class LGA(nn.Module):
         return knn_x_w
 
 
+class TemporalDFT(nn.Module):
+    """
+    沿时间维 L 做离散傅里叶变换 (DFT) 的可学习时序模块：
+      x --rfft--> X(f) --(learnable complex filter)--> Y(f) --irfft--> y
+    设计目标：把“轨迹是有序序列”的归纳偏置放到 encoder 的 temporal head 里，
+    避免把 N=K*L 当成无序点云直接做全局池化。
+    """
+    def __init__(self, channels: int, L: int, dropout: float = 0.0, residual: bool = True):
+        super().__init__()
+        self.channels = int(channels)
+        self.L = int(L)
+        self.residual = bool(residual)
+        # rfft 的频点数
+        self.F = self.L // 2 + 1
+
+        # 逐通道、逐频点的复数权重：Y = X * W
+        self.weight_real = nn.Parameter(torch.ones(self.channels, self.F))
+        self.weight_imag = nn.Parameter(torch.zeros(self.channels, self.F))
+
+        self.dropout = nn.Dropout(float(dropout)) if dropout and dropout > 0 else nn.Identity()
+        # BN1d 支持 [B, C, L]
+        self.norm = nn.BatchNorm1d(self.channels)
+        self.act = nn.GELU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, C, L]
+        return: [B, C, L]
+        """
+        assert x.dim() == 3, f"TemporalDFT expects [B,C,L], got {tuple(x.shape)}"
+        B, C, L = x.shape
+        assert C == self.channels, f"channels mismatch: expect {self.channels}, got {C}"
+        assert L == self.L, f"L mismatch: expect {self.L}, got {L}"
+
+        X = torch.fft.rfft(x, dim=-1, norm='ortho')  # [B, C, F], complex
+        W = torch.complex(self.weight_real, self.weight_imag).unsqueeze(0)  # [1, C, F]
+        Y = X * W
+        y = torch.fft.irfft(Y, n=self.L, dim=-1, norm='ortho')  # [B, C, L], real
+
+        y = self.dropout(self.act(self.norm(y)))
+        return (x + y) if self.residual else y
+
+
 
 # Non-Parametric Encoder
 class FMT(nn.Module):  
-    def __init__(self, PathlineLtimesteps:int, num_stages, embed_dim, alpha, beta):
+    def __init__(self, PathlineLtimesteps:int, num_stages, embed_dim, alpha, beta, temporal_head: str = "dft"):
         super().__init__()
         self.PathlineLtimesteps = PathlineLtimesteps
         self.num_stages = num_stages
         self.embed_dim = embed_dim
         self.alpha, self.beta = alpha, beta
+        self.temporal_head = str(temporal_head).lower()
 
 
         # Raw-point Embedding
@@ -264,9 +304,16 @@ class FMT(nn.Module):
             out_dim = out_dim * 2
             #disable FPS
             # group_num = group_num // 2
-            self.FPS_kNN_list.append(kNN(self.PathlineLtimesteps))
+            self.FPS_kNN_list.append(GeoLinePicker(self.PathlineLtimesteps))
             self.LGA_list.append(LGA(out_dim, self.alpha, self.beta))
             self.Pooling_list.append(Pooling(out_dim))
+
+        # temporal head：在最后把 N=K*L 还原为时序并做频域学习
+        self.out_dim = out_dim
+        if self.temporal_head == "dft":
+            self.temporal_dft = TemporalDFT(channels=self.out_dim, L=self.PathlineLtimesteps, dropout=0.0, residual=True)
+        else:
+            self.temporal_dft = None
 
 
     def forward(self, xyz, x):
@@ -284,9 +331,26 @@ class FMT(nn.Module):
             # Pooling
             x = self.Pooling_list[i](knn_x_w)
 
-    
-        x = x.view(B, -1,N)
-        # Global Pooling, x: (B, embed_dim, N) -> (B, embed_dim)
+        # x: [B, out_dim, N]
+        x = x.view(B, -1, N)
+
+        # Temporal head (DFT along L): N must be K*L
+        if self.temporal_dft is not None:
+            L = int(self.PathlineLtimesteps)
+            assert N % L == 0, f"N must be divisible by L={L}, got N={N}"
+            K = N // L
+            # 还原为 [B, C, K, L]
+            x_ckl = x.reshape(B, self.out_dim, K, L)
+            # 逐线做 DFT，再跨线聚合得到时序 token: [B, C, L]
+            x_line = x_ckl.permute(0, 2, 1, 3).reshape(B * K, self.out_dim, L)  # [B*K, C, L]
+            x_line = self.temporal_dft(x_line)  # [B*K, C, L]
+            x_ckl = x_line.reshape(B, K, self.out_dim, L).permute(0, 2, 1, 3)  # [B, C, K, L]
+            x_cl = x_ckl.max(dim=2)[0] + x_ckl.mean(dim=2)  # [B, C, L]
+            # time pooling -> token
+            every_cross_feature = x_cl.max(dim=-1)[0] + x_cl.mean(dim=-1)  # [B, C]
+            return every_cross_feature
+
+        # Fallback: old global pooling (treat as unordered points)
         every_cross_feature = x.max(-1)[0] + x.mean(-1)
         return every_cross_feature
 
@@ -296,7 +360,7 @@ class FMT(nn.Module):
 
 
 class HierachyFMT_encoder(nn.Module):  
-    def __init__(self, ReceptiveFieldList:list[int], base_num_stages:int, embed_dim:int, PathlineLtimesteps:int, alpha:float,  beta:float):
+    def __init__(self, ReceptiveFieldList:list[int], base_num_stages:int, embed_dim:int, PathlineLtimesteps:int, alpha:float,  beta:float, temporal_head: str = "dft"):
         super().__init__()
         """
         ReceptiveFieldList: 感受野窗口边长列表（单位：低分辨率网格格点数），例如 [4, 8, 16]
@@ -316,6 +380,7 @@ class HierachyFMT_encoder(nn.Module):
         self.beta = float(beta)
         self.embed_dim = int(embed_dim)
         self.PathlineLtimesteps = int(PathlineLtimesteps)
+        self.temporal_head = str(temporal_head).lower()
 
         # 为每个感受野构建一个 FMT 编码器
         self.fmts = nn.ModuleList()
@@ -324,7 +389,7 @@ class HierachyFMT_encoder(nn.Module):
             # FMT 的输出维度约为 embed_dim * (2**stages)
             out_dim = self.embed_dim * (2 ** max(0, stages))
             self.out_dims.append(out_dim)
-            self.fmts.append(FMT(PathlineLtimesteps=self.PathlineLtimesteps, num_stages=stages, embed_dim=self.embed_dim, alpha=self.alpha, beta=self.beta))
+            self.fmts.append(FMT(PathlineLtimesteps=self.PathlineLtimesteps, num_stages=stages, embed_dim=self.embed_dim, alpha=self.alpha, beta=self.beta, temporal_head=self.temporal_head))
 
     def _normalize_input(self, pathlines: torch.Tensor):
         """
@@ -348,8 +413,8 @@ class HierachyFMT_encoder(nn.Module):
             X = int(math.isqrt(N))
             assert X * X == N, f"Cannot infer square grid from N={N}. Provide [B,X,Y,...] shape."
             Y = X
-            pl = pathlines.unsqueeze(0).reshape(B, Y, X, K, L, 3)
-            return pathlines
+            pl = pathlines.reshape(B, Y, X, K, L, 3)
+            return pl
         if pathlines.dim() == 6 :  #[B, X, Y, K, L, 3]
             return pathlines
         raise ValueError(f"Unsupported pathlines shape: {tuple(pathlines.shape)}")

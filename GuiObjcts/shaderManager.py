@@ -257,15 +257,36 @@ class ShaderProgram:
         elif uniform_type == gl.GL_FLOAT_VEC4:
             gl.glUniform4fv(location, 1, value)
         elif uniform_type == gl.GL_FLOAT_MAT2:
-            matrix_data = glm.value_ptr(value) if value.__class__==glm.mat2 else value
-            gl.glUniformMatrix2fv(location, 1, gl.GL_FALSE, matrix_data)
+            # glm matrices are column-major already; numpy matrices are almost always row-major.
+            # If we feed a row-major 2x2 with transpose=GL_FALSE, OpenGL will interpret it as column-major
+            # which effectively transposes (and can break transforms when used as part of a larger pipeline).
+            if value.__class__ == glm.mat2:
+                gl.glUniformMatrix2fv(location, 1, gl.GL_FALSE, glm.value_ptr(value))
+            elif isinstance(value, np.ndarray):
+                mat = np.ascontiguousarray(value, dtype=np.float32)
+                gl.glUniformMatrix2fv(location, 1, gl.GL_TRUE, mat)
+            else:
+                gl.glUniformMatrix2fv(location, 1, gl.GL_FALSE, value)
         elif uniform_type == gl.GL_FLOAT_MAT3:
-            matrix_data = glm.value_ptr(value) if value.__class__==glm.mat3 else value
-            gl.glUniformMatrix3fv(location, 1, gl.GL_FALSE, matrix_data)
+            if value.__class__ == glm.mat3:
+                gl.glUniformMatrix3fv(location, 1, gl.GL_FALSE, glm.value_ptr(value))
+            elif isinstance(value, np.ndarray):
+                mat = np.ascontiguousarray(value, dtype=np.float32)
+                gl.glUniformMatrix3fv(location, 1, gl.GL_TRUE, mat)
+            else:
+                gl.glUniformMatrix3fv(location, 1, gl.GL_FALSE, value)
         elif uniform_type == gl.GL_FLOAT_MAT4:
-            #only support glm.mat4
-            matrix_data = glm.value_ptr(value) if value.__class__==glm.mat4 else value
-            gl.glUniformMatrix4fv(location, 1, gl.GL_FALSE,  matrix_data)
+            # glm.mat4 is column-major, compatible with OpenGL when transpose=GL_FALSE.
+            # Many objects in this repo store modelMat as numpy (row-major). For row-major matrices,
+            # uploading with transpose=GL_FALSE will transpose them implicitly and may push translation into W,
+            # causing severe perspective-like distortion. Upload numpy mats with transpose=GL_TRUE.
+            if value.__class__ == glm.mat4:
+                gl.glUniformMatrix4fv(location, 1, gl.GL_FALSE, glm.value_ptr(value))
+            elif isinstance(value, np.ndarray):
+                mat = np.ascontiguousarray(value, dtype=np.float32)
+                gl.glUniformMatrix4fv(location, 1, gl.GL_TRUE, mat)
+            else:
+                gl.glUniformMatrix4fv(location, 1, gl.GL_FALSE, value)
         elif uniform_type in [gl.GL_SAMPLER_1D, gl.GL_SAMPLER_2D, gl.GL_SAMPLER_3D,
                          gl.GL_SAMPLER_1D_ARRAY, gl.GL_SAMPLER_2D_ARRAY]:
             setSuccess=self.set_sampler_uniform(location,uniform_type, name, value)

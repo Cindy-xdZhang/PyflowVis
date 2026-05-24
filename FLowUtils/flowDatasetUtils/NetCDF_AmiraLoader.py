@@ -1,10 +1,11 @@
 import numpy as np
 import netCDF4 as nc
-from .VectorField2d import UnsteadyVectorField2D, SteadyVectorField2D
-from .VectorField3d import *
-from .AnalyticalFlowCreator import *
 import os,time,logging
 import re
+from ..VectorField2d import UnsteadyVectorField2D, SteadyVectorField2D
+from ..VectorField3d import *
+from ..AnalyticalFlowCreator import *
+
 
 def measure_execution_time(func):
     def wrapper(*args, **kwargs):
@@ -386,9 +387,24 @@ class AmiraLoader:
             f.write(payload)
 
 
+def relocate_flow2d_dataset_folder(config):
+    import platform
+
+    if platform.system() == "Windows":
+        # config.dataset.dat_dir="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d"->move to config file
+        if config.dataset.dat_dir is None:
+            config.dataset.dat_dir="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d"
+        config.cache_dir="./outputs/"
+
+    elif platform.system() == "Linux":
+        if config.dataset.dat_dir is None:
+            config.dataset.dat_dir="/ibex/user/zhanx0o/FLowDataFolder/"
+        config.cache_dir="/ibex/user/zhanx0o/outputs/"
+    else:
+        raise ValueError(f"Unknown system: {platform.system()}")
 
 
-def load_UnsteadyVectorFields_netCDFOrAnalytical(flowDataFolder,vector_field_names: list[str]|str):
+def load_UnsteadyVectorFields_general(flowDataFolder,vector_field_names: list[str]|str):
     netCDF = NetCDFLoader()
     amiraLoader=AmiraLoader()
     UnsteadyVectorFields=[]
@@ -404,21 +420,21 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(flowDataFolder,vector_field_nam
             #laod amira fiels from the folder GerrisFlowSolverData
             amira_folder=os.path.join(flowDataFolder, name)
             if os.path.isdir(amira_folder):
-                logging.info(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load amira files from {amira_folder}")
+                logging.info(f"[load_UnsteadyVectorFields_general] load amira files from {amira_folder}")
                 am_files_list=[]
                 for file in os.listdir(amira_folder):
                     if file.endswith(".am"):
                         am_file_path=os.path.join(amira_folder, file)
                         load_vector_field2d=amiraLoader.load_vector_field2d(am_file_path)
                         if load_vector_field2d is None:
-                            print(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {file} failed. Skip this field.")
+                            print(f"[load_UnsteadyVectorFields_general] load {file} failed. Skip this field.")
                             continue
                         UnsteadyVectorFields.append(load_vector_field2d)
                         am_files_list.append(file)
                 if len(am_files_list)==0:
-                    logging.warning(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] no .am files found in {amira_folder}. Skip this field.")
+                    logging.warning(f"[load_UnsteadyVectorFields_general] no .am files found in {amira_folder}. Skip this field.")
                 else:
-                    logging.info(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {len(am_files_list)} .am files from {amira_folder}: {am_files_list}")
+                    logging.info(f"[load_UnsteadyVectorFields_general] load {len(am_files_list)} .am files from {amira_folder}: {am_files_list}")
         else:
             try:
                 vectorfield_datapath=os.path.join(flowDataFolder, f"{name}.nc")
@@ -426,5 +442,5 @@ def load_UnsteadyVectorFields_netCDFOrAnalytical(flowDataFolder,vector_field_nam
                 if load_vector_field2d is not None:
                     UnsteadyVectorFields.append(load_vector_field2d)
             except Exception as e:
-                print(f"[load_UnsteadyVectorFields_netCDFOrAnalytical] load {name} failed: {e}. Skip this field.")
+                print(f"[load_UnsteadyVectorFields_general] load {name} failed: {e}. Skip this field.")
     return UnsteadyVectorFields

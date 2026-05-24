@@ -1,6 +1,6 @@
 from GuiObjcts.VertexArrayObject import *
 from .VisualizationEngine import getEngine
-from FLowUtils.netCDFLoader import *
+from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import NetCDFLoader
 
 def path2name(path):
     name = path.split('/')[-1].split('\\')[-1]  # Handle both forward and back slashes

@@ -47,6 +47,7 @@ class Camera(Object):
         self.height = height
         self.aspect_ratio = width / height
         self.last_mouse_pos = None
+        self._last_arcball_vec = None
         self.mouse_down = False
 
         self.addAction("z positive", lambda object: object.look_at_z_positive())
@@ -76,15 +77,28 @@ class Camera(Object):
 
     def get_view_matrix(self):
         """Get the view matrix."""
-        pos = self.getValue("position")
-        targetDirection = self.getValue("targetDirection")
-        targetDirection = np.append(targetDirection, 1)
-        rotation_matrix = self.getValue("rotation_matrix")
-        targetDirectionNew = np.dot(rotation_matrix.transpose(), np.array(targetDirection))[:3]
-        targetNew = pos + targetDirectionNew
-        targetNew = np.array(targetNew, dtype=np.float32)
-        up = self.getValue("up")
-        return glm.lookAt(pos, targetNew, up)
+        pos = np.array(self.getValue("position"), dtype=np.float32)
+
+        # Apply camera rotation (column-vector convention): v' = R @ v
+        rotation_matrix = np.array(self.getValue("rotation_matrix"), dtype=np.float32)
+        target_dir = np.array(self.getValue("targetDirection"), dtype=np.float32)
+        up_dir = np.array(self.getValue("up"), dtype=np.float32)
+
+        target4 = np.array([target_dir[0], target_dir[1], target_dir[2], 0.0], dtype=np.float32)
+        up4 = np.array([up_dir[0], up_dir[1], up_dir[2], 0.0], dtype=np.float32)
+        target_dir_new = (rotation_matrix @ target4)[:3]
+        up_dir_new = (rotation_matrix @ up4)[:3]
+
+        # Robust normalize (avoid NaNs)
+        td_norm = np.linalg.norm(target_dir_new)
+        if td_norm > 1e-8:
+            target_dir_new = target_dir_new / td_norm
+        up_norm = np.linalg.norm(up_dir_new)
+        if up_norm > 1e-8:
+            up_dir_new = up_dir_new / up_norm
+
+        target_new = pos + target_dir_new
+        return glm.lookAt(glm.vec3(*pos), glm.vec3(*target_new), glm.vec3(*up_dir_new))
     
     def get_projection_matrix(self):
         fov = self.getValue("fov")
@@ -120,36 +134,43 @@ class Camera(Object):
         """Handle the mouse movement to rotate the camera around the target."""
         if up is True:
             self.last_mouse_pos = None
+            self._last_arcball_vec = None
             return
         if self.last_mouse_pos is None:
             self.last_mouse_pos = (x, y)
+            self._last_arcball_vec = screen_to_arcball(x, y, self.width, self.height)
             return
 
-        dx, dy = x - self.last_mouse_pos[0], y - self.last_mouse_pos[1]
         self.last_mouse_pos = (x, y)
+        v0 = self._last_arcball_vec
+        v1 = screen_to_arcball(x, y, self.width, self.height)
+        self._last_arcball_vec = v1
 
-        # Convert mouse movement to rotation angle
-        sensitivity = 0.00025  # Adjust this value based on your preference
-        angle_x = dy * sensitivity
-        angle_y = dx * sensitivity
+        # Arcball: rotate from v0 to v1 around axis = v0 x v1
+        axis = glm.cross(v0, v1)
+        axis_len = glm.length(axis)
+        if axis_len < 1e-7:
+            return
+        dot01 = float(glm.dot(v0, v1))
+        dot01 = max(-1.0, min(1.0, dot01))
+        angle = float(np.arccos(dot01))
 
-        # Update rotation_matrix based on mouse movement
-        rotation_x = np.array([
-            [1, 0, 0, 0],
-            [0, np.cos(angle_x), -np.sin(angle_x), 0],
-            [0, np.sin(angle_x), np.cos(angle_x), 0],
-            [0, 0, 0, 1]
-        ])
+        ax = np.array([axis.x, axis.y, axis.z], dtype=np.float32) / float(axis_len)
+        c = float(np.cos(angle))
+        s = float(np.sin(angle))
+        C = 1.0 - c
+        x0, y0, z0 = float(ax[0]), float(ax[1]), float(ax[2])
+        r3 = np.array([
+            [c + x0*x0*C,     x0*y0*C - z0*s, x0*z0*C + y0*s],
+            [y0*x0*C + z0*s,  c + y0*y0*C,    y0*z0*C - x0*s],
+            [z0*x0*C - y0*s,  z0*y0*C + x0*s, c + z0*z0*C   ],
+        ], dtype=np.float32)
+        r4 = np.eye(4, dtype=np.float32)
+        r4[:3, :3] = r3
 
-        rotation_y = np.array([
-            [np.cos(angle_y), 0, np.sin(angle_y), 0],
-            [0, 1, 0, 0],
-            [-np.sin(angle_y), 0, np.cos(angle_y), 0],
-            [0, 0, 0, 1]
-        ])
-
-        # Apply the rotations
-        rotation_matrix = np.dot(rotation_y, np.dot(rotation_x, self.getValue("rotation_matrix")))
+        # Compose rotation in camera local space: R_new = R_current @ R_inc
+        rotation_matrix = np.array(self.getValue("rotation_matrix"), dtype=np.float32)
+        rotation_matrix = rotation_matrix @ r4
         self.updateValue("rotation_matrix", rotation_matrix)
 
         self.updateMVPVariables()
@@ -158,27 +179,25 @@ class Camera(Object):
         """
         Pans the camera based on horizontal (dx) and vertical (dy) input values.
         """
-        def normalize_vector(v):
-            norm = np.linalg.norm(v)
-            if norm == 0:
-                return v
-            return v / norm
-        # Calculate the right vector as the cross product of the target direction and the up vector
-        up_vec = self.getValue("up")
-        targetDirection = self.getValue("targetDirection")
-        right = np.cross(targetDirection, up_vec)
-        right = normalize_vector(right)
+        def _norm(v: np.ndarray) -> np.ndarray:
+            n = np.linalg.norm(v)
+            return v if n < 1e-8 else (v / n)
 
-        # Calculate the actual movement vectors
+        rotation_matrix = np.array(self.getValue("rotation_matrix"), dtype=np.float32)
+        forward0 = np.array(self.getValue("targetDirection"), dtype=np.float32)
+        up0 = np.array(self.getValue("up"), dtype=np.float32)
+
+        f4 = np.array([forward0[0], forward0[1], forward0[2], 0.0], dtype=np.float32)
+        u4 = np.array([up0[0], up0[1], up0[2], 0.0], dtype=np.float32)
+        forward = _norm((rotation_matrix @ f4)[:3])
+        up_vec = _norm((rotation_matrix @ u4)[:3])
+        right = _norm(np.cross(forward, up_vec))
+
         right_movement = right * dx
-        up_movement = glm.normalize(glm.vec3(*up_vec)) * dy
-        z_movement = normalize_vector(targetDirection) * dz
+        up_movement = up_vec * dy
+        z_movement = forward * dz
 
-        # Convert movement vectors from glm to numpy for calculations
-        up_movement_np = np.array([up_movement.x, up_movement.y, up_movement.z], dtype=np.float32)
-
-        # Update the position based on the movements
-        new_position = np.array(self.getValue("position")+ right_movement + up_movement_np + z_movement, dtype=np.float32) 
+        new_position = np.array(self.getValue("position") + right_movement + up_movement + z_movement, dtype=np.float32)
         self.updateValue("position", new_position )
         self.updateMVPVariables()
 

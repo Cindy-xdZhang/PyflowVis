@@ -16,7 +16,7 @@ dataset:
   grid_sampling: 0.25 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d  GerrisFlowSolverData/*.am
-  names: [cylinder2d]
+  names: [cylinder2d,doublegyre2d,beads2d,pipedcylinder2d]
   extension: nc
   t_start: 0.6 #% for the whole time
   t_target: 0.8
@@ -28,7 +28,7 @@ dataset:
 
 encoder:
   receptive_fields: [1]
-  base_num_stages: 1
+  base_num_stages: 2
   embed_dim: 24
   alpha: 1000
   beta: 19

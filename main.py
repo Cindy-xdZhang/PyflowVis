@@ -13,7 +13,10 @@ from GuiObjcts.FlowLineRenderObject import *
 from GuiObjcts.Indicator import *
 from GuiObjcts.geometryRender import *
 from GuiObjcts.ActiveFieldObject import *
-from FLowUtils.JHTDB_Lodader import JHTDB_Lodader
+from FLowUtils.flowDatasetUtils.JHTDB_Lodader import JHTDB_Lodader
+from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import NetCDFLoader
+
+
 from typing import Tuple
 def test_opengl_state():
     program = gl.glGetIntegerv(gl.GL_CURRENT_PROGRAM)
@@ -142,17 +145,7 @@ def init_render(cfg="config/renderingConfig.yaml"):
 def main():
 
     engine,camera,ObjectNameDict=init_render()
-
     actFieldWidget=ObjectNameDict["ActiveField"]
-    # eventRegister.register(lambda event: renderable_object.eventCallBacks(event))
-
-    #exmaple loading amria file
-    # vectorField2d=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData\\0190.am")
-    # actFieldWidget.insertField("resampled",vectorField2d)
-
-    # vectorField2d2=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverDataTemp\\0071.am")
-    # actFieldWidget.insertField("original",vectorField2d2)
-
 
     #####################################################################################
     #########################reference frame transformation test#########################
@@ -161,22 +154,32 @@ def main():
     actFieldWidget.insertField("rfc",vectorField2d)
     vectorField2d2= constant_rotation((64,64),64)
     actFieldWidget.insertField("constant_rotation",vectorField2d2)
+
+
     #####################################################################################
-    #########################reference frame transformation test#########################
+    #########################3d flow vis test#########################
     #####################################################################################
-
-
-
-
-
     # flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
     # cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
     # vectorField3d= NetCDFLoader.load_vector_field3d(cylider_netCDF,64);
     # actFieldWidget.insertField("tornado3d",vectorField3d)
 
+    
+    #exmaple loading amria file
+    # vectorField2d=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData\\0190.am")
+    # actFieldWidget.insertField("resampled",vectorField2d)
+    # vectorField2d2=AmiraLoader.load_vector_field2d("C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverDataTemp\\0071.am")
+    # actFieldWidget.insertField("original",vectorField2d2)
+
+
+    #jhtdb turlulent 2d flow vis load example test
     # jhtdb_loader=JHTDB_Lodader()
     # vf2d=jhtdb_loader.load_2d_unsteadyFlow("channel5200","xz",64,64, 0.000997615051193464,(0, 0.4*np.pi),(0, 0.15*np.pi),1,11,11,integerTime=True)
     # actFieldWidget.insertField("channel",vf2d)
+
+
+
+
 
     # args=config['training']
     # # device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")

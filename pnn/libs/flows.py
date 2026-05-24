@@ -1,11 +1,10 @@
 from FLowUtils.VectorField2d import *
-from FLowUtils.netCDFLoader import *
+from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import *
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib import colors, cm
-import torch
+import numpy as np
 from tqdm import trange, tqdm
-
 import torch
 import torch.nn.functional as F
 

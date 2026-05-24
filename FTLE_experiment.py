@@ -1,9 +1,11 @@
 #step 1: load FTLE dataset
 from calendar import c
-import os,random
+import os
 import logging
 import copy
 import numpy as np
+import pickle
+import wandb
 
 import torch
 import torch.nn as nn
@@ -17,12 +19,10 @@ from DeepUtils.utils.stable_hash import stable_hash
 from FMT_Utils.FTLE_fitting_utils import *
 from DeepUtils.MiscFunctions import *
 from FMT_Utils.model_zoo import *
-import pickle
-import wandb
+from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import relocate_flow2d_dataset_folder
+
 GLOBAL_WANDB_PROJECT_NAME="FlowMapTokenizer"
-
 torch.backends.cuda.matmul.allow_tf32 = False  
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
@@ -564,16 +564,6 @@ def runNameTagGenerator_fmt(config,mode)->Tuple[str, List[str]]:
     runTags= [tagGen0,tagGen1]
     return runName,runTags
 
-def relocate_flow2d_dataset_folder(config):
-    import platform
-    if platform.system() == "Windows":
-        config.dataset.dat_dir="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d"
-        config.cache_dir="./outputs/"
-    elif platform.system() == "Linux":
-        config.dataset.dat_dir="/ibex/user/zhanx0o/FLowDataFolder/"
-        config.cache_dir="/ibex/user/zhanx0o/outputs/"
-    else:
-        raise ValueError(f"Unknown system: {platform.system()}")
 
 
     

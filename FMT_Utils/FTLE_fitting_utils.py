@@ -1,18 +1,16 @@
+import torch
 from torch.nn.functional import upsample
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
-import torch,os
+import os,logging,hashlib
 import numpy as np
-import hashlib
 from DeepUtils.utils.stable_hash import stable_hash
 from FLowUtils.ScalarField2d import ScalarField2D,ScalarFieldManager
-import matplotlib.pyplot as plt
 from FMT_Utils.FlowlinePostProcessing import AngleAwareSampling, LocLines, temporal_downsamplePathlineCrossPrimitiveRegular
 from FLowUtils.flowlineIntegral import batch_pathlineCross_integration_2D_auto
-from FLowUtils.netCDFLoader import *
-from FLowUtils.AnalyticalFlowCreator import *
-from FLowUtils.ScalarField2d import compute_ivd_2D
+from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import load_UnsteadyVectorFields_general
 
 global_UniformValueSpatical=8.0
 global_UniformValueTemporal=12.5663704#4 pi
@@ -932,7 +930,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
             except Exception as e:
                 print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
                          
-        UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,config.dataset.names)
+        UnsteadyVectorFields=  load_UnsteadyVectorFields_general(config.dataset.dat_dir,config.dataset.names)
         FTLE_fieldsLowRes=[]      # list[Tensor patch_yx]
         FTLE_fieldsHighRes=[]     # list[Tensor patch_yx (hi)]
         lowResPathlinesData=[]    # list[Tensor (patch_hw groups, nerbors, L, 3)]

@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from FLowUtils.VectorField2d import *
-from FLowUtils.netCDFLoader import *
+from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import NetCDFLoader
 
 
 
