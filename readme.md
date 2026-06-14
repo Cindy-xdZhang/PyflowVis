@@ -183,6 +183,20 @@ Our code relies on  <font color=#0CBCED>VTK-9.4.1</font>.
 
 ***Note*** : We will gradually migrate these C++ code from our closed source engine to PyFlowVis. Once done, you will see specification and links to python files.
 
+### Data
+
+Large flow datasets are not included in this repository. The LBM-based unsteady flow datasets used in the paper are available from Zenodo:
+
+- **X_FLUIDX3D LBM-based unsteady flow dataset, volume 1:** https://zenodo.org/records/19419413
+- **X_FLUIDX3D LBM-based unsteady flow dataset, volume 2:** https://zenodo.org/records/19427191
+
+Additional datasets used in the paper but not included here:
+
+- **3D Unsteady Half Cylinder Ensemble, and smokeBuoyancy**, generated with the Gerris solver and provided by the Visual Computing group at FAU:
+
+  https://vc.tf.fau.de/publications/datasets/
+
+Please follow the licenses, citation requirements, and terms of use specified by each dataset provider.
 
 ---
 
@@ -192,28 +206,35 @@ This project is licensed under the Apache License, Version 2.0. See the
 [NOTICE](./NOTICE).
 
 ## Citation
-If you use PyFlowVis, or its components in your research, please cite one of the following :
+If you use PyFlowVis, or its components in your research, please cite  the following  Paper (VortexTransformer):
 
-- Software:  
-  Zhang, Xingdi. PyFlowVis (2025).  [DOI 10.5281/zenodo.17045686](https://zenodo.org/records/17045687)
-
-- Paper (VortexTransformer):
 ```bibtexW
-@inproceedings{zhang2025vortextransformer,
-  title={VortexTransformer: End-to-End Objective Vortex Detection in 2D Unsteady Flow Using Transformers},
-  author={Zhang, Xingdi and Rautek, Peter and Hadwiger, Markus},
-  booktitle={Computer Graphics Forum},
-  pages={e70042},
-  year={2025},
-  organization={Wiley Online Library}
+@article{https://doi.org/10.1111/cgf.70042,
+author = {Zhang, X. and Rautek, P. and Hadwiger, M.},
+title = {VortexTransformer: End-to-End Objective Vortex Detection in 2D Unsteady Flow Using Transformers},
+journal = {Computer Graphics Forum},
+volume = {44},
+number = {2},
+pages = {e70042},
+doi = {https://doi.org/10.1111/cgf.70042},
+url = {https://onlinelibrary.wiley.com/doi/abs/10.1111/cgf.70042},
+eprint = {https://onlinelibrary.wiley.com/doi/pdf/10.1111/cgf.70042},
+year = {2025}
 }
 ```
 
-- Paper (Exploring 3D Unsteady Flow using 6D Observer Space Interactions):
+
+If you use the LBM simulated 3D FLow Data, please cite the following Paper (Exploring 3D Unsteady Flow using 6D Observer Space Interactions):
 ```bibtex
-@inproceedings{zhang2025Explore3DUnsteadyFlow,
-  title={Exploring 3D Unsteady Flow using 6D Observer Space Interactions},
-  author={Zhang, Xingdi and  Ageeli,Amani and  Theu{\ss}l,Thomas and  Hadwiger, Markus and  Rautek, Peter},
-  year={2025},
-}
+@ARTICLE{11295972,
+  author={Zhang, Xingdi and Ageeli, Amani and Theußl, Thomas and Hadwiger, Markus and Rautek, Peter},
+  journal={IEEE Transactions on Visualization and Computer Graphics}, 
+  title={Exploring 3D Unsteady Flow using 6D Observer Space Interactions}, 
+  year={2026},
+  volume={32},
+  number={1},
+  pages={517-526},
+  doi={10.1109/TVCG.2025.3642506}
+  }
+
 ```
