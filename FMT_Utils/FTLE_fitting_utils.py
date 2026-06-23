@@ -6,11 +6,13 @@ from torch.utils.data import Dataset
 from FLowUtils.VectorField2d import UnsteadyVectorField2D
 import os,logging,hashlib
 import numpy as np
+import matplotlib.pyplot as plt  # used by the visualize_* helpers below
 from DeepUtils.utils.stable_hash import stable_hash
 from FLowUtils.ScalarField2d import ScalarField2D,ScalarFieldManager
 from FMT_Utils.FlowlinePostProcessing import AngleAwareSampling, LocLines, temporal_downsamplePathlineCrossPrimitiveRegular
 from FLowUtils.flowlineIntegral import batch_pathlineCross_integration_2D_auto
 from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import load_UnsteadyVectorFields_general
+from FMT_Utils import debug_checks as dbg
 
 global_UniformValueSpatical=8.0
 global_UniformValueTemporal=12.5663704#4 pi
@@ -299,6 +301,10 @@ def generate_FTLE_SLICE(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:flo
     rows=valid_index//nx
     cols=valid_index%nx
     true_grid[rows, cols] = y_all[valid_index].detach().cpu().numpy()
+    # Stage-1 debug: verify the FTLE field is finite, non-degenerate, and that a
+    # reasonable fraction of pathlines stayed valid (catches integration overshoot).
+    dbg.check_ftle_field(f"FTLE_slice(res~{resolutionUPsampling},t={physcial_time:.3f})",
+                         true_grid, expected_shape=(ny, nx))
     return true_grid,Pathline_g,nx,ny
 
 
@@ -884,7 +890,10 @@ class FTLEUpsamplingTrainDataset(Dataset):
         ftle_resolutionUPsampling=float(config.dataset.UPsampling)
         all_vectorfieldsname=[name for name in config.dataset.names]
         all_vectorfieldsname_str=",".join(all_vectorfieldsname)
-        timesliceCount=config.dataset.timesliceCount
+        # Train slice count is decoupled from the test set: prefer `trainTimesliceCount`
+        # so the train set can grow while build_test_dataset (which uses `timesliceCount`)
+        # keeps producing the exact same test slices.
+        timesliceCount=int(getattr(config.dataset, 'trainTimesliceCount', config.dataset.timesliceCount))
         UPsampling=int(config.dataset.UPsampling)
         low_res_grid_sampling=float(config.dataset.low_res_grid_sampling)
         max_steps: int=config.pcds.max_iterations
@@ -953,6 +962,16 @@ class FTLEUpsamplingTrainDataset(Dataset):
                 logging.info(f"[FTLEUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
                 time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 time_window_target = float(time_window_target_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+                # Forward FTLE integration needs seed_time + dt*max_steps <= tmax, otherwise every
+                # pathline runs out of time and the FTLE field collapses to all-zeros (constant).
+                # Cap the latest seed time so the integration horizon always fits the time domain.
+                integ_horizon = float(flowline_dt) * int(max_steps)
+                safe_target = float(vectorfield.tmax) - integ_horizon
+                if time_window_target > safe_target:
+                    logging.warning(f"[UpsamplingTrainDataset] t_target={time_window_target:.3f} + integ horizon "
+                                    f"{integ_horizon:.3f} exceeds tmax={float(vectorfield.tmax):.3f}; "
+                                    f"clamping slice end to {max(time_window_start, safe_target):.3f}")
+                    time_window_target = max(time_window_start, safe_target)
                 timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
                 for time_slice in timeslice:
                     # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
@@ -960,6 +979,8 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,high_res_sampling)
                     # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
                     # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
+                    # Stage-2 debug: low/high-res FTLE slice consistency (shape ratio sanity).
+                    dbg.check_ftle_lowhigh(low_resFTLE_field, high_resFTLE_field, UPsampling)
 
                     lowResPathlinesPreprocessed=AngleAwareSampling(lowResPathlines, LstepsPerline)
                     # lowResPathlinesPreprocessed=preprocess_localization_normalization(temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False ).cpu().float()
@@ -1044,6 +1065,12 @@ class FTLEUpsamplingTrainDataset(Dataset):
         normalized_y=normalized_y.clamp(0,1)
         self.labels = normalized_y       # [N]
 
+        # Stage-2 debug: validate the assembled dataset (shapes, finiteness, sample-count
+        # consistency, pathline structure, normalized label range, patch UP relation).
+        _nerb = int(getattr(config.pcds, 'num_cross_points_per_seeding', 5))
+        _L = int(getattr(config.pcds, 'sampled_points_per_line', 4))
+        dbg.check_dataset("FTLE_train", self.lowResFTLE, self.labels, self.lowResPathlines,
+                          nerbors=_nerb, L=_L, upsampling=int(UPsampling))
 
 
     def __len__(self):
@@ -1060,7 +1087,10 @@ class FLowMapUpsamplingTrainDataset(Dataset):
         ftle_resolutionUPsampling=float(config.dataset.UPsampling)
         all_vectorfieldsname=[name for name in config.dataset.names]
         all_vectorfieldsname_str=",".join(all_vectorfieldsname)
-        timesliceCount=config.dataset.timesliceCount
+        # Train slice count is decoupled from the test set: prefer `trainTimesliceCount`
+        # so the train set can grow while build_test_dataset (which uses `timesliceCount`)
+        # keeps producing the exact same test slices.
+        timesliceCount=int(getattr(config.dataset, 'trainTimesliceCount', config.dataset.timesliceCount))
         UPsampling=int(config.dataset.UPsampling)
         low_res_grid_sampling=float(config.dataset.low_res_grid_sampling)
         max_steps: int=config.pcds.max_iterations
@@ -1125,6 +1155,16 @@ class FLowMapUpsamplingTrainDataset(Dataset):
                 logging.info(f"[FLowMapUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
                 time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 time_window_target = float(time_window_target_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
+                # Forward FTLE integration needs seed_time + dt*max_steps <= tmax, otherwise every
+                # pathline runs out of time and the FTLE field collapses to all-zeros (constant).
+                # Cap the latest seed time so the integration horizon always fits the time domain.
+                integ_horizon = float(flowline_dt) * int(max_steps)
+                safe_target = float(vectorfield.tmax) - integ_horizon
+                if time_window_target > safe_target:
+                    logging.warning(f"[UpsamplingTrainDataset] t_target={time_window_target:.3f} + integ horizon "
+                                    f"{integ_horizon:.3f} exceeds tmax={float(vectorfield.tmax):.3f}; "
+                                    f"clamping slice end to {max(time_window_start, safe_target):.3f}")
+                    time_window_target = max(time_window_start, safe_target)
                 timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
                 for time_slice in timeslice:
                     # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)

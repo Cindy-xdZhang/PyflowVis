@@ -19,6 +19,7 @@ model:
   # NAME: FTLEUpsamplingFMT_UnetV3
   # NAME: FTLEUpsamplingFMT_Vit
   NAME: FTLEUpsamplingFMT_UnetV2
+  # NAME: FTLEUpsamplingDCT_FMT_UnetV2  # Fourier/DCT tokenizer twin of FMT_UnetV2 (training-free encoder)
   # NAME: ConditionalFMTNetV3
   # NAME: FTLEUpsamplingViTBaseline
   # NAME: ConditionalFMTNet
@@ -28,22 +29,29 @@ model:
 # mode = 'point_FTLE_regression'
 mode : upsamplingFTLE
 
-wandb: False 
+wandb: False
+
+# Pipeline validation/debug checks (FTLE computation, dataset, training, testing).
+# 0=off (default, ~zero cost), 1=warn+log one-line summaries, 2=strict (raise on failure).
+# Can also be enabled via env FMT_DEBUG=1 or `--debug 1` on the compare harness.
+debug: 0
 
 dataset:
-  timesliceCount: 5 # total data set is    NumberOfVectorFields*timesliceCount* (VectorFieldGridRes//PatchSize)   
+  timesliceCount: 5 # TEST slice count (build_test_dataset uses timesliceCount//2). Kept at 5 so the test set is unchanged.
+  trainTimesliceCount: 20 # TRAIN slice count (FTLEUpsamplingTrainDataset).
 
-  low_res_grid_sampling: 0.25 #low resolution ftle's grid =vectorfield.grid*low_res_grid_sampling 
+  low_res_grid_sampling: 0.25 #low resolution ftle's grid =vectorfield.grid*low_res_grid_sampling
   UPsampling: 2 # must be integer
 
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d  GerrisFlowSolverData/*.am
-  names: [GerrisFlowSolverDatadebug,cylinder2d]
+  # GerrisFlowSolverDatadebug removed (folder absent -> "url wrong"). Enlarged train set with more fields.
+  names: [cylinder2d, boussinesq, doublegyre2d, rfc2d, beads2d, pipedcylinder2d]
   extension: nc
-  t_start: 0.2 #% for the whole time
-  t_target: 0.8
+  t_start: 0.1 # skip the first 10% of the time window when sampling slices
+  t_target: 0.9 # skip the last 10% of the time window when sampling slices
   patchSize: 32 #modify this according to low_res_grid_sampling, since low_res_grid_sampling will influence how large the low res ftle grid , it could happen that low res ftle grid is smaller than patchSize
-  patchStride: 10 # when do fast testing or generate traing dataset, real patchStride is patchStride*4(for faster testing and training), only finaly visualize, use patchStride
+  patchStride: 4 # when do fast testing or generate traing dataset, real patchStride is patchStride*4(for faster testing and training), only finaly visualize, use patchStride
   
 test_tasks: test_UpsamplingModel
 test_vectorfield: [doublegyre2d,cylinder2d]
@@ -61,6 +69,15 @@ pnn:
   beta: 100
 
 
+# DCT_FMT (Fourier tokenizer) hyper-parameters. Only used by FTLEUpsamplingDCT_FMT_UnetV2.
+# k is auto-clamped to (sampled_points_per_line - 1); with sampled_points_per_line=4 the
+# usable DFT length is 3, so effective k <= 3.
+dct:
+  k: 6              # number of low-frequency |FFT| magnitudes kept per channel
+  weight: 0.5       # scale on the neighbor block when concatenating
+  neighbor_diff_scale: 100.0  # amplify the (neighbor-center) relative-velocity signal before DFT
+
+
 
 # set the params to generate the point clouds
 pcds:
@@ -69,7 +86,7 @@ pcds:
   line_method: RK4 # RK4 Euler
   dt: 0.01 # flowline integration dt 
 
-  max_iterations: 200 # time step
+  max_iterations: 300 # FTLE integration window = dt*max_iterations (=3.0). Expanded 1.5x from 200 for sharper FTLE ridges.
   sampled_points_per_line: 4 # samples one the line
   offset_dist: 0.01 # scale of grid interval
   num_cross_points_per_seeding: 5 

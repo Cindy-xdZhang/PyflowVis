@@ -200,10 +200,6 @@ Please follow the licenses, citation requirements, and terms of use specified by
 
 ---
 
-## License
-This project is licensed under the Apache License, Version 2.0. See the
-[LICENSE](./LICENSE) file for details. Attribution notices are provided in
-[NOTICE](./NOTICE).
 
 ## Citation
 If you use PyFlowVis, or its components in your research, please cite  the following  Paper (VortexTransformer):
@@ -238,3 +234,7 @@ If you use the LBM simulated 3D FLow Data, please cite the following Paper (Expl
   }
 
 ```
+
+## License
+This project is licensed under the Apache License, Version 2.0. See the
+[LICENSE](./LICENSE) file for details. Attribution notices are provided in [NOTICE](./NOTICE).

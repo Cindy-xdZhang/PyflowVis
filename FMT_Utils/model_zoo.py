@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from pnn.models.point_nn import EncNPNew
+from FMT_Utils.DCT_FMT_encoder import DCT_FMT
 
 
 def calculate_model_parm_size(model: nn.Module):
@@ -451,6 +452,65 @@ class UpsamplingUnetModel(nn.Module):
         return pred
 
 
+class UpsamplingUnetModelV2(nn.Module):
+    """
+    Super-resolution-oriented UNet variant of UpsamplingUnetModel:
+      - higher channel width (base_ch=64 vs 24)
+      - ONE FEWER downsampling stage (a single 2x down instead of two)
+
+    Rationale: pixel super-resolution needs high-frequency detail, which a deep
+    encoder-decoder discards when it downsamples 32->16->8. Keeping a shallower
+    (32->16) bottleneck with more channels preserves that detail. Tests whether a
+    properly-sized UNet can beat the flat ESPCN CNN on this task.
+
+    Inputs:  lowResFTLE [B, X, Y]   (pathlines ignored)
+    Output:  pred       [B, X*UP, Y*UP]
+    """
+    def __init__(self, cfg, lowResX: int, lowResY: int, upscale: float, base_ch: int = 64):
+        super().__init__()
+        self.upscale = int(upscale)
+        self.inc = DoubleConv(1, base_ch)
+        self.down1 = Down(base_ch, base_ch * 2)        # single downsample: X -> X/2
+        self.up1 = Up(base_ch * 2, base_ch)            # single upsample back to X
+        self.out_low = nn.Conv2d(base_ch, base_ch, kernel_size=1)
+
+        n_up = max(0, int(round(math.log2(max(1, self.upscale)))))
+        self.up_blocks = nn.ModuleList()
+        in_ch = base_ch
+        for i in range(n_up):
+            out_ch = base_ch if i < n_up - 1 else base_ch // 2
+            self.up_blocks.append(
+                nn.Sequential(
+                    nn.ConvTranspose2d(in_ch, out_ch, kernel_size=2, stride=2),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1, bias=False),
+                    nn.BatchNorm2d(out_ch),
+                    nn.ReLU(inplace=True),
+                )
+            )
+            in_ch = out_ch
+        self.out_high = nn.Conv2d(in_ch, 1, kernel_size=1)
+
+    def forward(self, lowResFTLE: torch.Tensor, lowResPathlines: torch.Tensor | None = None) -> torch.Tensor:
+        B, X, Y = lowResFTLE.shape
+        x = lowResFTLE.unsqueeze(1).contiguous()  # [B,1,X,Y]
+
+        x1 = self.inc(x)
+        x2 = self.down1(x1)
+        x = self.up1(x2, x1)   # [B, base_ch, X, Y]
+        x = self.out_low(x)
+
+        for blk in self.up_blocks:
+            x = blk(x)
+        pred = self.out_high(x).squeeze(1)  # [B, X*UP, Y*UP]
+
+        target_h = int(X * max(1, self.upscale))
+        target_w = int(Y * max(1, self.upscale))
+        if pred.shape[-2] != target_h or pred.shape[-1] != target_w:
+            pred = F.interpolate(pred.unsqueeze(1), size=(target_h, target_w), mode='bilinear', align_corners=False).squeeze(1)
+        return pred
+
+
 class AttentionFusion(nn.Module):
     """
     融合来自 pathline 的特征图 F ∈ [B, D, X, Y] 与低分辨率 FTLE 的单通道映射 L ∈ [B, 1, X, Y]。
@@ -773,6 +833,138 @@ class FTLEupsamplingFMT_UnetV2(nn.Module):
         x_in = torch.cat([ftle_in, feat_map], dim=1)  # [B, D+1, X, Y]
 
         # UNet encode-decode + upsampling head
+        x1 = self.inc(x_in)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x = self.up1(x3, x2)
+        x = self.up2(x, x1)
+        x = self.out_low(x)
+        for blk in self.up_blocks:
+            x = blk(x)
+        pred = self.out_high(x).squeeze(1)  # [B, X*UP, Y*UP]
+
+        # Size alignment
+        target_h = int(X * max(1, self.upscale))
+        target_w = int(Y * max(1, self.upscale))
+        if pred.shape[-2] != target_h or pred.shape[-1] != target_w:
+            pred = F.interpolate(pred.unsqueeze(1), size=(target_h, target_w), mode='bilinear', align_corners=False).squeeze(1)
+        return pred
+
+
+class FTLEupsamplingDCT_FMT_UnetV2(nn.Module):
+    """
+    Twin of :class:`FTLEupsamplingFMT_UnetV2`, with the FMT point-cloud encoder
+    (EncNPNew: KNN + PosE + pooling) replaced by the training-free, Fourier-based
+    :class:`~FMT_Utils.DCT_FMT_encoder.DCT_FMT` tokenizer.
+
+    Everything else is identical to V2 so the two models form a fair A/B test of
+    the *tokenizer* only (same sliding-window mechanism, same UNet backend, same
+    upsampling head):
+      1) sliding window (k = self.FMT_focus_area, stride = k) over the low-res grid
+      2) DCT_FMT encodes each window's *structured* pathlines -> token [B, D]
+         (note: pathlines are kept as [B, M, K, L, 3]; NOT flattened to a cloud)
+      3) coarse feature map [B, D, Hc, Wc] -> bilinear upsample to [B, D, X, Y]
+      4) concat with the 1-channel low-res FTLE -> UNet -> transposed-conv upsample
+
+    Inputs:
+      lowResFTLE:      [B, X, Y]
+      lowResPathlines: [B, X*Y, nerbors, L, 3]
+    Output:
+      pred:            [B, X*UP, Y*UP]
+    """
+    def __init__(self, cfg, lowResX: int, lowResY: int, upscale: float, base_ch: int = 32):
+        super().__init__()
+        self.lowResX = int(lowResX)
+        self.lowResY = int(lowResY)
+        self.upscale = int(upscale)
+
+        # Sliding-window size (same default/intent as V2).
+        self.FMT_focus_area = int(getattr(cfg, 'FMT_focus_area', 8))
+        nerbors = int(getattr(cfg.pcds, 'num_cross_points_per_seeding', 5)) if hasattr(cfg, 'pcds') else 5
+        LstepsPerline = int(getattr(cfg.pcds, 'sampled_points_per_line', 4)) if hasattr(cfg, 'pcds') else 4
+        self.cross_neighborsize = nerbors
+
+        # DCT_FMT hyper-parameters (optional `dct:` config block; sensible defaults otherwise).
+        dct_cfg = getattr(cfg, 'dct', None)
+        dct_k = int(getattr(dct_cfg, 'k', 6)) if dct_cfg is not None else 6
+        dct_weight = float(getattr(dct_cfg, 'weight', 0.5)) if dct_cfg is not None else 0.5
+        neighbor_diff_scale = float(getattr(dct_cfg, 'neighbor_diff_scale', 100.0)) if dct_cfg is not None else 100.0
+
+        self.encoder = DCT_FMT(nerbors=nerbors, L=LstepsPerline, dct_k=dct_k,
+                               dct_weight=dct_weight, neighbor_diff_scale=neighbor_diff_scale)
+        self.fmt_feature_dim = self.encoder.out_dim
+
+        in_channels = self.fmt_feature_dim + 1  # D feature channels + 1 channel low-res FTLE
+        self.inc = DoubleConv(in_channels, base_ch)
+        self.down1 = Down(base_ch, base_ch * 2)
+        self.down2 = Down(base_ch * 2, base_ch * 4)
+        self.up1 = Up(base_ch * 4, base_ch * 2)
+        self.up2 = Up(base_ch * 2, base_ch)
+        self.out_low = nn.Conv2d(base_ch, base_ch, kernel_size=1)
+
+        n_up = max(0, int(round(math.log2(max(1, self.upscale)))))
+        self.up_blocks = nn.ModuleList()
+        in_ch = base_ch
+        for i in range(n_up):
+            out_ch = base_ch if i < n_up - 1 else base_ch // 2
+            self.up_blocks.append(
+                nn.Sequential(
+                    nn.ConvTranspose2d(in_ch, out_ch, kernel_size=2, stride=2),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1, bias=False),
+                    nn.BatchNorm2d(out_ch),
+                    nn.ReLU(inplace=True),
+                )
+            )
+            in_ch = out_ch
+        self.out_high = nn.Conv2d(in_ch, 1, kernel_size=1)
+
+    def _tiling_starts(self, length: int, k: int):
+        if k >= length:
+            return [0]
+        s = int(k)
+        starts = list(range(0, length - k + 1, s))
+        last = length - k
+        if starts[-1] != last:
+            starts.append(last)
+        return starts
+
+    def forward(self, lowResFTLE: torch.Tensor, lowResPathlines: torch.Tensor) -> torch.Tensor:
+        B, X, Y = lowResFTLE.shape
+        _, N, nerbors, L, Dim = lowResPathlines.shape
+        assert N == X * Y, "lowResPathlines second dim must be X*Y"
+        assert nerbors == self.cross_neighborsize, "nerbors mismatch with model setting"
+
+        # 1) Sliding-window DCT_FMT -> coarse feature map [B, D, Hc, Wc]
+        k = int(self.FMT_focus_area)
+        row_starts = self._tiling_starts(int(X), k)
+        col_starts = self._tiling_starts(int(Y), k)
+        Hc, Wc = len(row_starts), len(col_starts)
+
+        feat_coarse = lowResFTLE.new_zeros((B, self.fmt_feature_dim, Hc, Wc))
+        for ri, i0 in enumerate(row_starts):
+            i1 = min(i0 + k, int(X))
+            for ci, j0 in enumerate(col_starts):
+                j1 = min(j0 + k, int(Y))
+                idx_list = []
+                for rr in range(i0, i1):
+                    base = rr * int(Y)
+                    idx_list.extend(range(base + j0, base + j1))
+                if len(idx_list) == 0:
+                    continue
+                idx_tensor = torch.as_tensor(idx_list, dtype=torch.long, device=lowResFTLE.device)
+                # Keep structure: [B, M, nerbors, L, Dim] (do NOT flatten to a point cloud)
+                pl_win = lowResPathlines[:, idx_tensor, ...]
+                feat_win = self.encoder(pl_win)  # [B, D]
+                feat_coarse[:, :, ri, ci] = feat_win
+
+        # 2) Bilinear upsample the coarse feature map to [X, Y]
+        feat_map = F.interpolate(feat_coarse, size=(int(X), int(Y)), mode='bilinear', align_corners=False)
+        # 3) Concatenate with low-resolution FTLE
+        ftle_in = lowResFTLE.unsqueeze(1)  # [B, 1, X, Y]
+        x_in = torch.cat([ftle_in, feat_map], dim=1)  # [B, D+1, X, Y]
+
+        # 4) UNet encode-decode + upsampling head
         x1 = self.inc(x_in)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
@@ -1502,6 +1694,11 @@ def build_model(config, device):
         lowResY = int(config.lowResY)
         model = UpsamplingUnetModel(config, lowResX, lowResY,upscale=int(config.dataset.UPsampling)).to(device)
         return model
+    elif config.model.NAME == 'UpsamplingUnetModelV2':
+        lowResX = int(config.lowResX)
+        lowResY = int(config.lowResY)
+        model = UpsamplingUnetModelV2(config, lowResX, lowResY,upscale=int(config.dataset.UPsampling)).to(device)
+        return model
     elif config.model.NAME == 'FTLEUpsamplingFMT_Unet':
         lowResX = int(config.lowResX)
         lowResY = int(config.lowResY)
@@ -1521,6 +1718,11 @@ def build_model(config, device):
         lowResX = int(config.lowResX)
         lowResY = int(config.lowResY)
         model = FTLEupsamplingFMT_UnetV2(config, lowResX, lowResY,upscale=int(config.dataset.UPsampling)).to(device)
+        return model
+    elif config.model.NAME == 'FTLEUpsamplingDCT_FMT_UnetV2' or config.model.NAME == 'DCT_FMT_UnetV2':
+        lowResX = int(config.lowResX)
+        lowResY = int(config.lowResY)
+        model = FTLEupsamplingDCT_FMT_UnetV2(config, lowResX, lowResY,upscale=int(config.dataset.UPsampling)).to(device)
         return model
     elif config.model.NAME == 'FTLEUpsamplingFMT_UnetV3' or config.model.NAME == 'FTLEUpsamplingFMT_Unet_V3':
         lowResX = int(config.lowResX)

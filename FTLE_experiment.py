@@ -20,6 +20,13 @@ from FMT_Utils.FTLE_fitting_utils import *
 from DeepUtils.MiscFunctions import *
 from FMT_Utils.model_zoo import *
 from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import relocate_flow2d_dataset_folder
+from FMT_Utils import debug_checks as dbg
+# `load_UnsteadyVectorFields_netCDFOrAnalytical` is a stale/renamed reference used below
+# (build_test_dataset cache-miss path + the visualize path); the real function is
+# `load_UnsteadyVectorFields_general`. Alias it so both call-sites resolve.
+from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import (
+    load_UnsteadyVectorFields_general as load_UnsteadyVectorFields_netCDFOrAnalytical,
+)
 
 GLOBAL_WANDB_PROJECT_NAME="FlowMapTokenizer"
 torch.backends.cuda.matmul.allow_tf32 = False  
@@ -104,6 +111,15 @@ def build_test_dataset(config):
         tmin, tmax = float(vf_obj.tmin), float(vf_obj.tmax)
         time_window_start = float(time_window_start_ratio * (tmax - tmin) + tmin)
         time_window_target = float(time_window_target_ratio * (tmax - tmin) + tmin)
+        # Forward FTLE integration needs seed_time + dt*max_steps <= tmax (else the field
+        # collapses to all-zeros). Cap the latest seed time so the horizon fits the domain.
+        integ_horizon = float(flowline_dt) * int(max_steps)
+        safe_target = float(tmax) - integ_horizon
+        if time_window_target > safe_target:
+            logging.warning(f"[build_test_dataset] t_target={time_window_target:.3f} + integ horizon "
+                            f"{integ_horizon:.3f} exceeds tmax={float(tmax):.3f}; "
+                            f"clamping slice end to {max(time_window_start, safe_target):.3f}")
+            time_window_target = max(time_window_start, safe_target)
         sample_times = np.linspace(time_window_start, time_window_target, num=timesliceCount)
         high_res_sampling=float(UPsampling*low_res_grid_sampling)
         if mode == 'upsamplingFTLE':
@@ -280,6 +296,9 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
 
                 label_y_b = high_resFTLE_field.astype(np.float32)
                 pred_b = pred_grid.astype(np.float32)
+                # Stage-4 debug: reconstructed pred shape/finiteness + GT non-degeneracy
+                # (a near-constant GT makes PSNR meaningless — flags broken data early).
+                dbg.check_pred_grid(f"sample{test_i}", pred_b, label_y_b)
                 mse, mae, maxe, psnr = compute_metrics(label_y_b, pred_b)
 
                 # 计算插值基线的 PSNR（双线性与立方）
@@ -469,6 +488,11 @@ def train_model(config, model, dataset, device,test_dataset=None):
     
     total_iterations=0
     for epoch in range(epochs):
+        # IMPORTANT: the per-epoch test below calls model.eval(); without re-asserting
+        # train() here, every epoch after the first would train in eval mode (BatchNorm
+        # frozen on epoch-0 running stats). This crippled all BatchNorm models (UNet/FMT/
+        # DCT) while leaving the BN-free ESPCN unaffected.
+        model.train()
         epoch_avg_loss = 0.0
         for it, (Pk, label_y) in enumerate(loader):
             # Pk: [B, nerb*K, 3]; reshape to [B, 3, nerb*K]
@@ -480,6 +504,11 @@ def train_model(config, model, dataset, device,test_dataset=None):
             else:
                 input1 = Pk.to(device)
                 pred = model(input1).to(device).float()
+
+            # Stage-3 debug (first iter each epoch): confirm the model is actually in
+            # train() mode (guards the eval-mode bug) and pred/label shapes/finiteness match.
+            if it == 0:
+                dbg.check_train_step(model, pred, label_y)
 
             if torch.isnan(pred).any() or torch.isinf(pred).any():
                 logging.info(f"Warning: nan or inf in pred at epoch {epoch}, iter {it}")
@@ -576,6 +605,7 @@ if __name__=="__main__":
 
     cfg=argParseAndPrepareConfig()
     cfg["gitInfo"]=get_git_commit_id()
+    dbg.set_debug(int(getattr(cfg, 'debug', 0)))  # pipeline validation checks (0=off)
     mode=cfg['mode']
     relocate_flow2d_dataset_folder(cfg)
     run_Name,runTags=runNameTagGenerator_fmt(cfg,mode)
