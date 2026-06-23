@@ -47,13 +47,13 @@ def build_test_dataset(config):
     """
     # Parameter collection
     # 支持多个测试流场名称；兼容字符串输入
-    names_cfg = config['test_vectorfield'] if 'test_vectorfield' in config else [config.dataset.names[0]]
+    names_cfg = config['test_vectorfield'] if 'test_vectorfield' in config else [config.dataset.input_names[0]]
     test_vectorfield_names = names_cfg if isinstance(names_cfg, (list, tuple)) else [names_cfg]
     
 
     time_window_start_ratio = float(config.dataset.t_start)
     time_window_target_ratio = float(config.dataset.t_target)
-    timesliceCount =int(getattr(config.dataset, 'timesliceCount', 8))//2
+    timesliceCount =int(getattr(config.dataset, 'testTimesliceCount', 5))
 
     low_res_grid_sampling = float(config.dataset.low_res_grid_sampling)
     UPsampling = int(config.dataset.UPsampling)
@@ -621,21 +621,21 @@ if __name__=="__main__":
                     name=run_Name,
                     tags=runTags,
                     config=cfg)
-    if mode == 'point_FTLE_regression':
-        config = EasyConfig()
-        netCDF = NetCDFLoader()
-        config.load("config/PointWiseFTLERegressor.yaml", recursive=False)
-        vectorfield_datapath=os.path.join(config.dataset.dat_dir, f"{config.dataset.test_name}.{config.dataset.extension}")
-        vectorfield = netCDF.load_vector_field2d(vectorfield_datapath)
-        config['vectorfield']=vectorfield
+    # if mode == 'point_FTLE_regression':
+    #     config = EasyConfig()
+    #     netCDF = NetCDFLoader()
+    #     config.load("config/PointWiseFTLERegressor.yaml", recursive=False)
+    #     vectorfield_datapath=os.path.join(config.dataset.dat_dir, f"{config.dataset.test_name}.{config.dataset.extension}")
+    #     vectorfield = netCDF.load_vector_field2d(vectorfield_datapath)
+    #     config['vectorfield']=vectorfield
    
-        model = build_model(config, device)
-        # use Dataset + DataLoader (support shuffle / multi-threading etc.)
-        dataset = PointWiseFTLETrainDataset( config=config )
-        config['ftle_min']=dataset.ftle_min
-        config['ftle_max']=dataset.ftle_max
-        train_model(config,model,dataset,device)
-    elif mode == 'upsamplingFTLE':
+    #     model = build_model(config, device)
+    #     # use Dataset + DataLoader (support shuffle / multi-threading etc.)
+    #     dataset = PointWiseFTLETrainDataset( config=config )
+    #     config['ftle_min']=dataset.ftle_min
+    #     config['ftle_max']=dataset.ftle_max
+    #     train_model(config,model,dataset,device)
+    if mode == 'upsamplingFTLE':
         # future mode: low resolution pathlines + low resolution FTLE -> high resolution FTLE
         dataset = FTLEUpsamplingTrainDataset(cfg, useCacheSystem=True)
         test_dataset=build_test_dataset(cfg)

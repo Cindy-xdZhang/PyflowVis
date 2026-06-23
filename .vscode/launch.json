@@ -12,15 +12,15 @@
             // "program": "${workspaceFolder}/main.py",
             // "program": "${workspaceFolder}/GerrisFlowSolverDatasetLoader.py",
             // "program": "${workspaceFolder}/FTLE_experiment.py",
-            "program": "${workspaceFolder}/FMT_Clustering.py",
+            "program": "${workspaceFolder}/FTLE_experiment.py",
             // "program": "${workspaceFolder}/train.py",
             // "program": "${workspaceFolder}/test.py",
             // "program": "${workspaceFolder}/experiment.py",
             "console": "integratedTerminal",
             "args": [
                 "--config",
-                "config/PathlineFMTclustering.yaml",
-                // "config/FTLEUpsampling.yaml",
+                // "config/PathlineFMTclustering.yaml",
+                "config/FTLEUpsampling.yaml",
                 // "config/segmentation/vortexboundary_unet.yaml"
                 // "config/segmentation/pathline_transformer.yaml",
                 // "--data_dir",

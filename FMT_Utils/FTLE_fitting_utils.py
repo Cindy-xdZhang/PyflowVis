@@ -208,7 +208,7 @@ def generate_training_samples(
         
 
 
-def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampling:float,boundary_offset:float=0.05):
+def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampling:float,boundary_offset:float=0.1):
     xmin, ymin, _ = vectorfield.domainMinBoundary
     xmax, ymax, _ = vectorfield.domainMaxBoundary
     xmin_grid=xmin+boundary_offset*(xmax-xmin)
@@ -279,7 +279,6 @@ def generate_FLowMap_SLICE(vectorfield: UnsteadyVectorField2D,physcial_time:floa
 def generate_FTLE_SLICE(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:float,dt:float,maxIterations:int, resolutionUPsampling:float=1.0):
     nerbors=5
     offset_dist = float(cfg.pcds.offset_dist)
-    max_steps = int(cfg.pcds.max_iterations)
     starts_xy,xs,ys=generate_seedingGrid_2D(vectorfield,resolutionUPsampling)
     ny, nx = len(ys), len(xs)
     grid_low=np.zeros((ny,nx),dtype=np.float32)
@@ -287,14 +286,14 @@ def generate_FTLE_SLICE(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:flo
                 points=starts_xy,
                 vectorfield=vectorfield,
                 t_start=float(physcial_time), t_target=float(physcial_time+dt*maxIterations),
-                dt=float(dt), max_steps=int(max_steps),
+                dt=float(dt), max_steps=int(maxIterations),
                 offsets_size=float(offset_dist), method="rk4"
             )
-    Pathline_g = Pathline_b.view(nx*ny, nerbors, max_steps, 3)
+    Pathline_g = Pathline_b.view(nx*ny, nerbors, maxIterations, 3)
     PathlineLength_g = PathlineLength_b.view(nx*ny, nerbors)
     y_all=computeFTLEFromPathlineCrossPrimitive(Pathline_g, vectorfield_dt=vectorfield.timeInterval)
 
-    keep_groups_full = (PathlineLength_g == max_steps).all(dim=1)
+    keep_groups_full = (PathlineLength_g == maxIterations).all(dim=1)
     true_grid = np.full((ny, nx), 0, dtype=np.float32)
     linear_index=np.arange(nx*ny)
     valid_index=linear_index[keep_groups_full]
@@ -806,7 +805,7 @@ class PointWiseFTLETrainDataset(Dataset):
         
         #generate training samples
         if not cacheSuccess:
-            UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,config.dataset.names)
+            UnsteadyVectorFields=load_UnsteadyVectorFields_general(config.dataset.dat_dir,config.dataset.names)
             integration_interval=float(flowline_dt*max_steps)
             for i,vectorfield in enumerate(UnsteadyVectorFields):
                 logging.info(f"[generate_training_samples] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
@@ -888,12 +887,9 @@ class FTLEUpsamplingTrainDataset(Dataset):
     def __init__(self,   config, useCacheSystem: bool = True):
         UnsteadyVectorFields=[]
         ftle_resolutionUPsampling=float(config.dataset.UPsampling)
-        all_vectorfieldsname=[name for name in config.dataset.names]
-        all_vectorfieldsname_str=",".join(all_vectorfieldsname)
-        # Train slice count is decoupled from the test set: prefer `trainTimesliceCount`
-        # so the train set can grow while build_test_dataset (which uses `timesliceCount`)
-        # keeps producing the exact same test slices.
-        timesliceCount=int(getattr(config.dataset, 'trainTimesliceCount', config.dataset.timesliceCount))
+        all_vectorfieldsname=[name for name in config.dataset.input_names]
+   
+        timesliceCount=int(getattr(config.dataset, 'trainTimesliceCount', 20))
         UPsampling=int(config.dataset.UPsampling)
         low_res_grid_sampling=float(config.dataset.low_res_grid_sampling)
         max_steps: int=config.pcds.max_iterations
@@ -939,7 +935,7 @@ class FTLEUpsamplingTrainDataset(Dataset):
             except Exception as e:
                 print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
                          
-        UnsteadyVectorFields=  load_UnsteadyVectorFields_general(config.dataset.dat_dir,config.dataset.names)
+        UnsteadyVectorFields=  load_UnsteadyVectorFields_general(config.dataset.dat_dir,config.dataset.input_names)
         FTLE_fieldsLowRes=[]      # list[Tensor patch_yx]
         FTLE_fieldsHighRes=[]     # list[Tensor patch_yx (hi)]
         lowResPathlinesData=[]    # list[Tensor (patch_hw groups, nerbors, L, 3)]
@@ -971,14 +967,13 @@ class FTLEUpsamplingTrainDataset(Dataset):
                     logging.warning(f"[UpsamplingTrainDataset] t_target={time_window_target:.3f} + integ horizon "
                                     f"{integ_horizon:.3f} exceeds tmax={float(vectorfield.tmax):.3f}; "
                                     f"clamping slice end to {max(time_window_start, safe_target):.3f}")
-                    time_window_target = max(time_window_start, safe_target)
+                    time_window_target = safe_target 
                 timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
-                for time_slice in timeslice:
+                for physical_time in timeslice:
                     # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
-                    low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,low_res_grid_sampling)  
-                    high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FTLE_SLICE(config,vectorfield,time_slice,flowline_dt,max_steps,high_res_sampling)
-                    # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
-                    # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
+                    low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FTLE_SLICE(config,vectorfield,physical_time,flowline_dt,max_steps,low_res_grid_sampling)  
+                    high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FTLE_SLICE(config,vectorfield,physical_time,flowline_dt,max_steps,high_res_sampling)
+
                     # Stage-2 debug: low/high-res FTLE slice consistency (shape ratio sanity).
                     dbg.check_ftle_lowhigh(low_resFTLE_field, high_resFTLE_field, UPsampling)
 
@@ -1078,6 +1073,15 @@ class FTLEUpsamplingTrainDataset(Dataset):
 
     def __getitem__(self, idx):
         return (self.lowResFTLE[idx], self.lowResPathlines[idx]), self.labels[idx]
+
+
+
+
+
+
+
+
+
 
 
 # Torch Dataset for training samples generated on-the-fly via generate_training_samples

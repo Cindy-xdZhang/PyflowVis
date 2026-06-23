@@ -25,7 +25,10 @@ def _env_level() -> int:
         return 0
 
 
-_LEVEL = _env_level()
+# _LEVEL = _env_level()
+_LEVEL = 1
+
+
 
 
 def set_debug(level: int) -> None:
@@ -76,7 +79,7 @@ def check_ftle_field(name: str, field, expected_shape=None, strict: bool = False
     tot = max(1, a.size)
     nz = int(np.count_nonzero(a))
     dr = float(a.max() - a.min())
-    logging.info(f"[FMT_DEBUG] {name}: shape={tuple(a.shape)} valid={nz}/{tot} "
+    logging.info(f"[FMT_DEBUG] {name}: shape={tuple(a.shape)} none zero(valid) cells={nz}/{tot} "
                  f"({100.0*nz/tot:.1f}%) range=[{a.min():.4g},{a.max():.4g}] "
                  f"dynRange={dr:.4g} mean={a.mean():.4g}")
     if dr < 1e-6:

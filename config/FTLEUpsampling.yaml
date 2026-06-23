@@ -34,19 +34,16 @@ wandb: False
 # Pipeline validation/debug checks (FTLE computation, dataset, training, testing).
 # 0=off (default, ~zero cost), 1=warn+log one-line summaries, 2=strict (raise on failure).
 # Can also be enabled via env FMT_DEBUG=1 or `--debug 1` on the compare harness.
-debug: 0
+debug: 1
 
 dataset:
-  timesliceCount: 5 # TEST slice count (build_test_dataset uses timesliceCount//2). Kept at 5 so the test set is unchanged.
   trainTimesliceCount: 20 # TRAIN slice count (FTLEUpsamplingTrainDataset).
-
   low_res_grid_sampling: 0.25 #low resolution ftle's grid =vectorfield.grid*low_res_grid_sampling
   UPsampling: 2 # must be integer
-
   dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
   # name: cylinder2d #beads2d  doublegyre2d pipedcylinder2d cylinder2d  GerrisFlowSolverData/*.am
   # GerrisFlowSolverDatadebug removed (folder absent -> "url wrong"). Enlarged train set with more fields.
-  names: [cylinder2d, boussinesq, doublegyre2d, rfc2d, beads2d, pipedcylinder2d]
+  input_names: [cylinder2d, boussinesq, doublegyre2d, rfc2d, beads2d, pipedcylinder2d]
   extension: nc
   t_start: 0.1 # skip the first 10% of the time window when sampling slices
   t_target: 0.9 # skip the last 10% of the time window when sampling slices
@@ -55,6 +52,7 @@ dataset:
   
 test_tasks: test_UpsamplingModel
 test_vectorfield: [doublegyre2d,cylinder2d]
+test_timesliceCount: 5 # TEST slice count (build_test_dataset uses timesliceCount).
 
 
 
@@ -84,11 +82,11 @@ pcds:
   sample_area: full #points full areas
   line_type: p_line # streamline   p_line-> pathline
   line_method: RK4 # RK4 Euler
-  dt: 0.01 # flowline integration dt 
+  dt: 0.005 # flowline integration dt 
 
-  max_iterations: 300 # FTLE integration window = dt*max_iterations (=3.0). Expanded 1.5x from 200 for sharper FTLE ridges.
-  sampled_points_per_line: 4 # samples one the line
-  offset_dist: 0.01 # scale of grid interval
+  max_iterations: 200 # FTLE integration window = dt*max_iterations (=3.0). Expanded 1.5x from 200 for sharper FTLE ridges.
+  sampled_points_per_line: 16 # samples one the line
+  offset_dist: 0.005 # scale of grid interval
   num_cross_points_per_seeding: 5 
 
 

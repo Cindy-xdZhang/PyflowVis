@@ -95,8 +95,7 @@ def AngleAwareSampling(points: torch.Tensor, K: int) -> torch.Tensor:
     - outputs:       [G, LinesPerGroup, K, D]
 
     策略：
-    1) 若 random=True，退化为随机中段采样（保留首尾）。
-    3) 否则，按时间估计“转向角”显著性（基于切向向量夹角），对每组在 1..T-2 中选取 top-(K-2) 的时刻，
+    按时间估计“转向角”显著性（基于切向向量夹角），对每组在 1..T-2 中选取 top-(K-2) 的时刻，
        并与首(0)尾(T-1)一起作为采样索引；组内所有 L 条线共享同一组选取的时间索引。
     """
     if K < 2:
