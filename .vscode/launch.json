@@ -20,7 +20,8 @@
             "args": [
                 "--config",
                 // "config/PathlineFMTclustering.yaml",
-                "config/FTLEUpsampling.yaml",
+                // "config/FTLEUpsampling.yaml",
+                "config/FlowMapUpsampling.yaml",
                 // "config/segmentation/vortexboundary_unet.yaml"
                 // "config/segmentation/pathline_transformer.yaml",
                 // "--data_dir",

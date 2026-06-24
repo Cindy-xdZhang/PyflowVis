@@ -27,7 +27,7 @@ model:
 
 # mode: upsamplingFLowMap
 # mode = 'point_FTLE_regression'
-mode : upsamplingFTLE
+mode : upsamplingFLowMap
 
 wandb: False
 

@@ -14,46 +14,43 @@ from torch.utils.data import DataLoader
 from DeepUtils.utils import EasyConfig
 from DeepUtils.loss import build_criterion_from_cfg
 from DeepUtils.optim import build_optimizer_from_cfg
-from FLowUtils.VectorField2d import *
 from DeepUtils.utils.stable_hash import stable_hash
-from FMT_Utils.FTLE_fitting_utils import *
 from DeepUtils.MiscFunctions import *
-from FMT_Utils.model_zoo import *
+
+from FLowUtils.VectorField2d import *
 from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import relocate_flow2d_dataset_folder
-from FMT_Utils import debug_checks as dbg
-# `load_UnsteadyVectorFields_netCDFOrAnalytical` is a stale/renamed reference used below
-# (build_test_dataset cache-miss path + the visualize path); the real function is
-# `load_UnsteadyVectorFields_general`. Alias it so both call-sites resolve.
 from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import (
-    load_UnsteadyVectorFields_general as load_UnsteadyVectorFields_netCDFOrAnalytical,
-)
+    load_UnsteadyVectorFields_general as load_UnsteadyVectorFields_netCDFOrAnalytical,)
+
+from FMT_Utils.FTLE_fitting_utils import *
+from FMT_Utils import debug_checks as dbg
+from FMT_Utils.model_zoo import *
+
 
 GLOBAL_WANDB_PROJECT_NAME="FlowMapTokenizer"
-torch.backends.cuda.matmul.allow_tf32 = False  
+torch.backends.cuda.matmul.allow_tf32 = False
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
-
 def build_test_dataset(config):
     """
-    Generate low/high-resolution FTLE slices and preprocessed low-resolution pathlines for testing,
-    with a simple caching mechanism.
+    Build test slices with the same low/high-resolution generation path used by training.
 
     Returns:
-        lowResFTLE_all: np.ndarray [T, X_low, Y_low]
-        lowResPathlines_all: torch.FloatTensor [T, X_low*Y_low, nerbors, L, 3]
-        highResFTLE_all: np.ndarray [T, X_high, Y_high]
-        vectorfield: UnsteadyVectorField2D object (for visualization/boundary info)
+        lowResFTLEorFLowMap_list:
+            - upsamplingFTLE: np.ndarray [ny_low, nx_low]
+            - upsamplingFLowMap: np.ndarray [ny_low, nx_low, 5, 2, 3]
+        highResFTLEorFLowMap_list:
+            - upsamplingFTLE: np.ndarray [ny_hi, nx_hi]
+            - upsamplingFLowMap: np.ndarray [ny_hi, nx_hi, 5, 2, 3]
+        lowResPathlines_list: torch.FloatTensor [ny_low*nx_low, 5, L, 3]
     """
-    # Parameter collection
-    # 支持多个测试流场名称；兼容字符串输入
-    names_cfg = config['test_vectorfield'] if 'test_vectorfield' in config else [config.dataset.input_names[0]]
+    # 支持多个测试流场名称；兼容字符串输入。
+    names_cfg =  config.test.vectorfield          
     test_vectorfield_names = names_cfg if isinstance(names_cfg, (list, tuple)) else [names_cfg]
-    
-
     time_window_start_ratio = float(config.dataset.t_start)
     time_window_target_ratio = float(config.dataset.t_target)
-    timesliceCount =int(getattr(config.dataset, 'testTimesliceCount', 5))
+    timesliceCount = int(config.test.timesliceCount)
 
     low_res_grid_sampling = float(config.dataset.low_res_grid_sampling)
     UPsampling = int(config.dataset.UPsampling)
@@ -64,9 +61,9 @@ def build_test_dataset(config):
     localized = bool(config.pcds.localized)
     mode=config['mode']
 
-    # Cache key
+    # Keep cache parameters aligned with the train dataset keys where they affect generated data.
     key_obj = {
-        "name": "ftle_upsampling_test",
+        "name": f"{mode}_test",
         "vectorfields": list(map(str, test_vectorfield_names)),
         "timesliceCount": int(timesliceCount),
         "UPsampling": int(UPsampling),
@@ -76,7 +73,8 @@ def build_test_dataset(config):
         "max_steps": int(max_steps),
         "dt": float(flowline_dt),
         "offset_dist": float(offset_dist),
-        "LstepsPerline": int(LstepsPerline)
+        "LstepsPerline": int(LstepsPerline),
+        "mode": str(mode),
     }
     tag = stable_hash(key_obj, prefix=f"{mode}TestDataset_")
     cache_dir = os.path.join(config.cache_dir, "temp")
@@ -86,26 +84,32 @@ def build_test_dataset(config):
     lowResFTLEorFLowMap_list = []
     highResFTLEorFLowMap_list = []
     lowResPathlines_list = []
+    per_field_test_patches = {}
 
     # Try loading cache first
     if os.path.exists(cache_path):
         try:
-            data = pickle.load(open(cache_path, "rb"))
+            with open(cache_path, "rb") as f:
+                data = pickle.load(f)
             lowResFTLEorFLowMap_all_list = data["lowResFTLE_list"]
             highResFTLEorFLowMap_all_list = data["highResFTLE_list"]
             lowResPathlines_all = data["lowResPathlines_list"]
             assert len(lowResFTLEorFLowMap_all_list) == len(highResFTLEorFLowMap_all_list) ==len(lowResPathlines_all)
             logging.info(f"[build_test_dataset] loaded {len(lowResPathlines_all)} samples from cache {cache_path}")
+            for vf_name, n_patches in data.get("per_field_test_patches", {}).items():
+                logging.info(f"[build_test_dataset] '{vf_name}': loaded {int(n_patches)} test patches from cache.")
             return lowResFTLEorFLowMap_all_list,highResFTLEorFLowMap_all_list,  lowResPathlines_all
         except Exception as e:
             logging.info(f"[build_test_dataset] cache load failed: {e}. Regenerating...")
 
 
-    for vf_name in test_vectorfield_names:
-        vf_obj = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,vf_name)[0]
+    vectorfields = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir, test_vectorfield_names)
+    for vf_idx, vf_obj in enumerate(vectorfields):
+        vf_name = test_vectorfield_names[vf_idx] if vf_idx < len(test_vectorfield_names) else f"field{vf_idx}"
         if vf_obj is None:
             logging.info(f"[build_test_dataset] load {vf_name} failed. Skip this field.")
             continue
+        field_patches_before = len(lowResFTLEorFLowMap_list)
   
         # 针对每个流场单独确定时间窗口
         tmin, tmax = float(vf_obj.tmin), float(vf_obj.tmax)
@@ -120,51 +124,41 @@ def build_test_dataset(config):
                             f"{integ_horizon:.3f} exceeds tmax={float(tmax):.3f}; "
                             f"clamping slice end to {max(time_window_start, safe_target):.3f}")
             time_window_target = max(time_window_start, safe_target)
-        sample_times = np.linspace(time_window_start, time_window_target, num=timesliceCount)
+        sample_times = np.linspace(time_window_start, time_window_target, timesliceCount)
         high_res_sampling=float(UPsampling*low_res_grid_sampling)
-        if mode == 'upsamplingFTLE':
-            for time_slice in sample_times:
-                # Low-resolution slice and corresponding pathlines
-                low_resFTLE_field, lowResPathlines, low_res_xs, low_res_ys = generate_FTLE_SLICE(
-                    config, vf_obj, float(time_slice), flowline_dt, max_steps, low_res_grid_sampling
-                )
-                # High-resolution (as ground truth)
-                high_resFTLE_field, _, high_res_xs, high_res_ys = generate_FTLE_SLICE(
-                    config, vf_obj, float(time_slice), flowline_dt, max_steps, high_res_sampling
-                )
+        
+        for physcialTime in sample_times:
+            # Same raw-coordinate flow map generation as FlowMapUpsamplingTrainDataset.
+            # Test keeps whole-grid tensors for fully convolutional evaluation.
+            low_flow, lowResPathlines, _llen, nx_low, ny_low = generate_Flowmap_SLICE(
+                vf_obj, float(physcialTime), flowline_dt, max_steps, offset_dist, low_res_grid_sampling)
+            high_flow, _hpl, _hlen, nx_hi, ny_hi = generate_Flowmap_SLICE(
+                vf_obj, float(physcialTime), flowline_dt, max_steps, offset_dist, high_res_sampling)
+            low_grid = low_flow.reshape(ny_low, nx_low, 5, 2, 3).detach().cpu().numpy().astype(np.float32)
+            high_grid = high_flow.reshape(ny_hi, nx_hi, 5, 2, 3).detach().cpu().numpy().astype(np.float32)
+            temporal_sampled_P_all = AngleAwareSampling(lowResPathlines, int(LstepsPerline))
+            lowResFTLEorFLowMap_list.append(low_grid)
+            highResFTLEorFLowMap_list.append(high_grid)
+            lowResPathlines_list.append(temporal_sampled_P_all)
 
-                # Preprocessing consistent with training: temporal downsampling and normalization (no FTLE normalization)
-                # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
-                # temporal_sampled_P_all = temporal_downsamplePathlineCrossPrimitiveRegular(lowResPathlines, int(LstepsPerline))
-                temporal_sampled_P_all=AngleAwareSampling(lowResPathlines, int(LstepsPerline))
-
-                lowResFTLEorFLowMap_list.append(low_resFTLE_field)
-                highResFTLEorFLowMap_list.append(high_resFTLE_field)
-                lowResPathlines_list.append(temporal_sampled_P_all)
-        # elif mode == 'upsamplingFLowMap':
-        #         for time_slice in sample_times:
-        #             # Low-resolution slice and corresponding pathlines
-        #             low_resFTLE_field, lowResPathlines, low_res_xs, low_res_ys = generate_FLowMap_SLICE(
-        #                 config, vf_obj, float(time_slice), flowline_dt, max_steps, low_res_grid_sampling
-        #             )
-        #             # High-resolution (as ground truth)
-        #             high_res_sampling = up * low_res_grid_sampling
-        #             high_resFTLE_field, _, high_res_xs, high_res_ys = generate_FLowMap_SLICE(
-        #                 config, vf_obj, float(time_slice), flowline_dt, max_steps, high_res_sampling
-        #             )
-        #             # Preprocessing consistent with training: temporal downsampling and normalization (no FTLE normalization)
-        #             # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
-        #             # temporal_sampled_P_all = temporal_downsamplePathlineCrossPrimitiveRegular(lowResPathlines, int(LstepsPerline))
-        #             temporal_sampled_P_all=AngleAwareSampling(lowResPathlines, int(LstepsPerline))
-
-        #             lowResFTLEorFLowMap_list.append(low_resFTLE_field)
-        #             highResFTLEorFLowMap_list.append(high_resFTLE_field)
-        #             lowResPathlines_list.append(temporal_sampled_P_all)
+        n_field_patches = len(lowResFTLEorFLowMap_list) - field_patches_before
+        per_field_test_patches[str(vf_name)] = int(n_field_patches)
+        if n_field_patches == 0:
+            logging.warning(f"[build_test_dataset] '{vf_name}': 0 test patches generated.")
+        else:
+            logging.info(f"[build_test_dataset] '{vf_name}': collected {n_field_patches} test patches.")
+    
+    
     
     # Save cache (use float32)
     try:
         with open(cache_path, "wb") as f:
-            pickle.dump({"lowResFTLE_list": lowResFTLEorFLowMap_list, "highResFTLE_list": highResFTLEorFLowMap_list, "lowResPathlines_list": lowResPathlines_list}, f)
+            pickle.dump({
+                "lowResFTLE_list": lowResFTLEorFLowMap_list,
+                "highResFTLE_list": highResFTLEorFLowMap_list,
+                "lowResPathlines_list": lowResPathlines_list,
+                "per_field_test_patches": per_field_test_patches,
+            }, f)
         logging.info(f"[build_test_dataset] saved {len(lowResFTLEorFLowMap_list)} samples to cache {cache_path}")
     except Exception as e:
         logging.info(f"[build_test_dataset] cache save failed: {e}")
@@ -178,278 +172,251 @@ def build_test_dataset(config):
     )
 
 
-def _inverse_normalization(flowmap: np.ndarray|torch.Tensor):
-    flowmap[...,0:2]=flowmap[...,0:2]*global_UniformValueSpatical
-    flowmap[...,2]=flowmap[...,2]*global_UniformValueTemporal
-    flowmap[...,3:5]=flowmap[...,3:5]*global_UniformValueSpatical
-    flowmap[...,5]=flowmap[...,5]*global_UniformValueTemporal
+def _normalize_flowmap(flowmap: np.ndarray|torch.Tensor):
+    # Forward of _inverse_normalization. Must match the scaling applied in
+    # FlowMapUpsamplingTrainDataset so train/test see the same input distribution.
+    flowmap[...,0:3]=flowmap[...,0:3]/GLOBAL_UniformValueTemporalAndSpatial
     return flowmap
+
+
+def _inverse_normalization(flowmap: np.ndarray|torch.Tensor):
+    flowmap[...,0:3]=flowmap[...,0:3]*GLOBAL_UniformValueTemporalAndSpatial
+    return flowmap
+
+
+def _tiling_starts(length: int, k: int, stride: int) -> list[int]:
+    """Sliding-window start indices identical to FlowMapUpsamplingTrainDataset, so test
+    patches are tiled the same way the model was trained on."""
+    length = int(length); k = int(k)
+    if length <= 0:
+        return []
+    if k >= length:
+        return [0]
+    s = max(1, int(stride))
+    starts = list(range(0, length - k + 1, s))
+    if starts[-1] != length - k:
+        starts.append(length - k)
+    return starts
+
+
+def _patch_blend_weight(h, w):
+    """Separable raised-cosine (Hann) window, floored above 0, used to feather patch
+    borders during overlap blending. Uniform weights would reproduce a plain mean but
+    leave count-boundary seams; tapering the borders gives a seam-free weighted mean."""
+    def hann(n):
+        if n <= 1:
+            return np.ones(n, dtype=np.float64)
+        x = np.arange(n, dtype=np.float64)
+        return 0.5 - 0.5 * np.cos(2.0 * np.pi * x / (n - 1))  # 0 at the two ends
+    wy = 0.05 + 0.95 * hann(h)   # floor keeps every pixel's total weight > 0
+    wx = 0.05 + 0.95 * hann(w)
+    return (wy[:, None] * wx[None, :])  # [h, w]
+
+
+def _sliding_window_predict_flowmap(model, low_grid, pathlines, UPsampling, patch_size,
+                                    patch_stride, device, offset_dist):
+    """Run the flow-map upsampler over the whole low-res grid in patch_size x patch_size
+    windows (the same tiling used in training) and blend the high-res patch predictions
+    by a feathered (Hann-windowed) weighted average over overlaps.
+
+    Per patch: raw -> flowmap_to_relative -> normalize -> model -> inverse_normalize ->
+    flowmap_from_relative -> raw, matching the training transforms exactly.
+
+    Args:
+        low_grid:  np [ny_low, nx_low, 5, 2, 3]   (raw physical coords)
+        pathlines: torch [ny_low*nx_low, 5, L, 3] (geometry branch; ignored by the
+                   fully-convolutional flow-map models but passed through for API parity)
+        offset_dist: cross-line seed offset; rel_scale = 2*offset_dist.
+    Returns:
+        stitched high-res flow map: np [ny_low*UP, nx_low*UP, 5, 2, 3] (raw coords)
+    """
+    ny_low, nx_low = low_grid.shape[:2]
+    UP = int(UPsampling)
+    rel_scale = 2.0 * float(offset_dist)
+    ny_hi, nx_hi = ny_low * UP, nx_low * UP
+
+    low_flat = torch.from_numpy(low_grid).reshape(ny_low * nx_low, 5, 2, 3).float()
+    acc = np.zeros((ny_hi, nx_hi, 5, 2, 3), dtype=np.float64)
+    wsum = np.zeros((ny_hi, nx_hi, 1, 1, 1), dtype=np.float64)
+
+    row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
+    col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
+
+    for ri, i0 in enumerate(row_starts):
+        ph = min(int(patch_size), ny_low)
+        row_idx = list(range(i0, i0 + ph))
+        for ci, j0 in enumerate(col_starts):
+            pw = min(int(patch_size), nx_low)
+            col_idx = list(range(j0, j0 + pw))
+            lo_flat = [r * nx_low + c for r in row_idx for c in col_idx]
+            lo_t = torch.as_tensor(lo_flat, dtype=torch.long)
+
+            patch = low_flat[lo_t].clone()                       # [P,5,2,3] raw
+            patch = flowmap_to_relative(patch, rel_scale)        # Jacobian-aware rep
+            fm = _normalize_flowmap(patch).reshape(1, ph * pw, 5, 2, 3).to(device).float()
+            pl = pathlines[lo_t].unsqueeze(0).to(device).float() if pathlines is not None else None
+            pred = model(fm, pl, hw=(ph, pw)).to(device).float()  # [1, ph*UP*pw*UP, 5,2,3] normalized-rel
+            pred = _inverse_normalization(pred)                   # undo /GLOBAL
+            pred = flowmap_from_relative(pred, rel_scale)         # back to absolute raw coords
+            pred_patch = pred.reshape(ph * UP, pw * UP, 5, 2, 3).detach().cpu().numpy()
+
+            # high-res placement; snap the last window to the boundary exactly like training
+            hi_h, hi_w = ph * UP, pw * UP
+            hi_i0 = int(round(i0 * UP))
+            hi_j0 = int(round(j0 * UP))
+            if ri == len(row_starts) - 1:
+                hi_i0 = ny_hi - hi_h
+            if ci == len(col_starts) - 1:
+                hi_j0 = nx_hi - hi_w
+            hi_i0 = max(0, hi_i0); hi_j0 = max(0, hi_j0)
+
+            wgt = _patch_blend_weight(hi_h, hi_w)[..., None, None, None]  # [hi_h,hi_w,1,1,1]
+            acc[hi_i0:hi_i0 + hi_h, hi_j0:hi_j0 + hi_w] += pred_patch * wgt
+            wsum[hi_i0:hi_i0 + hi_h, hi_j0:hi_j0 + hi_w] += wgt
+
+    wsum = np.maximum(wsum, 1e-12)
+    return (acc / wsum).astype(np.float32)
+
+
+def _flowmap_ftle_sensitivity_report(pred_grid, high_grid, offset_dist):
+    """Quantify whether the model resolves the FTLE-relevant signal.
+
+    FTLE's Jacobian is J = (pEnd[x+]-pEnd[x-]) / dx0 with dx0 = 2*offset_dist. What
+    controls FTLE is therefore the *neighbour endpoint differences* d_x=pEnd[x+]-pEnd[x-]
+    and d_y=pEnd[y+]-pEnd[y-], NOT the absolute positions (the center line's absolute
+    position can be off without hurting FTLE). We report the model's relative error on
+    those differences: ratio<1 means the Jacobian is resolved and FTLE PSNR can be good.
+    """
+    hg = torch.as_tensor(high_grid).float().reshape(-1, 5, 2, 3)
+    pg = torch.as_tensor(pred_grid).float().reshape(-1, 5, 2, 3)
+    valid = (hg.abs().reshape(hg.shape[0], -1).sum(1) > 0)
+    if int(valid.sum()) == 0:
+        logging.warning("[FlowMap][sensitivity] no valid cells; skip report.")
+        return
+    he, pe = hg[valid, :, 1, :2], pg[valid, :, 1, :2]   # tail endpoints (x,y) of the 5 lines
+    # FTLE numerator differences (true vs predicted)
+    true_dx = he[:, 1, :] - he[:, 2, :];  pred_dx = pe[:, 1, :] - pe[:, 2, :]
+    true_dy = he[:, 3, :] - he[:, 4, :];  pred_dy = pe[:, 3, :] - pe[:, 4, :]
+    sig = torch.cat([true_dx.norm(dim=-1), true_dy.norm(dim=-1)])
+    err = torch.cat([(pred_dx - true_dx).norm(dim=-1), (pred_dy - true_dy).norm(dim=-1)])
+    ratio = (err.median() / sig.median().clamp_min(1e-12)).item()
+    dx0 = 2.0 * float(offset_dist)
+    logging.info(
+        f"[FlowMap][sensitivity] dx0(=2*offset_dist)={dx0:.4e}  "
+        f"FTLE-signal median|pEnd[x+]-pEnd[x-]|={sig.median().item():.4e}  "
+        f"model diff-error={err.median().item():.4e}  rel-error(on Jacobian)={ratio*100:.1f}%")
+    if ratio > 0.5:
+        logging.warning(
+            f"[FlowMap][sensitivity] {ratio*100:.0f}% error on the FTLE Jacobian differences: "
+            f"FTLE PSNR will be limited. Lower it with more training / better representation.")
 
 
 test_times=0
 
-def test_UpsamplingModel(config, model,test_dataset, device,visualize=False):
+def test_UpsamplingModel(config, model,test_dataset, device,visualize=True):
     global test_times
     test_times += 1
     with torch.no_grad():
         model.to(device).eval()
-
-        # helper: compute starts so that last window touches boundary (may overlap previous)
-        def _tiling_starts(length: int, k: int, stride: int):
-            if k >= length:
-                return [0]
-            s = max(1, int(stride))
-            starts = list(range(0, length - k + 1, s))
-            last = length - k
-            if starts[-1] != last:
-                starts.append(last)
-            return starts
-
-        # Use cached dataset
-        if test_dataset is None:
-            lowResFTLE_all,  highResFTLE_all ,lowResPathlines_all,= build_test_dataset(config)
-        else:
-            lowResFTLE_all, highResFTLE_all, lowResPathlines_all= test_dataset
-
-
-        if lowResFTLE_all is not None and lowResPathlines_all is not None and highResFTLE_all is not None and config['mode'] == 'upsamplingFTLE':
-            patch_size = int(getattr(config.dataset, 'patchSize', 32))
-            patch_stride = int(getattr(config.dataset, 'patchStride', 2))
-            patch_stride=patch_stride*2 if visualize==False else patch_stride # faster test if not visualize
-
-            LstepsPerline = int(config.pcds.sampled_points_per_line)
-            mse_sum = 0.0
-            mae_sum = 0.0
-            maxe_sum = 0.0
-            psnr_sum = 0.0
-            psnr_bilinear_sum = 0.0
-            psnr_cubic_sum = 0.0
+        lowResFTLE_all, highResFTLE_all, lowResPathlines_all= test_dataset
+        if lowResFTLE_all is not None and lowResPathlines_all is not None and highResFTLE_all is not None and config['mode'] == 'upsamplingFLowMap':
+            # Flow-map upsampling eval. The model predicts the high-res flow map; the metric
+            # is computed in FTLE space (FTLE = computeFTLEFromPathlineCrossPrimitive on the
+            # [N,5,2,3] flow map, treating the 2 endpoints as the line's head/tail).
             sample_count = int(len(lowResPathlines_all))
             UPsampling = int(config.dataset.UPsampling)
+            dt = float(config.pcds.dt)
+            # Mirror the training data construction: tile the low-res grid into
+            # patchSize x patchSize windows, predict each, then blend. patchSize must match
+            # training (config.dataset.patchSize); test.patchStride controls inference overlap
+            # and defaults to half the patch (override via config test: block).
+            patch_size = int(getattr(config.dataset, 'patchSize', 32))
+            patch_stride = int(config.test.patchStride)
+
+            def _ftle_grid_from_flowmap(field_grid):
+                # field_grid: np or torch [ny, nx, 5, 2, 3] -> FTLE np [ny, nx]
+                fg = torch.from_numpy(field_grid) if isinstance(field_grid, np.ndarray) else field_grid
+                fg = fg.float()
+                ny_, nx_ = fg.shape[0], fg.shape[1]
+                ftle = computeFTLEFromPathlineCrossPrimitive(fg.reshape(ny_ * nx_, 5, 2, 3), vectorfield_dt=dt)
+                return ftle.reshape(ny_, nx_).detach().cpu().numpy().astype(np.float32)
+
+            def _interp_flowmap(low_grid_np, ny_hi, nx_hi, mode):
+                # low_grid_np: [ny,nx,5,2,3] -> interpolated [ny_hi,nx_hi,5,2,3]
+                t = torch.from_numpy(low_grid_np).float()
+                ny_, nx_ = t.shape[0], t.shape[1]
+                img = t.reshape(ny_, nx_, 30).permute(2, 0, 1).unsqueeze(0)  # [1,30,ny,nx]
+                up = F.interpolate(img, size=(ny_hi, nx_hi), mode=mode,
+                                   align_corners=False if mode in ('bilinear', 'bicubic') else None)
+                return up.squeeze(0).permute(1, 2, 0).reshape(ny_hi, nx_hi, 5, 2, 3)
+
+            mse_sum = mae_sum = maxe_sum = psnr_sum = 0.0
+            psnr_bilinear_sum = psnr_cubic_sum = 0.0
             for test_i in range(sample_count):
-                low_resFTLE_field = lowResFTLE_all[test_i]
-                high_resFTLE_field =highResFTLE_all[test_i]
-                lowResPathlinesPreprocessed =lowResPathlines_all[test_i]
+                low_grid = lowResFTLE_all[test_i]          # np [ny_low,nx_low,5,2,3]
+                high_grid = highResFTLE_all[test_i]        # np [ny_hi, nx_hi, 5,2,3]
+                lowResPathlinesPreprocessed = lowResPathlines_all[test_i]  # torch [ny_low*nx_low,5,L,3]
+                ny_low, nx_low = low_grid.shape[:2]
+                ny_hi, nx_hi = high_grid.shape[:2]
 
-                # Normalization as in training (normalize low-res input using train-set statistics)
-                ftle_min = float(config.ftle_min)
-                ftle_max = float(config.ftle_max)
-                low_resFTLE_field_clip = np.clip(low_resFTLE_field, ftle_min, ftle_max)
-                low_resFTLE_field_norm = (low_resFTLE_field_clip - ftle_min) / max(1e-12, (ftle_max - ftle_min))
-                low_resFTLE_field_norm=torch.from_numpy(low_resFTLE_field_norm).float()
+                # sliding-window inference: tile the low-res grid the same way training did,
+                # predict each patch, and blend overlapping high-res patches (raw coords out).
+                pred_grid = _sliding_window_predict_flowmap(
+                    model, low_grid, lowResPathlinesPreprocessed, UPsampling,
+                    patch_size, patch_stride, device,
+                    offset_dist=float(config.pcds.offset_dist))  # np [ny_hi,nx_hi,5,2,3]
 
-                ny_low, nx_low = low_resFTLE_field.shape[:2]
-                ny_hi, nx_hi = high_resFTLE_field.shape[:2]
-                ry = UPsampling
-                rx = UPsampling
+                label_ftle = _ftle_grid_from_flowmap(high_grid)
+                pred_ftle = _ftle_grid_from_flowmap(pred_grid)
+                mse, mae, maxe, psnr = compute_metrics(label_ftle, pred_ftle)
 
-                row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
-                col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
-
-                pred_grid = np.zeros((ny_hi, nx_hi), dtype=np.float32)
-                weight_grid = np.zeros((ny_hi, nx_hi), dtype=np.float32)
-
-                for i0 in row_starts:
-                    i1 = min(i0 + patch_size, ny_low)
-                    for j0 in col_starts:
-                        j1 = min(j0 + patch_size, nx_low)
-
-                        # map to high-res
-                        hi_h = max(1,patch_size*UPsampling)
-                        hi_w = max(1,patch_size*UPsampling)
-                        hi_i0 = int(round(i0 * ry))
-                        hi_j0 = int(round(j0 * rx))
-                        if i0 == row_starts[-1]:
-                            hi_i0 = ny_hi - hi_h
-                        if j0 == col_starts[-1]:
-                            hi_j0 = nx_hi - hi_w
-                        hi_i1 = hi_i0 + hi_h
-                        hi_j1 = hi_j0 + hi_w
-
-                        # build inputs
-                        lr_patch_norm = low_resFTLE_field_norm[i0:i1, j0:j1].unsqueeze(0).to(device).float()
-
-                        # select corresponding pathlines groups
-                        idx_list = []
-                        for rr in range(i0, i1):
-                            base = rr * nx_low
-                            for cc in range(j0, j1):
-                                idx_list.append(base + cc)
-                        idx_tensor = torch.as_tensor(idx_list, dtype=torch.long)
-                        pl_patch = lowResPathlinesPreprocessed[idx_tensor].unsqueeze(0).to(device).float()
-
-                        # forward
-                        pred_patch = model(lr_patch_norm, pl_patch).to(device).float()  # [1, hi_h, hi_w]
-                        # inverse normalization
-                        patch_np = pred_patch.squeeze(0).detach().cpu().numpy()
-                        hi_i0=max(0,hi_i0)
-                        hi_j0=max(0,hi_j0)
-                        hi_i1=min(ny_hi,hi_i1)
-                        hi_j1=min(nx_hi,hi_j1)
-                        pred_grid[hi_i0:hi_i1, hi_j0:hi_j1] += patch_np
-                        weight_grid[hi_i0:hi_i1, hi_j0:hi_j1] += 1.0
-
-                # metrics (raw scale)
-                weight_grid = np.clip(weight_grid, 1.0, None)
-                pred_grid = pred_grid / weight_grid
-                pred_grid = pred_grid * (ftle_max - ftle_min) + ftle_min
-
-                label_y_b = high_resFTLE_field.astype(np.float32)
-                pred_b = pred_grid.astype(np.float32)
-                # Stage-4 debug: reconstructed pred shape/finiteness + GT non-degeneracy
-                # (a near-constant GT makes PSNR meaningless — flags broken data early).
-                dbg.check_pred_grid(f"sample{test_i}", pred_b, label_y_b)
-                mse, mae, maxe, psnr = compute_metrics(label_y_b, pred_b)
-
-                # 计算插值基线的 PSNR（双线性与立方）
                 if test_times == 1:
-                    with torch.no_grad():
-                        lr = torch.from_numpy(low_resFTLE_field)[None, None, ...].float()
-                        lr_up = torch.nn.functional.interpolate(lr, size=(label_y_b.shape[0], label_y_b.shape[1]), mode='bilinear', align_corners=False)[0, 0]
-                        bilinear_grid = lr_up.detach().cpu().numpy().astype(np.float32)
-                    _, _, _, psnr_bilinear = compute_metrics(label_y_b, bilinear_grid)
+                    bil = _interp_flowmap(low_grid, ny_hi, nx_hi, 'bilinear')
+                    cub = _interp_flowmap(low_grid, ny_hi, nx_hi, 'bicubic')
+                    _, _, _, psnr_bilinear = compute_metrics(label_ftle, _ftle_grid_from_flowmap(bil))
+                    _, _, _, psnr_cubic = compute_metrics(label_ftle, _ftle_grid_from_flowmap(cub))
                     psnr_bilinear_sum += psnr_bilinear
-                    with torch.no_grad():
-                        lr_up_cubic = torch.nn.functional.interpolate(lr, size=(label_y_b.shape[0], label_y_b.shape[1]), mode='bicubic', align_corners=False)[0, 0]
-                        cubic_grid = lr_up_cubic.detach().cpu().numpy().astype(np.float32)
-                    _, _, _, psnr_cubic = compute_metrics(label_y_b, cubic_grid)
                     psnr_cubic_sum += psnr_cubic
 
-                if visualize and test_i == sample_count-1:
-                    vectorfield_4vis = config.test_vectorfield[-1] if isinstance(config.test_vectorfield, list) else [config.test_vectorfield]
-                    vectorfield = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,vectorfield_4vis)[-1]
-                    visualize_FTLEUpampling(label_y_b, pred_b, low_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
+                # One-time sensitivity check: FTLE = (neighbor endpoint difference)/dx0 with
+                # dx0=2*offset_dist (tiny). If the model's absolute-position error exceeds that
+                # endpoint-difference signal, FTLE PSNR is doomed regardless of flow-map MSE.
+                # This is the diagnostic for "low train MSE but terrible FTLE PSNR".
+                if test_times == 1 and test_i == 0:
+                    _flowmap_ftle_sensitivity_report(pred_grid, high_grid,
+                                                     offset_dist=float(config.pcds.offset_dist))
 
-                mse_sum += mse
-                mae_sum += mae
-                maxe_sum += maxe
-                psnr_sum += psnr
+                # Render the FTLE image for the last test slice. Always produce it on the
+                # FIRST test (test_times==1) so the whole pipeline can be eyeballed; block
+                # interactively only when visualize=True (avoid stalling per-epoch eval).
+                if (visualize and test_times %10==0) and test_i == sample_count - 1:
+                    # The last test slice belongs to the last test field (fields are appended
+                    # in order), so use that field's name + domain bounds for the render.
+                    vf_cfg = config.test.vectorfield
+                    vf_name = vf_cfg[-1] if isinstance(vf_cfg, (list, tuple)) else vf_cfg
+                    vectorfield = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir, [vf_name])[-1]
+                    low_ftle = _ftle_grid_from_flowmap(low_grid)  # low-res FTLE (raw coords)
+                    vis_dir = os.path.join(config.cache_dir, "vis")
+                    os.makedirs(vis_dir, exist_ok=True)
+                    save_path = os.path.join(vis_dir, f"{config['mode']}__{config['model']['NAME']}__{vf_name}_test{test_times}.png")
+                    visualize_FTLEUpampling(label_ftle, pred_ftle, low_ftle,
+                                            vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary,
+                                            save_path=save_path, show=bool(visualize))
+                    logging.info(f"[FlowMap] saved FTLE visualization to {save_path}")
+
+                mse_sum += mse; mae_sum += mae; maxe_sum += maxe; psnr_sum += psnr
 
             mse = mse_sum / sample_count
             mae = mae_sum / sample_count
             maxe = maxe_sum / sample_count
             psnr = psnr_sum / sample_count
-            psnr_bilinear = psnr_bilinear_sum / sample_count
-            psnr_cubic = psnr_cubic_sum / sample_count
             if test_times == 1:
-                logging.info(f"baseline psnr_bilinear={psnr_bilinear:.6f}, psnr_cubic={psnr_cubic:.6f}")
-
-            # logging.info(f"test average: mse={mse:.6f}, mae={mae:.6f}, maxe={maxe:.6f}, psnr={psnr:.6f}")
+                psnr_bilinear = psnr_bilinear_sum / sample_count
+                psnr_cubic = psnr_cubic_sum / sample_count
+                logging.info(f"[FlowMap] baseline psnr_bilinear={psnr_bilinear:.6f}, psnr_cubic={psnr_cubic:.6f}")
             return {"mse": mse, "mae": mae, "maxe": maxe, "psnr": psnr}
-
-
-        # elif lowResFTLE_all is not None and lowResPathlines_all is not None and highResFTLE_all is not None and config['mode'] == 'upsamplingFLowMap':
-        #     patch_size = int(getattr(config.dataset, 'patchSize', 32))
-        #     patch_stride = int(getattr(config.dataset, 'patchStride', 2))
-        #     patch_stride=patch_stride*2 if visualize==False else patch_stride # faster test if not visualize
-        #     LstepsPerline = int(config.pcds.sampled_points_per_line)
-        #     mse_sum = 0.0
-        #     mae_sum = 0.0
-        #     maxe_sum = 0.0
-        #     psnr_sum = 0.0
-        #     psnr_bilinear_sum = 0.0
-        #     psnr_cubic_sum = 0.0
-        #     sample_count = int(len(lowResPathlines_all))
-        #     UPsampling = int(config.dataset.UPsampling)
-        #     dt = float(config.pcds.dt)
-        #     max_steps = int(config.pcds.max_iterations)
-        #     def _ftle_from_flowmap_np(flowmap_np: np.ndarray) -> np.ndarray:
-        #         # flowmap_np: [H, W, 2 or 3]
-        #         fm = torch.from_numpy(flowmap_np).float()
-        #         ftle_core = FTLEFromFlowMap(fm)  # 0.5*log(lambda_max)
-        #         return ftle_core.detach().cpu().numpy().astype(np.float32)
-        #     for test_i in range(sample_count):
-        #         low_resFlowMap_field = lowResFTLE_all[test_i]
-        #         high_resFlowMap_field =highResFTLE_all[test_i]
-        #         lowResPathlinesPreprocessed =lowResPathlines_all[test_i]
-        #         ny_low, nx_low = low_resFlowMap_field.shape[:2]
-        #         ny_hi, nx_hi = high_resFlowMap_field.shape[:2]
-        #         ry = UPsampling
-        #         rx = UPsampling
-        #         row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
-        #         col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
-        #         # 预测的是流映射 (x,y[,t])，先拼接再转 FTLE
-        #         pred_grid = np.zeros((ny_hi, nx_hi, low_resFlowMap_field.shape[-1]), dtype=np.float32)
-        #         weight_grid = np.zeros((ny_hi, nx_hi), dtype=np.float32)
-        #         for i0 in row_starts:
-        #             i1 = min(i0 + patch_size, ny_low)
-        #             for j0 in col_starts:
-        #                 j1 = min(j0 + patch_size, nx_low)
-        #                 # map to high-res
-        #                 hi_h = max(1,patch_size*UPsampling)
-        #                 hi_w = max(1,patch_size*UPsampling)
-        #                 hi_i0 = int(round(i0 * ry))
-        #                 hi_j0 = int(round(j0 * rx))
-        #                 if i0 == row_starts[-1]:
-        #                     hi_i0 = ny_hi - hi_h
-        #                 if j0 == col_starts[-1]:
-        #                     hi_j0 = nx_hi - hi_w
-        #                 hi_i1 = hi_i0 + hi_h
-        #                 hi_j1 = hi_j0 + hi_w
-        #                 # build inputs
-        #                 lr_patch_norm = torch.from_numpy(low_resFlowMap_field[i0:i1, j0:j1]).unsqueeze(0).to(device).float()
-        #                 # select corresponding pathlines groups
-        #                 idx_list = []
-        #                 for rr in range(i0, i1):
-        #                     base = rr * nx_low
-        #                     for cc in range(j0, j1):
-        #                         idx_list.append(base + cc)
-        #                 idx_tensor = torch.as_tensor(idx_list, dtype=torch.long)
-        #                 pl_patch = lowResPathlinesPreprocessed[idx_tensor].unsqueeze(0).to(device).float()
-        #                 # forward
-        #                 pred_patch = model(lr_patch_norm, pl_patch).to(device).float()  # [1, hi_h, hi_w, C] or [1, hi_h, hi_w] if model outputs FTLE directly
-        #                 patch_np = pred_patch.permute(0,2,3,1).squeeze(0).detach().cpu().numpy()
-        #                 hi_i0=max(0,hi_i0)
-        #                 hi_j0=max(0,hi_j0)
-        #                 hi_i1=min(ny_hi,hi_i1)
-        #                 hi_j1=min(nx_hi,hi_j1)
-        #                 pred_grid[hi_i0:hi_i1, hi_j0:hi_j1, :patch_np.shape[-1]] += patch_np
-        #                 weight_grid[hi_i0:hi_i1, hi_j0:hi_j1] += 1.0
-        #         # metrics (raw scale)
-        #         weight_grid = np.clip(weight_grid, 1.0, None)
-        #         pred_grid = pred_grid / weight_grid[..., None]
-        #         #inverse normalization
-        #         pred_grid=_inverse_normalization(pred_grid)
-        #         pred_grid[...,3:6]= pred_grid[...,3:6]+ pred_grid[...,0:3]
-        #         # 转换为 FTLE 再评估
-        #         label_y_b = _ftle_from_flowmap_np(high_resFlowMap_field.astype(np.float32)) 
-        #         pred_b = _ftle_from_flowmap_np(pred_grid.astype(np.float32))
-        #         mse, mae, maxe, psnr = compute_metrics(label_y_b, pred_b)
-        #         # 计算插值基线的 PSNR（双线性与立方）
-        #         if test_times == 1:
-        #             low_resFTLE_field= torch.from_numpy(_ftle_from_flowmap_np( low_resFlowMap_field.astype(np.float32))).unsqueeze(0).unsqueeze(0)
-        #             with torch.no_grad():
-        #                 # 对低分辨率流映射的前两通道分别做双线性/双三次插值，再转 FTLE
-        #                 bilinear_lr_up_bi = torch.nn.functional.interpolate(low_resFTLE_field, size=(label_y_b.shape[0], label_y_b.shape[1]), mode='bilinear', align_corners=False)[0].squeeze()
-        #             _, _, _, psnr_bilinear = compute_metrics(label_y_b, bilinear_lr_up_bi)
-        #             psnr_bilinear_sum += psnr_bilinear
-        #             with torch.no_grad():
-        #                 lr_up_cubic = torch.nn.functional.interpolate(low_resFTLE_field, size=(label_y_b.shape[0], label_y_b.shape[1]), mode='bicubic', align_corners=False)[0].squeeze()
-        #             _, _, _, psnr_cubic = compute_metrics(label_y_b, lr_up_cubic)
-        #             psnr_cubic_sum += psnr_cubic
-        #         if visualize and test_i == sample_count-1:
-        #             vectorfield_4vis = config.test_vectorfield[-1] if isinstance(config.test_vectorfield, list) else [config.test_vectorfield]
-        #             vectorfield = load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,vectorfield_4vis)[-1]
-        #             low_resFTLE_field=_ftle_from_flowmap_np(low_resFlowMap_field.astype(np.float32))
-        #             visualize_FTLEUpampling(label_y_b, pred_b, low_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
-        #             visualize_OneScalarField(pred_b, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
-        #             # visualize_OneScalarField(low_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
-        #             # visualize_OneScalarField(label_y_b, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
-        #         mse_sum += mse
-        #         mae_sum += mae
-        #         maxe_sum += maxe
-        #         psnr_sum += psnr
-        #     mse = mse_sum / sample_count
-        #     mae = mae_sum / sample_count
-        #     maxe = maxe_sum / sample_count
-        #     psnr = psnr_sum / sample_count
-        #     psnr_bilinear = psnr_bilinear_sum / sample_count
-        #     psnr_cubic = psnr_cubic_sum / sample_count
-        #     if test_times == 1:
-        #         logging.info(f"baseline psnr_bilinear={psnr_bilinear:.6f}, psnr_cubic={psnr_cubic:.6f}")
-        #     logging.info(f"test average: mse={mse:.6f}, mae={mae:.6f}, maxe={maxe:.6f}, psnr={psnr:.6f}")
-        #     return {"mse": mse, "mae": mae, "maxe": maxe, "psnr": psnr}
-
+        else:
+            raise ValueError(f"TEST Failed: Unknown mode: {config['mode']} or test_dataset is None")
 
 
 
@@ -479,8 +446,8 @@ def train_model(config, model, dataset, device,test_dataset=None):
     min_delta = 1e-6  # minimum change in loss to be considered as improvement
     last_lr = optimizer.param_groups[0]['lr']
 
-    if hasattr(config, 'test_tasks'):
-        test_task_func_name=config['test_tasks']
+    test_task_func_name = config.test.tasks
+    if test_task_func_name is not None:
         task_init_fn=eval(test_task_func_name)
         assert task_init_fn is not None and callable(task_init_fn)
     else:
@@ -635,25 +602,27 @@ if __name__=="__main__":
     #     config['ftle_min']=dataset.ftle_min
     #     config['ftle_max']=dataset.ftle_max
     #     train_model(config,model,dataset,device)
-    if mode == 'upsamplingFTLE':
-        # future mode: low resolution pathlines + low resolution FTLE -> high resolution FTLE
-        dataset = FTLEUpsamplingTrainDataset(cfg, useCacheSystem=True)
-        test_dataset=build_test_dataset(cfg)
-        logging.info(f"build_dataset done, train dataset lenth: {dataset.lowResFTLE.shape[0]}")
-        lowResX,lowResY=dataset.lowResFTLE[0].shape[0],dataset.lowResFTLE[0].shape[1]
-        cfg['lowResX']=lowResX
-        cfg['lowResY']=lowResY
-        cfg['ftle_min']=dataset.ftle_min
-        cfg['ftle_max']=dataset.ftle_max
-        model = build_model(cfg, device)
-        train_model(cfg,model,dataset,device,test_dataset)
-    elif mode == 'upsamplingFLowMap':
-        dataset = FLowMapUpsamplingTrainDataset(cfg, useCacheSystem=True)
+    # if mode == 'upsamplingFTLE':
+    #     # future mode: low resolution pathlines + low resolution FTLE -> high resolution FTLE
+    #     dataset = FTLEUpsamplingTrainDataset(cfg, useCacheSystem=True)
+    #     test_dataset=build_test_dataset(cfg)
+    #     logging.info(f"build_dataset done, train dataset lenth: {dataset.lowResFTLE.shape[0]}")
+    #     lowResX,lowResY=dataset.lowResFTLE[0].shape[0],dataset.lowResFTLE[0].shape[1]
+    #     cfg['lowResX']=lowResX
+    #     cfg['lowResY']=lowResY
+    #     cfg['ftle_min']=dataset.ftle_min
+    #     cfg['ftle_max']=dataset.ftle_max
+    #     model = build_model(cfg, device)
+    #     train_model(cfg,model,dataset,device,test_dataset)
+    if mode == 'upsamplingFLowMap':
+        dataset = FlowMapUpsamplingTrainDataset(cfg, useCacheSystem=True)
         test_dataset=build_test_dataset(cfg)
         logging.info(f"upsamplingFLowMap task build_dataset done, train dataset lenth: {dataset.lowResFlowMap.shape[0]}")
-        lowResX,lowResY=dataset.lowResFlowMap[0].shape[0],dataset.lowResFlowMap[0].shape[1]
-        cfg['lowResX']=lowResX
-        cfg['lowResY']=lowResY
+        # lowResFlowMap patches are flat-indexed [P, 5, 2, 3]; the low-res spatial extent
+        # is the (square) patch grid, so derive lowResX/Y from patchSize.
+        patch_size=int(getattr(cfg.dataset, 'patchSize', 32))
+        cfg['lowResX']=patch_size
+        cfg['lowResY']=patch_size
         model = build_model(cfg, device)
         train_model(cfg,model,dataset,device,test_dataset)
     else:

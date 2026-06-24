@@ -14,11 +14,38 @@ from FLowUtils.flowlineIntegral import batch_pathlineCross_integration_2D_auto
 from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import load_UnsteadyVectorFields_general
 from FMT_Utils import debug_checks as dbg
 
-global_UniformValueSpatical=8.0
-global_UniformValueTemporal=12.5663704#4 pi
+
+GLOBAL_UniformValueTemporalAndSpatial=15.0
+
+
+def flowmap_to_relative(fm, scale: float):
+    """Jacobian-aware representation for flow-map upsampling.
+
+    A flow map cell is [..., 5, 2, 3] = (5 cross lines: center,x+,x-,y+,y-) x
+    (2 endpoints: head,tail) x (3: x,y,t). FTLE depends on the *difference* between
+    neighbour-line endpoints (~O(2*offset_dist)=O(scale)) hidden inside O(1) absolute
+    positions, so plain position MSE cannot resolve it.
+
+    This rewrites the xy of the 4 neighbour lines as their offset from the center line,
+    divided by `scale`, lifting the FTLE-relevant signal to O(1) so MSE weights it fairly.
+    The center line (index 0) keeps absolute xy; the t channel is left untouched. The map
+    is exactly invertible via `flowmap_from_relative` with the same `scale`.
+    """
+    out = fm.clone() if isinstance(fm, torch.Tensor) else fm.copy()
+    center_xy = fm[..., 0:1, :, 0:2]                       # [...,1,2,2] center head/tail xy
+    out[..., 1:, :, 0:2] = (fm[..., 1:, :, 0:2] - center_xy) / float(scale)
+    return out
+
+
+def flowmap_from_relative(fm_rel, scale: float):
+    """Inverse of `flowmap_to_relative`: rebuild absolute (x,y) for the 4 neighbour lines."""
+    out = fm_rel.clone() if isinstance(fm_rel, torch.Tensor) else fm_rel.copy()
+    center_xy = fm_rel[..., 0:1, :, 0:2]
+    out[..., 1:, :, 0:2] = fm_rel[..., 1:, :, 0:2] * float(scale) + center_xy
+    return out
+
 
 torch.set_printoptions(precision=4, threshold=10000, linewidth=200, sci_mode=False)
-
 
 #every scalar field is a 2d-time volume.
 # we can generate thousands of training samples from this scalar field.
@@ -81,34 +108,28 @@ def computeFTLEFromPathlineCrossPrimitive(points_grouped: torch.Tensor,
     Classical FTLE estimation based on cross-primitive (5 pathlines).
     Ensure time values are in physical time range (not normalized time).
     Inputs:
-      - points_grouped: [N, sample_nerbors, (line_steps), 3], ordered as (center, x+, x-, y+, y-)
+      - points_grouped: [N, sample_nerbors, (line_steps=2), 3], sample_nerbors is ordered as (center, x+, x-, y+, y-)
       - sample_nerbors: 5 (cross)
-      - line_steps:     number of integration steps (K), each line has K+1 points
       - vectorfield_dt: physical time step to validate effective time span
-
     Output:
       - ftle: [N] FTLE for the center sample in each group
     """
-    assert points_grouped.dim() == 4 and points_grouped.shape[-1] >= 2
-    N = int(points_grouped.shape[0])
-    pts = points_grouped
-    L=pts.shape[2]
-    k = L - 1
+    assert points_grouped.dim() == 4 and points_grouped.shape[-1] >= 2 and points_grouped.shape[2] >= 2
+    NumberofCross,NumberOfNeighbors,NumberOfLineSteps,Dim=points_grouped.shape
 
     # Initial and final positions (physical coordinates)
     # Neighbor order convention: 0=center, 1=x+, 2=x-, 3=y+, 4=y-
-    p0 = pts[:, :, 0, :2]  # [N,5,2]
-    pk = pts[:, :, k, :2]  # [N,5,2]
+    pStart= points_grouped[:, :, 0, :2]  # [N,5,2]
+    pEnd = points_grouped[:, :, -1, :2]  # [N,5,2]
 
     # Initial offsets (scalars, axis-aligned)
-    dx0 = (p0[:, 1, 0] - p0[:, 2, 0]).clamp_min(1e-12)  # [N]
-    dy0 = (p0[:, 3, 1] - p0[:, 4, 1]).clamp_min(1e-12)  # [N]
+    dx0 = (pStart[:, 1, 0] - pStart[:, 2, 0]).clamp_min(1e-12)  # [N]
+    dy0 = (pStart[:, 3, 1] - pStart[:, 4, 1]).clamp_min(1e-12)  # [N]
 
     # Flow map Jacobian J = [dPhi/dx0, dPhi/dy0] (as column vectors)
-    dPhi_dx = (pk[:, 1, :2] - pk[:, 2, :2]) / dx0.unsqueeze(-1)  # [N,2]
-    dPhi_dy = (pk[:, 3, :2] - pk[:, 4, :2]) / dy0.unsqueeze(-1)  # [N,2]
+    dPhi_dx = (pEnd[:, 1, :2] - pEnd[:, 2, :2]) / dx0.unsqueeze(-1)
+    dPhi_dy = (pEnd[:, 3, :2] - pEnd[:, 4, :2]) / dy0.unsqueeze(-1)
     J = torch.stack([dPhi_dx, dPhi_dy], dim=-1)  # [N,2,2]
-
     # Cauchy–Green tensor C = J^T J
     JT = J.transpose(1, 2)
     C = torch.bmm(JT, J)  # [N,2,2]
@@ -118,14 +139,17 @@ def computeFTLEFromPathlineCrossPrimitive(points_grouped: torch.Tensor,
     lambda_max = eigvals[:, 1].clamp_min(1e-12)
 
     # Physical time span ΔT (use center line time)
-    t_norm_start = pts[:, 0, 0, 2]
-    t_norm_end   = pts[:, 0, k, 2]
+    t_norm_start = points_grouped[:, 0, 0, -1]
+    t_norm_end   = points_grouped[:, 0, -1, -1]
     T_phys = (t_norm_end - t_norm_start).abs() 
+    valid = T_phys >= 2 * vectorfield_dt
+    T_safe = T_phys.clamp_min(1e-12)
+    ftle_raw = 0.5 * torch.log(lambda_max) / T_safe
 
-    # If T_phys is too small (< 2*vectorfield_dt), the pathline is invalid → set FTLE to 0
-    ftle = 0.5 * torch.log(lambda_max) / T_phys
-    ftle = torch.where(T_phys <2* vectorfield_dt , torch.zeros_like(ftle), ftle)
+    ftle = torch.where(valid, ftle_raw, torch.zeros_like(ftle_raw))
     return ftle
+
+
 
 def sample_random_starts(vectorfield: UnsteadyVectorField2D, count: int) -> torch.Tensor:
     xrange = vectorfield.domainMaxBoundary[0] - vectorfield.domainMinBoundary[0]
@@ -233,47 +257,53 @@ def generate_seedingGrid_2D(vectorfield: UnsteadyVectorField2D,resolutionUPsampl
 
 
 
+def generate_Flowmap_SLICE(vectorfield: UnsteadyVectorField2D, physcial_time: float, dt: float,
+                           maxIterations: int, offesetDist: float, resolutionUPsampling: float = 1.0):
+    """
+    生成一张时间切片的 flow map（直接输出 pathline 的首/尾点位置，不计算 FTLE，不做归一化）。
 
-def generate_FLowMap_SLICE(vectorfield: UnsteadyVectorField2D,physcial_time:float,dt:float,maxIterations:int, offesetDist:float, resolutionUPsampling:float=1.0):
+    与 `generate_FTLE_SLICE` 的关系: FTLE 本质就是这里 flow map 的派生量
+    （对每个格点的 pathline 取首尾 + 线性变化求 Cauchy-Green 特征值开根号，见
+    `computeFTLEFromPathlineCrossPrimitive` / `FTLEFromFlowMap`）。本函数把内部 pathline
+    的首尾点直接输出, 去掉了 FTLE 计算部分, 供 flow map 上采样训练使用。
+
+    与旧的 `generate_FLowMap_SLICE` 的区别:
+        - 保留全部 5 个 neighbor（不再只取中心点）;
+        - 输出首/尾两个点的 **原始物理坐标** (x,y,t)，形状 [..., 2, 3]，而非位移、也不归一化。
+
+    返回:
+        flowmap_field:    torch.FloatTensor [ny*nx, nerbors=5, 2, 3]  每个格点 5 条 pathline 的(首点,尾点)原始坐标
+        Pathline_g:       torch.FloatTensor [ny*nx, nerbors, max_steps, 3]
+        PathlineLength_g: torch.Tensor      [ny*nx, nerbors]
+        nx, ny: x/y 方向的格点数
     """
-    return: Pathline_g shape: (ny*nx, nerbors, max_steps, 3)
-            PathlineLength_b shape: (ny*nx, nerbors)
-            nx,ny: number of grid points in x and y direction
-    """
-    nerbors=5
+    nerbors = 5
     offset_dist = float(offesetDist)
     max_steps = int(maxIterations)
-    starts_xy,xs,ys=generate_seedingGrid_2D(vectorfield,resolutionUPsampling)
+    starts_xy, xs, ys = generate_seedingGrid_2D(vectorfield, resolutionUPsampling)
     ny, nx = len(ys), len(xs)
     Pathline_b, PathlineLength_b = batch_pathlineCross_integration_2D_auto(
-                points=starts_xy,
-                vectorfield=vectorfield,
-                t_start=float(physcial_time), t_target=float(physcial_time+dt*maxIterations),
-                dt=float(dt), max_steps=int(max_steps),
-                offsets_size=float(offset_dist), method="rk4"
-            )
-    Pathline_g = Pathline_b.view(nx*ny, nerbors, max_steps, 3)
-    PathlineLength_g = PathlineLength_b.view(nx*ny, nerbors)
-    # y_all=computeFTLEFromPathlineCrossPrimitive(Pathline_g, vectorfield_dt=vectorfield.timeInterval)
+        points=starts_xy,
+        vectorfield=vectorfield,
+        t_start=float(physcial_time), t_target=float(physcial_time + dt * maxIterations),
+        dt=float(dt), max_steps=int(max_steps),
+        offsets_size=float(offset_dist), method="rk4"
+    )
+    Pathline_g = Pathline_b.view(nx * ny, nerbors, max_steps, 3)
+    PathlineLength_g = PathlineLength_b.view(nx * ny, nerbors)
 
-    keep_groups_full = (PathlineLength_g == max_steps).all(dim=1)
-    linear_index=np.arange(nx*ny)
-    valid_index=linear_index[keep_groups_full]
-    rows=valid_index//nx
-    cols=valid_index%nx
+    # 首点(积分起点)与尾点(积分终点)的原始坐标, 不做归一化
+    head = Pathline_g[:, :, 0, :]              # [ny*nx, 5, 3]
+    tail = Pathline_g[:, :, max_steps - 1, :]  # [ny*nx, 5, 3]
+    flowmap_field = torch.stack([head, tail], dim=2).contiguous()  # [ny*nx, 5, 2, 3]
 
-    true_grid = np.full((ny, nx, 6), 0, dtype=np.float32)
-    centralPointfirt_pos=Pathline_g[valid_index, 0, 0,:]
-    centralPointlast_pos=Pathline_g[valid_index, 0, max_steps-1,:]
-    #concat centralPointfirt_pos and centralPointlast_pos
-    flowMap=torch.concat([centralPointfirt_pos,centralPointlast_pos-centralPointfirt_pos],axis=1)
-    flowMap[...,0:2]=flowMap[...,0:2]/global_UniformValueSpatical
-    flowMap[...,2]=flowMap[...,2]/global_UniformValueTemporal
-    flowMap[...,3:5]=flowMap[...,3:5]/global_UniformValueSpatical
-    flowMap[...,5]=flowMap[...,5]/global_UniformValueTemporal
-    true_grid[rows, cols,:] =flowMap.detach().cpu().numpy()
+    # 未完整积分的 group(任一 cross line 长度 != max_steps)其尾点是 0 填充的垃圾值, 会污染
+    # 由其派生的 FTLE。与 generate_FTLE_SLICE 一致: 把这些 group 整体置零, 经
+    # computeFTLEFromPathlineCrossPrimitive 的 T_phys<2*dt 检查后 FTLE 会自然变成 0。
+    keep_groups_full = (PathlineLength_g == max_steps).all(dim=1)  # [ny*nx]
+    flowmap_field[~keep_groups_full] = 0.0
 
-    return true_grid,Pathline_g,PathlineLength_g,nx,ny
+    return flowmap_field, Pathline_g, PathlineLength_g, nx, ny
 
 
 def generate_FTLE_SLICE(cfg,vectorfield: UnsteadyVectorField2D,physcial_time:float,dt:float,maxIterations:int, resolutionUPsampling:float=1.0):
@@ -478,7 +508,7 @@ def visualize_twoftle_slices(true_grid: np.ndarray, pred_grid: np.ndarray, domai
 
 
 def visualize_FTLEUpampling(true_grid: np.ndarray, pred_grid: np.ndarray,low_res_grid: np.ndarray, domainMinBoundary,domainMaxBoundary,save_path: str | None = None,
-                         upscale_factor: int = 1, dpi: int = 300):
+                         upscale_factor: int = 1, dpi: int = 300, show: bool = True):
     def robust_minmax(a):
         if np.all(np.isnan(a)):
             return 0.0, 1.0
@@ -532,7 +562,8 @@ def visualize_FTLEUpampling(true_grid: np.ndarray, pred_grid: np.ndarray,low_res
 
     if save_path is not None:
         plt.savefig(save_path, dpi=200)
-    plt.show(block=True)
+    if show:
+        plt.show(block=True)
     plt.close(fig)
 
 
@@ -882,14 +913,21 @@ class PointWiseFTLETrainDataset(Dataset):
 
 
 
-# Torch Dataset for training samples generated on-the-fly via generate_training_samples
-class FTLEUpsamplingTrainDataset(Dataset):
+
+
+# Unified flow-map upsampling dataset.
+#
+# 合并自原 FTLEUpsamplingTrainDataset + FLowMapUpsamplingTrainDataset。核心思路:
+# 直接 upsample flow map（pathline 首/尾点位置），而不是 upsample FTLE —— 因为 FTLE 只是
+# flow map 的派生量（首尾 + 线性变化 + Cauchy-Green 特征值开根号, 见 FTLEFromFlowMap）。
+# 每个 slice 通过 `generate_Flowmap_SLICE` 得到原始坐标的 flow map（[NxNy,5,2,3]），再做
+# 滑窗 patch tiling。flow map 不做任何归一化（输出原始物理坐标）。
+class FlowMapUpsamplingTrainDataset(Dataset):
     def __init__(self,   config, useCacheSystem: bool = True):
         UnsteadyVectorFields=[]
-        ftle_resolutionUPsampling=float(config.dataset.UPsampling)
-        all_vectorfieldsname=[name for name in config.dataset.input_names]
-   
-        timesliceCount=int(getattr(config.dataset, 'trainTimesliceCount', 20))
+        # 支持 input_names（与 FTLE 数据集一致）；兼容旧的 names 字段。
+        all_vectorfieldsname=[name for name in getattr(config.dataset, 'input_names', getattr(config.dataset, 'names', []))]
+        timesliceCount=int(getattr(config.dataset, 'trainTimesliceCount', getattr(config.dataset, 'timesliceCount', 20)))
         UPsampling=int(config.dataset.UPsampling)
         low_res_grid_sampling=float(config.dataset.low_res_grid_sampling)
         max_steps: int=config.pcds.max_iterations
@@ -899,12 +937,10 @@ class FTLEUpsamplingTrainDataset(Dataset):
         time_window_target_ratio=float(config.dataset.t_target)
         LstepsPerline=int(config.pcds.sampled_points_per_line)
         patch_size=int(getattr(config.dataset, 'patchSize', 32))
-        patch_stride=4*int(getattr(config.dataset, 'patchStride', 4))
+        patch_stride=int(getattr(config.dataset, 'patchStride', 4))
         LoadCacheSuccess=False
-       
-   
         key_obj = {
-            "name": "ftle_upsampling_train",
+            "name": "flowmap_upsampling_train",
             "vectorfields": list(all_vectorfieldsname),
             "timesliceCount": int(timesliceCount),
             "UPsampling": int(UPsampling),
@@ -916,212 +952,12 @@ class FTLEUpsamplingTrainDataset(Dataset):
             "offset_dist": float(offset_dist),
             "LstepsPerline": int(LstepsPerline),
             "patchSize": int(patch_size),
-            "patchStride": int(patch_stride)
-                }
-        tag = stable_hash(key_obj, prefix="FTLEUpsamplingTrainingDataset_")
-        cache_dir = os.path.join(config.cache_dir, "temp")
-        cache_path = os.path.join(cache_dir, f"{tag}.npz")
-        if useCacheSystem and os.path.exists(cache_path):
-            try:
-                data = np.load(cache_path)
-                data_np = data["Data"]
-                labels_np = data["Labels"]
-                lowResPathlines_np = data["LowResPathlines"]
-                self.lowResFTLE = torch.from_numpy(data_np).float()
-                self.lowResPathlines = torch.from_numpy(lowResPathlines_np).float()
-                self.labels = torch.from_numpy(labels_np).float()
-                LoadCacheSuccess=True
-                logging.info(f"[FTLEUpsamplingTrainDataset] loaded {self.lowResFTLE.shape[0]} samples from cache {cache_path}")
-            except Exception as e:
-                print(f"[generate_training_samples] cache load failed: {e}. Regenerating...")
-                         
-        UnsteadyVectorFields=  load_UnsteadyVectorFields_general(config.dataset.dat_dir,config.dataset.input_names)
-        FTLE_fieldsLowRes=[]      # list[Tensor patch_yx]
-        FTLE_fieldsHighRes=[]     # list[Tensor patch_yx (hi)]
-        lowResPathlinesData=[]    # list[Tensor (patch_hw groups, nerbors, L, 3)]
-        # itemMap2VectorField=[]
-
-        if not LoadCacheSuccess:
-            # helper: compute starts so that last window touches boundary (may overlap previous)
-            def _tiling_starts(length: int, k: int, stride: int) -> list[int]:
-                if k >= length:
-                    return [0]
-                s = max(1, int(stride))
-                starts = list(range(0, length - k + 1, s))
-                last = length - k
-                if starts[-1] != last:
-                    starts.append(last)
-                return starts
-
-            high_res_sampling=float(UPsampling*low_res_grid_sampling)
-            for i,vectorfield in enumerate(UnsteadyVectorFields):
-                logging.info(f"[FTLEUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
-                time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
-                time_window_target = float(time_window_target_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
-                # Forward FTLE integration needs seed_time + dt*max_steps <= tmax, otherwise every
-                # pathline runs out of time and the FTLE field collapses to all-zeros (constant).
-                # Cap the latest seed time so the integration horizon always fits the time domain.
-                integ_horizon = float(flowline_dt) * int(max_steps)
-                safe_target = float(vectorfield.tmax) - integ_horizon
-                if time_window_target > safe_target:
-                    logging.warning(f"[UpsamplingTrainDataset] t_target={time_window_target:.3f} + integ horizon "
-                                    f"{integ_horizon:.3f} exceeds tmax={float(vectorfield.tmax):.3f}; "
-                                    f"clamping slice end to {max(time_window_start, safe_target):.3f}")
-                    time_window_target = safe_target 
-                timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
-                for physical_time in timeslice:
-                    # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
-                    low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FTLE_SLICE(config,vectorfield,physical_time,flowline_dt,max_steps,low_res_grid_sampling)  
-                    high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FTLE_SLICE(config,vectorfield,physical_time,flowline_dt,max_steps,high_res_sampling)
-
-                    # Stage-2 debug: low/high-res FTLE slice consistency (shape ratio sanity).
-                    dbg.check_ftle_lowhigh(low_resFTLE_field, high_resFTLE_field, UPsampling)
-
-                    lowResPathlinesPreprocessed=AngleAwareSampling(lowResPathlines, LstepsPerline)
-                    # lowResPathlinesPreprocessed=preprocess_localization_normalization(temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False ).cpu().float()
-
-                    # sliding window tiling into patches that fully cover the 2D plane
-                    ny_low, nx_low = low_resFTLE_field.shape
-                    ny_hi, nx_hi = high_resFTLE_field.shape
-                    ry = UPsampling
-                    rx = UPsampling
-
-                    row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
-                    col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
-
-                    for i0 in row_starts:
-                        i1 = min(i0 + patch_size, ny_low)
-                        for j0 in col_starts:
-                            j1 = min(j0 + patch_size, nx_low)
-
-                            # map to high-res indices (align last window to boundary)
-                            hi_h = max(1,patch_size*UPsampling)
-                            hi_w = max(1,patch_size*UPsampling)
-                            hi_i0 = int(round(i0 * ry))
-                            hi_j0 = int(round(j0 * rx))
-                            if i0 == row_starts[-1]:
-                                hi_i0 = ny_hi - hi_h
-                            if j0 == col_starts[-1]:
-                                hi_j0 = nx_hi - hi_w
-                            hi_i1 = hi_i0 + hi_h
-                            hi_j1 = hi_j0 + hi_w
-
-                            # low-res FTLE patch
-                            lr_patch = torch.from_numpy(low_resFTLE_field[i0:i1, j0:j1]).float()
-
-                            # high-res FTLE patch
-                            hr_patch = torch.from_numpy(high_resFTLE_field[hi_i0:hi_i1, hi_j0:hi_j1]).float()
-
-                            # pathlines patch: select groups that fall inside the low-res window
-                            idx_list = []
-                            for rr in range(i0, i1):
-                                base = rr * nx_low
-                                for cc in range(j0, j1):
-                                    idx_list.append(base + cc)
-                            if len(idx_list) == 0:
-                                continue
-                            idx_tensor = torch.as_tensor(idx_list, dtype=torch.long)
-                            pl_patch = lowResPathlinesPreprocessed[idx_tensor]
-                            if pl_patch.shape[0] == lr_patch.shape[0]*lr_patch.shape[1] and lr_patch.shape[1]*UPsampling  == hr_patch.shape[1]and\
-                               lr_patch.shape[0]*UPsampling== hr_patch.shape[0]:
-                                FTLE_fieldsLowRes.append(lr_patch)
-                                FTLE_fieldsHighRes.append(hr_patch)
-                                lowResPathlinesData.append(pl_patch)
-                            else:
-                                logging.warning(f"[FTLEUpsamplingTrainDataset] pl_patch.shape: {pl_patch.shape}, lr_patch.shape: {lr_patch.shape}, hr_patch.shape: {hr_patch.shape}")
-                            # itemMap2VectorField.append(vectorfield)
-
-            self.lowResFTLE = torch.stack(FTLE_fieldsLowRes)
-            self.lowResPathlines = torch.stack(lowResPathlinesData)
-            self.labels = torch.stack(FTLE_fieldsHighRes)
-
-        if useCacheSystem and not LoadCacheSuccess:
-            try:
-                os.makedirs(cache_dir, exist_ok=True)
-                np.savez(cache_path,
-                        Data=self.lowResFTLE.detach().cpu().numpy().astype(np.float32),
-                        Labels=self.labels.detach().cpu().numpy().astype(np.float32),
-                        LowResPathlines=self.lowResPathlines.detach().cpu().numpy().astype(np.float32))
-                logging.info(f"[FTLEUpsamplingTrainDataset] saved {self.lowResFTLE.shape[0]} samples to cache {cache_path}")
-            except Exception as e:
-                print(f"[generate_training_samples] cache save failed: {e}")
-
-
-          #normalize the ftle
-       
-        #put preprocessing here if any
-
-        #normalize the ftle
-        self.ftle_min = float(self.labels.min())
-        self.ftle_max = float(self.labels.max())
-        self.lowResFTLE = self.lowResFTLE.clamp(self.ftle_min, self.ftle_max)
-        self.lowResFTLE = (self.lowResFTLE-self.ftle_min)/(self.ftle_max-self.ftle_min)
-        normalized_y=(self.labels-self.ftle_min)/(self.ftle_max-self.ftle_min)
-        normalized_y=normalized_y.clamp(0,1)
-        self.labels = normalized_y       # [N]
-
-        # Stage-2 debug: validate the assembled dataset (shapes, finiteness, sample-count
-        # consistency, pathline structure, normalized label range, patch UP relation).
-        _nerb = int(getattr(config.pcds, 'num_cross_points_per_seeding', 5))
-        _L = int(getattr(config.pcds, 'sampled_points_per_line', 4))
-        dbg.check_dataset("FTLE_train", self.lowResFTLE, self.labels, self.lowResPathlines,
-                          nerbors=_nerb, L=_L, upsampling=int(UPsampling))
-
-
-    def __len__(self):
-        return len(self.lowResFTLE)
-
-    def __getitem__(self, idx):
-        return (self.lowResFTLE[idx], self.lowResPathlines[idx]), self.labels[idx]
-
-
-
-
-
-
-
-
-
-
-
-# Torch Dataset for training samples generated on-the-fly via generate_training_samples
-class FLowMapUpsamplingTrainDataset(Dataset):
-    def __init__(self,   config, useCacheSystem: bool = True):
-        UnsteadyVectorFields=[]
-        ftle_resolutionUPsampling=float(config.dataset.UPsampling)
-        all_vectorfieldsname=[name for name in config.dataset.names]
-        all_vectorfieldsname_str=",".join(all_vectorfieldsname)
-        # Train slice count is decoupled from the test set: prefer `trainTimesliceCount`
-        # so the train set can grow while build_test_dataset (which uses `timesliceCount`)
-        # keeps producing the exact same test slices.
-        timesliceCount=int(getattr(config.dataset, 'trainTimesliceCount', config.dataset.timesliceCount))
-        UPsampling=int(config.dataset.UPsampling)
-        low_res_grid_sampling=float(config.dataset.low_res_grid_sampling)
-        max_steps: int=config.pcds.max_iterations
-        flowline_dt: float=config.pcds.dt
-        offset_dist: float =float(config.pcds.offset_dist)
-        time_window_start_ratio=float(config.dataset.t_start)
-        time_window_target_ratio=float(config.dataset.t_target)
-        LstepsPerline=int(config.pcds.sampled_points_per_line)
-        patch_size=int(getattr(config.dataset, 'patchSize', 32))
-        patch_stride=4*int(getattr(config.dataset, 'patchStride', 4))
-        LoadCacheSuccess=False
-        key_obj = {
-            "name": "ftle_upsampling_train",
-            "vectorfields": list(all_vectorfieldsname),
-            "timesliceCount": int(timesliceCount),
-            "UPsampling": int(UPsampling),
-            "lowResGridIntervalScale": float(low_res_grid_sampling),
-            "time_window_start_ratio": float(time_window_start_ratio),
-            "time_window_target_ratio": float(time_window_target_ratio),
-            "max_steps": int(max_steps),
-            "dt": float(flowline_dt),
-            "offset_dist": float(offset_dist),
-            "LstepsPerline": int(LstepsPerline),
-            "patchSize": int(patch_size),
-            "patchStride": int(patch_stride)
+            "patchStride": int(patch_stride),
+            # bump these when the stored data semantics change so old caches are not reused.
+            "normalize": f"div{GLOBAL_UniformValueTemporalAndSpatial}",
+            "representation": "relCenterScaled_2offset",
             }
-        tag = stable_hash(key_obj, prefix="FLowMapUpsamplingTrainingDataset_")
+        tag = stable_hash(key_obj, prefix="FlowMapUpsamplingTrainingDataset_")
         cache_dir = os.path.join(config.cache_dir, "temp")
         cache_path = os.path.join(cache_dir, f"{tag}.npz")
         if useCacheSystem and os.path.exists(cache_path):
@@ -1134,14 +970,24 @@ class FLowMapUpsamplingTrainDataset(Dataset):
                 self.lowResPathlines = torch.from_numpy(lowResPathlines_np).float()
                 self.labels = torch.from_numpy(labels_np).float()
                 LoadCacheSuccess=True
-                logging.info(f"[FLowMapUpsamplingTrainDataset] loaded {self.lowResFlowMap.shape[0]} samples from cache {cache_path}")
+                logging.info(f"[FlowMapUpsamplingTrainDataset] loaded {self.lowResFlowMap.shape[0]} samples from cache {cache_path}")
             except Exception as e:
-                print(f"[FLowMapUpsamplingTrainDataset] cache load failed: {e}. Regenerating...")
-                         
+                print(f"[FlowMapUpsamplingTrainDataset] cache load failed: {e}. Regenerating...")
+
         if not LoadCacheSuccess:
             # helper: compute starts so that last window touches boundary (may overlap previous)
             def _tiling_starts(length: int, k: int, stride: int) -> list[int]:
+                length = int(length)
+                k = int(k)
+                if length <= 0:
+                    logging.warning("[FlowMapUpsamplingTrainDataset] empty tiling dimension; no starts generated.")
+                    return []
+                if k <= 0:
+                    raise ValueError(f"patch size must be positive, got {k}")
                 if k >= length:
+                    if k > length:
+                        logging.warning(f"[FlowMapUpsamplingTrainDataset] patch_size={k} > grid length={length}; "
+                                        "using one edge-padded tile.")
                     return [0]
                 s = max(1, int(stride))
                 starts = list(range(0, length - k + 1, s))
@@ -1150,86 +996,109 @@ class FLowMapUpsamplingTrainDataset(Dataset):
                     starts.append(last)
                 return starts
 
-            UnsteadyVectorFields=load_UnsteadyVectorFields_netCDFOrAnalytical(config.dataset.dat_dir,config.dataset.names)
-            FLowMap_fieldsLowRes=[]      # list[Tensor patch_yx]
-            FLowMap_fieldsHighRes=[]     # list[Tensor patch_yx (hi)]
-            lowResPathlinesData=[]    # list[Tensor (patch_hw groups, nerbors, L, 3)]
-            high_res_sampling=int(UPsampling*low_res_grid_sampling)
+            def _patch_indices(start: int, length: int, k: int) -> list[int]:
+                start = max(0, min(int(start), max(0, int(length) - 1)))
+                end = min(start + int(k), int(length))
+                indices = list(range(start, end))
+                if indices and int(k) > int(length):
+                    indices.extend([indices[-1]] * (int(k) - len(indices)))
+                return indices
+
+            UnsteadyVectorFields=load_UnsteadyVectorFields_general(config.dataset.dat_dir, all_vectorfieldsname)
+            FLowMap_fieldsLowRes=[]      # list[Tensor (patch_hw, 5, 2, 3)]
+            FLowMap_fieldsHighRes=[]     # list[Tensor (patch_hw*UP*UP, 5, 2, 3)]
+            lowResPathlinesData=[]       # list[Tensor (patch_hw, 5, L, 3)]
+            high_res_sampling=float(UPsampling*low_res_grid_sampling)
             for i,vectorfield in enumerate(UnsteadyVectorFields):
-                logging.info(f"[FLowMapUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
+                logging.info(f"[FlowMapUpsamplingTrainDataset] generate training samples for {i+1} vector field of {len(UnsteadyVectorFields)}...")
+                field_patches_before = len(FLowMap_fieldsLowRes)
                 time_window_start = float(time_window_start_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
                 time_window_target = float(time_window_target_ratio * (vectorfield.tmax - vectorfield.tmin) + vectorfield.tmin)
-                # Forward FTLE integration needs seed_time + dt*max_steps <= tmax, otherwise every
-                # pathline runs out of time and the FTLE field collapses to all-zeros (constant).
-                # Cap the latest seed time so the integration horizon always fits the time domain.
+                # Forward integration needs seed_time + dt*max_steps <= tmax, otherwise every
+                # pathline runs out of time. Cap the latest seed time so the horizon fits the domain.
                 integ_horizon = float(flowline_dt) * int(max_steps)
                 safe_target = float(vectorfield.tmax) - integ_horizon
                 if time_window_target > safe_target:
-                    logging.warning(f"[UpsamplingTrainDataset] t_target={time_window_target:.3f} + integ horizon "
+                    logging.warning(f"[FlowMapUpsamplingTrainDataset] t_target={time_window_target:.3f} + integ horizon "
                                     f"{integ_horizon:.3f} exceeds tmax={float(vectorfield.tmax):.3f}; "
                                     f"clamping slice end to {max(time_window_start, safe_target):.3f}")
                     time_window_target = max(time_window_start, safe_target)
                 timeslice=np.linspace(time_window_start, time_window_target, timesliceCount)
-                for time_slice in timeslice:
-                    # Low-res grid seeding,lowResPathlines shape: (lowResX*lowResY, nerbors, max_steps, 3)
-                    low_resFTLE_field,lowResPathlines,low_res_xs,low_res_ys=generate_FLowMap_SLICE(vectorfield,time_slice,flowline_dt,max_steps,offset_dist,low_res_grid_sampling)  
-                    high_resFTLE_field,_,high_res_xs,high_res_ys=generate_FLowMap_SLICE(vectorfield,time_slice,flowline_dt,max_steps,offset_dist,high_res_sampling)
-                    # visualize_twoftle_slices(low_resFTLE_field, high_resFTLE_field, vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary)
-                    # pathline_length_in_save_data=max(max_steps//2, LstepsPerline)
+                for physcialTime in timeslice:
+                    # low/high-res flow map slices, raw coords:
+                    #   *_flow      : torch [ny*nx, 5, 2, 3]
+                    #   lowResPathlines: torch [ny*nx, 5, max_steps, 3]
+                    low_resFlowMap_field, lowResPathlines, _low_len, nx_low, ny_low = generate_Flowmap_SLICE(
+                        vectorfield, physcialTime, flowline_dt, max_steps, offset_dist, low_res_grid_sampling)
+                    high_resFlowMap_field, _h_pl, _h_len, nx_hi, ny_hi = generate_Flowmap_SLICE(
+                        vectorfield, physcialTime, flowline_dt, max_steps, offset_dist, high_res_sampling)
 
+                    # lowResPathlinesPreprocessed: [ny*nx, 5, LstepsPerline, 3]
                     lowResPathlinesPreprocessed=AngleAwareSampling(lowResPathlines, LstepsPerline)
-                    # lowResPathlinesPreprocessed=preprocess_localization_normalization(temporal_sampled_P_all, 5, int(LstepsPerline), bool(localized), False ).cpu().float()
 
-                    # sliding window tiling into patches that fully cover the 2D plane
-                    ny_low, nx_low = low_resFTLE_field.shape[:2]
-                    ny_hi, nx_hi = high_resFTLE_field.shape[:2]
-                    ry = UPsampling
-                    rx = UPsampling
-
+                    # sliding window tiling over the (ny_low, nx_low) grid; flow map / pathlines are
+                    # indexed flat (row*nx + col), so build flat index lists for each patch.
+                    # Only edge-pad when the whole grid dimension is smaller than patch_size
+                    # (e.g. 20 -> 32); normal partial/misaligned patches are dropped below.
                     row_starts = _tiling_starts(ny_low, patch_size, patch_stride)
                     col_starts = _tiling_starts(nx_low, patch_size, patch_stride)
 
-                    for i0 in row_starts:
-                        i1 = i0 + patch_size
-                        for j0 in col_starts:
-                            j1 = j0 + patch_size
-
+                    for row_tile_idx, i0 in enumerate(row_starts):
+                        row_idx = _patch_indices(i0, ny_low, patch_size)
+                        for col_tile_idx, j0 in enumerate(col_starts):
+                            col_idx = _patch_indices(j0, nx_low, patch_size)
                             # map to high-res indices (align last window to boundary)
-                            hi_h = max(1,patch_size*UPsampling)
-                            hi_w = max(1,patch_size*UPsampling)
-                            hi_i0 = int(round(i0 * ry))
-                            hi_j0 = int(round(j0 * rx))
-                            if i0 == row_starts[-1]:
+                            hi_h = max(1, patch_size * UPsampling)
+                            hi_w = max(1, patch_size * UPsampling)
+                            hi_i0 = int(round(i0 * UPsampling))
+                            hi_j0 = int(round(j0 * UPsampling))
+                            if row_tile_idx == len(row_starts) - 1:
                                 hi_i0 = ny_hi - hi_h
-                            if j0 == col_starts[-1]:
+                            if col_tile_idx == len(col_starts) - 1:
                                 hi_j0 = nx_hi - hi_w
-                            hi_i1 = hi_i0 + hi_h
-                            hi_j1 = hi_j0 + hi_w
+                            hi_i0 = max(0, hi_i0)
+                            hi_j0 = max(0, hi_j0)
+                            hi_row_idx = _patch_indices(hi_i0, ny_hi, hi_h)
+                            hi_col_idx = _patch_indices(hi_j0, nx_hi, hi_w)
 
-                            # low-res FTLE patch
-                            lr_patch = torch.from_numpy(low_resFTLE_field[i0:i1, j0:j1,:]).float()
-
-                            # high-res FTLE patch
-                            hr_patch = torch.from_numpy(high_resFTLE_field[hi_i0:hi_i1, hi_j0:hi_j1,:]).float()
-
-                            # pathlines patch: select groups that fall inside the low-res window
-                            idx_list = []
-                            for rr in range(i0, i1):
-                                base = rr * nx_low
-                                for cc in range(j0, j1):
-                                    idx_list.append(base + cc)
-                            if len(idx_list) == 0:
+                            #flatten the index to 1D index   ,GPT check Y,X 排序是正确的：rr 是 y/row，cc 是 x/col；同一个 row 内 x 连续增长，row 变化时 y 才增长。
+                            lo_idx = [rr * nx_low + cc for rr in row_idx for cc in col_idx]
+                            hi_idx = [rr * nx_hi + cc for rr in hi_row_idx for cc in hi_col_idx]
+                            if len(lo_idx) == 0 or len(hi_idx) == 0:
                                 continue
-                            idx_tensor = torch.as_tensor(idx_list, dtype=torch.long)
-                            pl_patch = lowResPathlinesPreprocessed[idx_tensor]
-                            if pl_patch.shape[0] == lr_patch.shape[0]*lr_patch.shape[1] and lr_patch.shape[1]*UPsampling  == hr_patch.shape[1]and\
-                               lr_patch.shape[0]*UPsampling== hr_patch.shape[0]:
+                            lo_t = torch.as_tensor(lo_idx, dtype=torch.long)
+                            hi_t = torch.as_tensor(hi_idx, dtype=torch.long)
+
+                            lr_patch = low_resFlowMap_field[lo_t].float()   # [P, 5, 2, 3]
+                            hr_patch = high_resFlowMap_field[hi_t].float()  # [P*UP*UP, 5, 2, 3]
+                            pl_patch = lowResPathlinesPreprocessed[lo_t].float()  # [P, 5, L, 3]
+
+                            # (1) Jacobian-aware representation: rewrite neighbour-line xy as
+                            # offset-from-center / (2*offset_dist), lifting the FTLE signal to
+                            # O(1). (2) Then scale all coords by 1/GLOBAL for image-like inputs.
+                            # Both input and label get the SAME transforms; test mirrors them in
+                            # reverse (inverse_normalize -> from_relative) before computing FTLE.
+                            rel_scale = 2.0 * offset_dist
+                            lr_patch = flowmap_to_relative(lr_patch, rel_scale) / GLOBAL_UniformValueTemporalAndSpatial
+                            hr_patch = flowmap_to_relative(hr_patch, rel_scale) / GLOBAL_UniformValueTemporalAndSpatial
+
+                            # keep only patches whose hi/lo counts respect the UP^2 relation
+                            if hr_patch.shape[0] == lr_patch.shape[0] * UPsampling * UPsampling \
+                               and pl_patch.shape[0] == lr_patch.shape[0]:
                                 FLowMap_fieldsLowRes.append(lr_patch)
                                 FLowMap_fieldsHighRes.append(hr_patch)
                                 lowResPathlinesData.append(pl_patch)
                             else:
-                                logging.warning(f"[FLowMapUpsamplingTrainDataset] pl_patch.shape: {pl_patch.shape}, lr_patch.shape: {lr_patch.shape}, hr_patch.shape: {hr_patch.shape}")
-                            # itemMap2VectorField.append(vectorfield)
+                                logging.warning(f"[FlowMapUpsamplingTrainDataset] dropped patch: "
+                                                f"pl={tuple(pl_patch.shape)}, lr={tuple(lr_patch.shape)}, hr={tuple(hr_patch.shape)}")
+
+                n_field_patches = len(FLowMap_fieldsLowRes) - field_patches_before
+                _vfname = all_vectorfieldsname[i] if i < len(all_vectorfieldsname) else f"field{i}"
+                if n_field_patches == 0:
+                    logging.warning(f"[FlowMapUpsamplingTrainDataset] '{_vfname}': 0 full {patch_size}x{patch_size} "
+                                    f"patches (low-res grid smaller than patch_size); excluded from training.")
+                else:
+                    logging.info(f"[FlowMapUpsamplingTrainDataset] '{_vfname}': collected {n_field_patches} patches.")
 
             self.lowResFlowMap = torch.stack(FLowMap_fieldsLowRes)
             self.lowResPathlines = torch.stack(lowResPathlinesData)
@@ -1242,26 +1111,12 @@ class FLowMapUpsamplingTrainDataset(Dataset):
                         Data=self.lowResFlowMap.detach().cpu().numpy().astype(np.float32),
                         Labels=self.labels.detach().cpu().numpy().astype(np.float32),
                         LowResPathlines=self.lowResPathlines.detach().cpu().numpy().astype(np.float32))
-                logging.info(f"[FLowMapUpsamplingTrainDataset] saved {self.lowResFlowMap.shape[0]} samples to cache {cache_path}")
+                logging.info(f"[FlowMapUpsamplingTrainDataset] saved {self.lowResFlowMap.shape[0]} samples to cache {cache_path}")
             except Exception as e:
-                logging.error(f"[FLowMapUpsamplingTrainDataset] cache save failed: {e}")
+                logging.error(f"[FlowMapUpsamplingTrainDataset] cache save failed: {e}")
 
 
-          #normalize the ftle
-       
-        #put preprocessing here if any
-
-        #normalize the ftle
-        # self.ftle_min = float(self.labels.min())
-        # self.ftle_max = float(self.labels.max())
-        # self.lowResFTLE = self.lowResFTLE.clamp(self.ftle_min, self.ftle_max)
-        # self.lowResFTLE = (self.lowResFTLE-self.ftle_min)/(self.ftle_max-self.ftle_min)
-        # normalized_y=(self.labels-self.ftle_min)/(self.ftle_max-self.ftle_min)
-        # normalized_y=normalized_y.clamp(0,1)
-        # self.labels = normalized_y       # [N]
-
-
-
+        # flow map 输出原始物理坐标, 不做归一化 (归一化交给下游处理)。
     def __len__(self):
         return len(self.lowResFlowMap)
 
@@ -1269,99 +1124,8 @@ class FLowMapUpsamplingTrainDataset(Dataset):
         return (self.lowResFlowMap[idx], self.lowResPathlines[idx]), self.labels[idx]
 
 
-def FTLEFromFlowMap(flowMapRegularGrid:torch.Tensor, deltaT: float = 1.0, dxdy: float = 1.0):
-    """
-    基于 flowmap 的 2D FTLE 估计（模仿 computeFTLEFromPathlineCrossPrimitive）。
-
-    输入:
-      - flowMapRegularGrid: [..., H, W, 6]，通道顺序为 [x0, y0, t0, x1, y1, t1]
-        若输入为 numpy，将自动转为 torch.float32。
-      - deltaT: 若缺失时间通道则使用的全局时间跨度；若提供 t0/t1 则按像素 |t1-t0|
-      - dxdy: 兼容参数，当前未使用（保留以兼容旧接口）
-    输出:
-      - ftle_grid: [..., H, W] 的 torch.float32 张量。
-
-    做法:
-      - 以起点坐标 (x0,y0) 的中心差分作为分母，对终点坐标 (x1,y1) 做中心差分作为分子，得到 J 的两列。
-      - 计算 Cauchy–Green 张量 C=J^T J 的最大特征值 λ_max。
-      - 对每个像素用物理时间跨度 ΔT=|t1-t0| 归一化：FTLE=0.5*log(λ_max)/ΔT。
-    """
-    # 支持 numpy 输入
-    if isinstance(flowMapRegularGrid, np.ndarray):
-        flow = torch.from_numpy(flowMapRegularGrid)
-    else:
-        flow = flowMapRegularGrid
-
-    assert flow.dtype in (torch.float16, torch.float32, torch.float64) or flow.is_floating_point(), "flow map must be float tensor"
-    flow = flow.to(dtype=torch.float32)
-
-    # 统一维度为 [..., H, W, C]
-    if flow.dim() == 3:
-        H, W, C = flow.shape
-        flow = flow.unsqueeze(0)  # [1, H, W, C]
-    elif flow.dim() >= 4:
-        H, W, C = flow.shape[-3], flow.shape[-2], flow.shape[-1]
-    else:
-        raise ValueError("flowMapRegularGrid must be [..., H, W, C] with C>=5")
-    if C < 5:
-        raise ValueError("flow map must have at least 5 channels: [x0,y0,t0,x1,y1(,t1)]")
-
-    # 提取起终点分量
-    x0 = flow[..., 0]
-    y0 = flow[..., 1]
-    t0 = flow[..., 2] if C >= 3 else None
-    X1 = flow[..., 3]
-    Y1 = flow[..., 4]
-    t1 = flow[..., 5] if C >= 6 else None
-
-    # 复制填充，便于中心差分（边界采用复制）
-    def _pad(t: torch.Tensor):
-        return F.pad(t, (1, 1, 1, 1), mode='replicate')  # [..., H+2, W+2]
-
-    x0p = _pad(x0)
-    y0p = _pad(y0)
-    X1p = _pad(X1)
-    Y1p = _pad(Y1)
-
-    # 初始坐标间距（分母），使用起点坐标的中心差分
-    dx0_raw = (x0p[..., 1:-1, 2:] - x0p[..., 1:-1, :-2])
-    dy0_raw = (y0p[..., 2:, 1:-1] - y0p[..., :-2, 1:-1])
-    zero_mask = (dx0_raw.abs() <= 1e-5) | (dy0_raw.abs() <= 1e-5)
 
 
-    # 终点坐标关于起点的偏导（分子），中心差分
-    dX_dx0 = (X1p[..., 1:-1, 2:] - X1p[..., 1:-1, :-2]) / dx0_raw
-    dY_dx0 = (Y1p[..., 1:-1, 2:] - Y1p[..., 1:-1, :-2]) / dx0_raw
-    dX_dy0 = (X1p[..., 2:, 1:-1] - X1p[..., :-2, 1:-1]) / dx0_raw
-    dY_dy0 = (Y1p[..., 2:, 1:-1] - Y1p[..., :-2, 1:-1]) / dx0_raw
 
 
-    # 显式展开 Cauchy–Green 张量 C = J^T J 的分量
-    C11 = dX_dx0 * dX_dx0 + dY_dx0 * dY_dx0
-    C22 = dX_dy0 * dX_dy0 + dY_dy0 * dY_dy0
-    C12 = dX_dx0 * dX_dy0 + dY_dx0 * dY_dy0
 
-    # 最大特征值解析式
-    trace = C11 + C22
-    diff = C11 - C22
-    rad = torch.sqrt((diff * diff + 4.0 * (C12 * C12)).clamp_min(1e-30))
-    lambda_max = 0.5 * (trace + rad)
-    lambda_max = lambda_max.clamp_min(1e-30)
-
-    # 时间跨度 ΔT(i,j)
-    if (t0 is not None) and (t1 is not None):
-        T_phys = (t1 - t0).abs().clamp_min(1e-12)
-    else:
-        # 若缺失时间通道，使用传入的 deltaT（默认 1.0）
-        T_val = float(abs(deltaT)) if abs(deltaT) > 0 else 1e-12
-        T_phys = torch.full_like(lambda_max, T_val)
-
-    # FTLE: 0.5*log(lambda_max) / ΔT
-    ftle_core = 0.5 * torch.log(lambda_max) / T_phys
-    # 对分母为零的位置（由 zero_mask 标记）置 NaN，便于后续过滤
-    ftle_core = torch.where(zero_mask,  torch.zeros_like(dY_dx0), ftle_core)
-
-    # 还原成原始批次维度
-    if flowMapRegularGrid.dim() == 3:
-        return ftle_core.squeeze(0)
-    return ftle_core

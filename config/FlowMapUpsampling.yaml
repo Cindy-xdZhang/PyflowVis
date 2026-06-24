@@ -1,0 +1,78 @@
+seed: 7068
+
+
+# training configurations
+train_points_count: 72000
+epochs: 200
+batch_size: 12
+print_freq: 200
+lr: 0.0001
+optimizer:
+  NAME: 'adamw'
+  weight_decay: 0.000001
+loss:
+  NAME: MSELoss
+model:
+  # Flow-map upsampling models (override per run via --model_name):
+  #   ESPCN_FlowMap | UNet_FlowMap
+  NAME: ESPCN_FlowMap
+
+
+
+
+# Pipeline validation/debug checks. 0=off, 1=warn+log, 2=strict.
+mode : upsamplingFLowMap
+wandb: False
+debug: 0
+dataset:
+  trainTimesliceCount: 20
+  low_res_grid_sampling: 0.5
+  UPsampling: 2 # must be integer
+  dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
+  input_names: [cylinder2d, boussinesq, doublegyre2d, rfc2d, beads2d, pipedcylinder2d]
+  extension: nc
+  t_start: 0.1
+  t_target: 0.9
+  patchSize: 32
+  patchStride: 8
+#testing configurations
+test:
+  tasks: test_UpsamplingModel
+  vectorfield: [doublegyre2d, cylinder2d]
+  timesliceCount: 5          # number of time slices per test field
+  patchStride: 4            # sliding-window stride at inference (patchSize=dataset.patchSize=32)
+
+
+pnn:
+  split: 3
+  points: 1024
+  stages: 2
+  dim: 24
+  k: 6
+  alpha: 1000
+  beta: 100
+
+
+dct:
+  k: 6
+  weight: 0.5
+  neighbor_diff_scale: 100.0
+
+
+pcds:
+  sample_area: full
+  line_type: p_line
+  line_method: RK4
+  dt: 0.005
+
+  max_iterations: 200
+  sampled_points_per_line: 16
+  offset_dist: 0.005
+  num_cross_points_per_seeding: 5
+
+  normalized: False
+  localized: False
+
+  max_seg: 50
+  start_points: [[0.0,0.0]]
+  bbox: [[2.5,0.5],[5.5,1.5]]
