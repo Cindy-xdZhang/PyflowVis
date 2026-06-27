@@ -16,7 +16,7 @@ def screen_to_arcball(x, y, width, height):
         return glm.vec3(px, py, glm.sqrt(1.0 - distance))
     else:
         return glm.normalize(glm.vec3(px, py, 0))
-    
+
 def glm_mat4_to_np_array(glm_mat):
     return np.array([
         [glm_mat[0][0], glm_mat[1][0], glm_mat[2][0], glm_mat[3][0]],
@@ -33,22 +33,36 @@ class Camera(Object):
         self.init_position = np.array(position, dtype=np.float32)
         self.init_targetDirection = (np.array(center, dtype=np.float32) - self.init_position)
         self.init_targetDirection = self.init_targetDirection / np.linalg.norm(self.init_targetDirection)
-        self.init_up =up/np.linalg.norm(up)
+        up_arr = np.array(up, dtype=np.float32)
+        self.init_up = up_arr / np.linalg.norm(up_arr)
+
+        # Compute initial ortho half-height so the ortho view matches what the
+        # perspective view would show at the given distance. This ensures a
+        # seamless visual switch between the two projection modes.
+        init_dist = float(np.linalg.norm(np.array(position, dtype=np.float32)))
+        init_ortho_size = float(np.tan(np.radians(fov / 2.0)) * max(init_dist, 0.1))
+        self.init_ortho_size = init_ortho_size
 
         # persist to load/save camera configuration
         self.create_variable_callback("position", np.array(position, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
         self.create_variable_callback("fov", fov, lambda x: self.updateMVPVariables(), True)
         self.create_variable_callback("targetDirection", np.array(self.init_targetDirection, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
         self.create_variable_callback("up", np.array(up, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
-        self.create_variable("rotation_matrix", np.eye(4, dtype=np.float32), True,False)
+        self.create_variable("rotation_matrix", np.eye(4, dtype=np.float32), True, False)
+        # Orthographic projection eliminates perspective distortion entirely.
+        # Enabled by default for 2D flow visualization.
+        self.create_variable_callback("use_ortho", True, lambda x: self.updateMVPVariables(), False)
+        # Half-height of the orthographic view volume (world units).
+        self.create_variable_callback("ortho_size", float(init_ortho_size), lambda x: self.updateMVPVariables(), True)
 
- 
         self.width = width
         self.height = height
         self.aspect_ratio = width / height
         self.last_mouse_pos = None
         self._last_arcball_vec = None
         self.mouse_down = False
+        self.middle_mouse_down = False
+        self.middle_mouse_last_pos = None
 
         self.addAction("z positive", lambda object: object.look_at_z_positive())
         self.addAction("z negative", lambda object: object.look_at_z_negative())
@@ -65,6 +79,7 @@ class Camera(Object):
         self.updateValue("up", np.array(self.init_up, dtype=np.float32))
         self.setValue("position", self.init_position)
         self.updateValue("rotation_matrix", np.eye(4, dtype=np.float32))
+        self.updateValue("ortho_size", float(self.init_ortho_size))
         self.updateMVPVariables()
 
     def updateMVPVariables(self):
@@ -79,7 +94,6 @@ class Camera(Object):
         """Get the view matrix."""
         pos = np.array(self.getValue("position"), dtype=np.float32)
 
-        # Apply camera rotation (column-vector convention): v' = R @ v
         rotation_matrix = np.array(self.getValue("rotation_matrix"), dtype=np.float32)
         target_dir = np.array(self.getValue("targetDirection"), dtype=np.float32)
         up_dir = np.array(self.getValue("up"), dtype=np.float32)
@@ -89,7 +103,6 @@ class Camera(Object):
         target_dir_new = (rotation_matrix @ target4)[:3]
         up_dir_new = (rotation_matrix @ up4)[:3]
 
-        # Robust normalize (avoid NaNs)
         td_norm = np.linalg.norm(target_dir_new)
         if td_norm > 1e-8:
             target_dir_new = target_dir_new / td_norm
@@ -99,17 +112,21 @@ class Camera(Object):
 
         target_new = pos + target_dir_new
         return glm.lookAt(glm.vec3(*pos), glm.vec3(*target_new), glm.vec3(*up_dir_new))
-    
-    def get_projection_matrix(self):
-        fov = self.getValue("fov")
-        # 根据相机位置动态调整近平面
-        pos = self.getValue("position")
-        distance_to_origin = np.linalg.norm(pos)
-        near_plane = max(0.5, distance_to_origin * 0.1)  # 动态近平面
-        far_plane = max(100.0, distance_to_origin * 10)    # 动态远平面
-        return glm.perspective(glm.radians(fov), self.aspect_ratio, near_plane, far_plane)
-    
 
+    def get_projection_matrix(self):
+        pos = self.getValue("position")
+        distance = float(np.linalg.norm(pos))
+        near_plane = max(0.01, distance * 0.005)
+        far_plane = max(500.0, distance * 100.0)
+
+        use_ortho = self.getValue("use_ortho")
+        if use_ortho:
+            half_h = float(self.getValue("ortho_size"))
+            half_w = half_h * self.aspect_ratio
+            return glm.ortho(-half_w, half_w, -half_h, half_h, near_plane, far_plane)
+        else:
+            fov = self.getValue("fov")
+            return glm.perspective(glm.radians(fov), self.aspect_ratio, near_plane, far_plane)
 
     def update_window_size(self, width, height):
         """Update the window size and recalculate the projection matrix."""
@@ -120,15 +137,24 @@ class Camera(Object):
 
     def look_at_z_positive(self):
         """Adjust the camera to look at the Z positive direction."""
-        targetDirection = np.array([0, 0, 1])
+        targetDirection = np.array([0, 0, 1], dtype=np.float32)
         self.updateValue("targetDirection", targetDirection)
         self.updateMVPVariables()
 
     def look_at_z_negative(self):
         """Adjust the camera to look at the Z negative direction."""
-        targetDirection = np.array([0, 0, -1])
+        targetDirection = np.array([0, 0, -1], dtype=np.float32)
         self.updateValue("targetDirection", targetDirection)
         self.updateMVPVariables()
+
+    def _get_forward_world(self):
+        """Return the camera's forward direction in world space (unit vector)."""
+        rotation_matrix = np.array(self.getValue("rotation_matrix"), dtype=np.float32)
+        forward0 = np.array(self.getValue("targetDirection"), dtype=np.float32)
+        f4 = np.array([forward0[0], forward0[1], forward0[2], 0.0], dtype=np.float32)
+        forward = (rotation_matrix @ f4)[:3]
+        n = np.linalg.norm(forward)
+        return forward / n if n > 1e-8 else forward
 
     def handle_mouse_move(self, x, y, up=False):
         """Handle the mouse movement to rotate the camera around the target."""
@@ -146,7 +172,6 @@ class Camera(Object):
         v1 = screen_to_arcball(x, y, self.width, self.height)
         self._last_arcball_vec = v1
 
-        # Arcball: rotate from v0 to v1 around axis = v0 x v1
         axis = glm.cross(v0, v1)
         axis_len = glm.length(axis)
         if axis_len < 1e-7:
@@ -168,17 +193,13 @@ class Camera(Object):
         r4 = np.eye(4, dtype=np.float32)
         r4[:3, :3] = r3
 
-        # Compose rotation in camera local space: R_new = R_current @ R_inc
         rotation_matrix = np.array(self.getValue("rotation_matrix"), dtype=np.float32)
         rotation_matrix = rotation_matrix @ r4
         self.updateValue("rotation_matrix", rotation_matrix)
-
         self.updateMVPVariables()
 
     def pan(self, dx: float, dy: float, dz: float):
-        """
-        Pans the camera based on horizontal (dx) and vertical (dy) input values.
-        """
+        """Pan the camera in camera-local right/up/forward directions."""
         def _norm(v: np.ndarray) -> np.ndarray:
             n = np.linalg.norm(v)
             return v if n < 1e-8 else (v / n)
@@ -193,56 +214,105 @@ class Camera(Object):
         up_vec = _norm((rotation_matrix @ u4)[:3])
         right = _norm(np.cross(forward, up_vec))
 
-        right_movement = right * dx
-        up_movement = up_vec * dy
-        z_movement = forward * dz
-
-        new_position = np.array(self.getValue("position") + right_movement + up_movement + z_movement, dtype=np.float32)
-        self.updateValue("position", new_position )
+        new_position = np.array(
+            self.getValue("position") + right * dx + up_vec * dy + forward * dz,
+            dtype=np.float32
+        )
+        self.updateValue("position", new_position)
         self.updateMVPVariables()
 
     def zoom(self, direction):
-        """Zoom the camera in/out."""
-        fov = self.getValue("fov")
-        if direction == 'in' and fov > 10:
-            self.updateValue("fov", fov - 1.0)
-        elif direction == 'out' and fov < 50:
-            self.updateValue("fov", fov + 1.0)
-        self.updateMVPVariables()
+        """Zoom in/out.
+
+        Orthographic mode: shrink/grow the ortho view volume (no distortion).
+        Perspective mode: dolly (move camera along forward axis) to avoid
+        FOV-change distortion.
+        """
+        use_ortho = self.getValue("use_ortho")
+        if use_ortho:
+            size = float(self.getValue("ortho_size"))
+            # Zoom 10% per scroll tick
+            if direction == 'in':
+                self.updateValue("ortho_size", max(0.01, size * 0.9))
+            else:
+                self.updateValue("ortho_size", size * (1.0 / 0.9))
+            self.updateMVPVariables()
+        else:
+            pos = np.array(self.getValue("position"), dtype=np.float32)
+            distance = float(np.linalg.norm(pos))
+            step = max(0.05, distance * 0.10)
+            forward = self._get_forward_world()
+            if direction == 'in':
+                new_pos = pos + forward * step
+            else:
+                new_pos = pos - forward * step
+            self.updateValue("position", new_pos.astype(np.float32))
+            self.updateMVPVariables()
 
     def eventCallBacks(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
-               # Zoom in
-            if event.button == 4:
+            if event.button == 4:       # scroll up → zoom in
                 self.zoom('in')
-            # Zoom out
-            elif event.button == 5:
+            elif event.button == 5:     # scroll down → zoom out
                 self.zoom('out')
-            elif event.button == 1:  # Left mouse button
+            elif event.button == 1:     # left button → arcball rotate
                 self.mouse_down = True
-        elif event.type == pygame.MOUSEMOTION and self.mouse_down and not(imgui.is_any_item_hovered() or imgui.is_any_item_active()):  # Only rotate when the left button is down
-            x, y = event.pos  # Use relative motion for smoother rotation
-            self.handle_mouse_move(x, y)
-        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:  # Left mouse button
-            self.mouse_down = False
-            x, y = event.pos  # Use relative motion for smoother rotation
-            self.handle_mouse_move(x, y, up=True)
+            elif event.button == 2:     # middle button → pan
+                self.middle_mouse_down = True
+                self.middle_mouse_last_pos = event.pos
+
+        elif event.type == pygame.MOUSEMOTION:
+            if not (imgui.is_any_item_hovered() or imgui.is_any_item_active()):
+                if self.mouse_down:
+                    self.handle_mouse_move(*event.pos)
+                if self.middle_mouse_down and self.middle_mouse_last_pos is not None:
+                    dx_px = event.pos[0] - self.middle_mouse_last_pos[0]
+                    dy_px = event.pos[1] - self.middle_mouse_last_pos[1]
+                    use_ortho = self.getValue("use_ortho")
+                    if use_ortho:
+                        # In ortho mode, pan in screen-space world units
+                        size = float(self.getValue("ortho_size"))
+                        pan_scale = (2.0 * size) / self.height
+                    else:
+                        distance = float(np.linalg.norm(self.getValue("position")))
+                        pan_scale = max(0.001, distance * 0.002)
+                    self.pan(-dx_px * pan_scale, dy_px * pan_scale, 0)
+                    self.middle_mouse_last_pos = event.pos
+
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1:
+                self.mouse_down = False
+                self.handle_mouse_move(*event.pos, up=True)
+            elif event.button == 2:
+                self.middle_mouse_down = False
+                self.middle_mouse_last_pos = None
+
         elif event.type == pygame.VIDEORESIZE:
             self.update_window_size(event.w, event.h)
-        if not(imgui.is_any_item_hovered() or imgui.is_any_item_active()):
+
+        if not (imgui.is_any_item_hovered() or imgui.is_any_item_active()):
             keys = pygame.key.get_pressed()
-            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-                self.pan(-0.1, 0, 0)  # Pan left
-            if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-                self.pan(0.1, 0, 0)  # Pan right
-            if keys[pygame.K_UP] or keys[pygame.K_w]:
-                self.pan(0, 0.1, 0)  # Pan up
-            if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-                self.pan(0, -0.1, 0)  # Pan down
-            if keys[pygame.K_q]:
-                self.pan(0, 0, 0.1)  # Pan forward
-            if keys[pygame.K_e]:
-                self.pan(0, 0, -0.1)  # Pan backward
-
-
-
+            if any([keys[pygame.K_LEFT], keys[pygame.K_a],
+                    keys[pygame.K_RIGHT], keys[pygame.K_d],
+                    keys[pygame.K_UP], keys[pygame.K_w],
+                    keys[pygame.K_DOWN], keys[pygame.K_s],
+                    keys[pygame.K_q], keys[pygame.K_e]]):
+                use_ortho = self.getValue("use_ortho")
+                if use_ortho:
+                    size = float(self.getValue("ortho_size"))
+                    step = max(0.005, size * 0.04)
+                else:
+                    distance = float(np.linalg.norm(self.getValue("position")))
+                    step = max(0.01, distance * 0.02)
+                if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+                    self.pan(-step, 0, 0)
+                if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+                    self.pan(step, 0, 0)
+                if keys[pygame.K_UP] or keys[pygame.K_w]:
+                    self.pan(0, step, 0)
+                if keys[pygame.K_DOWN] or keys[pygame.K_s]:
+                    self.pan(0, -step, 0)
+                if keys[pygame.K_q]:
+                    self.pan(0, 0, step)
+                if keys[pygame.K_e]:
+                    self.pan(0, 0, -step)
