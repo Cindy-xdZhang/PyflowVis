@@ -49,9 +49,8 @@ class Camera(Object):
         self.create_variable_callback("targetDirection", np.array(self.init_targetDirection, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
         self.create_variable_callback("up", np.array(up, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
         self.create_variable("rotation_matrix", np.eye(4, dtype=np.float32), True, False)
-        # Orthographic projection eliminates perspective distortion entirely.
-        # Enabled by default for 2D flow visualization.
-        self.create_variable_callback("use_ortho", True, lambda x: self.updateMVPVariables(), False)
+        # Orthographic mode is available as an option; perspective is default.
+        self.create_variable_callback("use_ortho", False, lambda x: self.updateMVPVariables(), False)
         # Half-height of the orthographic view volume (world units).
         self.create_variable_callback("ortho_size", float(init_ortho_size), lambda x: self.updateMVPVariables(), True)
 

@@ -115,7 +115,7 @@ def init_render(cfg="config/renderingConfig.yaml"):
     config.load(cfg, recursive=False)
     engine=VisualizationEngine(config=config['rendering'])
     size=config['rendering']["window_size"]
-    camera = Camera(60.0, (0, 0, 10), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
+    camera = Camera(30.0, (0, 0, 10), (0, 0, 0), [0.0, 1.0, 0.0],size[0],size[1])
     engine.addObjects2Scene([camera])
     
     ObjectNameDict=buildWorkLoads("Basic2DFlow")
