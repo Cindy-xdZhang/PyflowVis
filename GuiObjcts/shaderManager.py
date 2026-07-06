@@ -371,6 +371,9 @@ class ShaderManager(Object):
         self.add_shader_program("monoColor","assets/shaders/simple_vertex.glsl","assets/shaders/simple_fragment.glsl")
         self.add_shader_program("colormapMat","assets/shaders/simple_vertex.glsl","assets/shaders/colorMap_fragment.glsl")
         self.add_shader_program("flowlineMat","assets/shaders/flowline_vertex.glsl","assets/shaders/flowline_fragment.glsl","assets/shaders/flowline_geometry.glsl")
+        self.add_shader_program("glyphInstancedMat","assets/shaders/glyph_instanced_vertex.glsl","assets/shaders/glyph_instanced_fragment.glsl")
+        self.add_shader_program("isoSurfaceMat","assets/shaders/iso_surface_vertex.glsl","assets/shaders/iso_surface_fragment.glsl")
+        self.add_shader_program("dvrMat","assets/shaders/dvr_vertex.glsl","assets/shaders/dvr_fragment.glsl")
         self.add_shader_program("planarManifoldMat","assets/shaders/planarManifold_vertex.glsl","assets/shaders/planarManifold_fragment.glsl")
         self.add_shader_program("corelineMat","assets/shaders/coreline_vertex.glsl","assets/shaders/coreline_fragment.glsl")
    

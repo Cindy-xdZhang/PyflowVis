@@ -352,8 +352,14 @@ class FlowLineObject(Object):
         ]
         
         if vector_field.getDim() == 3:
-            self.streamline_cache = list(map(compute_streamline_3D, args_list))
-            self.MappingFlowlineAsRenderingVAO(self.streamline_cache)
+            # Fast path: numba parallel batch integration + numpy VBO assembly.
+            seeds_xyz = np.array([np.asarray(pos3d, dtype=np.float32)[:3] for pos3d, _ in seeds], dtype=np.float32)
+            batched = compute_streamlines_3D_batch(vector_field, seeds_xyz, time, step_size, max_iteration, method)
+            if batched is not None:
+                self.MappingBatchedFlowlineAsRenderingVAO(*batched)
+            else:  # unsupported integrator (e.g. RK5) -> serial fallback
+                self.streamline_cache = list(map(compute_streamline_3D, args_list))
+                self.MappingFlowlineAsRenderingVAO(self.streamline_cache)
         else:
             self.streamline_cache = list(map(compute_streamline_2D, args_list))
             self.MappingFlowlineAsRenderingVAO(self.streamline_cache)
@@ -401,10 +407,18 @@ class FlowLineObject(Object):
     
             if vector_field.getDim()==2:
                 self.pathline_cache = compute_pathline_2D_auto(args_list)
+                self.MappingFlowlineAsRenderingVAO(self.pathline_cache)
             elif vector_field.getDim()==3:
-                self.pathline_cache = list(map(compute_pathline_3D, args_list))
-
-            self.MappingFlowlineAsRenderingVAO(self.pathline_cache)
+                # Fast path: numba parallel batch integration + numpy VBO assembly.
+                seeds_xyzt = np.array(
+                    [[float(pos3d[0]), float(pos3d[1]), float(pos3d[2]), float(t0)] for pos3d, t0 in seeds],
+                    dtype=np.float64)
+                batched = compute_pathlines_3D_batch(vector_field, seeds_xyzt, min_time, max_time, step_size, max_iteration, method)
+                if batched is not None:
+                    self.MappingBatchedFlowlineAsRenderingVAO(*batched)
+                else:  # unsupported integrator -> serial fallback
+                    self.pathline_cache = list(map(compute_pathline_3D, args_list))
+                    self.MappingFlowlineAsRenderingVAO(self.pathline_cache)
             self.pathline_dirty = False
 
     def __numpy_vec3Arrays_to_pathlines2D(self, numpy_pathlines:np.ndarray):
@@ -539,6 +553,54 @@ class FlowLineObject(Object):
             return
         self.updateVertexAttributesBuffer(np.array(pathline_vertices, dtype=np.float32))
         self.updateMultiDrawIndices(pathline_offset_indices, pathline_sizes)
+
+    def MappingBatchedFlowlineAsRenderingVAO(self, out_pos: np.ndarray, out_len: np.ndarray):
+        """Build the render VBO directly from the padded batch-integrator output.
+
+        out_pos: (N, maxLen, 4) = (x, y, z, t); out_len: (N,) valid point count per line.
+        Same vertex layout / adjacency as MappingFlowlineAsRenderingVAO ([first]+pts+[last],
+        per-vertex (x, y, z, normalized_time, attrib2=0)), but assembled with numpy — the loop
+        is O(#lines), not O(#vertices), so long dense 3D lines no longer stall on Python appends.
+        """
+        N = int(out_pos.shape[0])
+        valid = []
+        tmin_all = np.inf
+        tmax_all = -np.inf
+        for i in range(N):
+            L = int(out_len[i])
+            if L >= 2:
+                tt = out_pos[i, :L, 3]
+                tmn = float(tt.min())
+                tmx = float(tt.max())
+                if tmn < tmin_all:
+                    tmin_all = tmn
+                if tmx > tmax_all:
+                    tmax_all = tmx
+                valid.append((i, L))
+        if not valid:
+            self.erase()
+            return
+        inv = 1.0 / (tmax_all - tmin_all) if tmax_all > tmin_all else 1.0
+
+        verts_list = []
+        offsets = []
+        sizes = []
+        off = 0
+        for i, L in valid:
+            seg = out_pos[i, :L, :]
+            exp = np.empty((L + 2, 5), dtype=np.float32)
+            exp[1:L + 1, 0:3] = seg[:, 0:3]
+            exp[1:L + 1, 3] = (seg[:, 3] - tmin_all) * inv
+            exp[1:L + 1, 4] = 0.0
+            exp[0] = exp[1]          # duplicate first vertex for LINE_STRIP_ADJACENCY
+            exp[L + 1] = exp[L]      # duplicate last vertex
+            verts_list.append(exp)
+            offsets.append(off)
+            sizes.append(L + 2)
+            off += L + 2
+
+        self.updateVertexAttributesBuffer(np.concatenate(verts_list, axis=0))
+        self.updateMultiDrawIndices(offsets, sizes)
         
         
 

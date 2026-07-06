@@ -1,0 +1,64 @@
+# ---------------------------------------------------------------------------
+# VortexTransformer data-generation pipeline (paper Section 3.1 / dissertation Ch.9).
+#
+# Paper-exact totals (dissertation p.117):
+#   STEADY  = 3000  = 1500 fitted (real-data patches) + 1400 random (from the fitted
+#                     distribution) + 100 manually-added Killing fields.
+#   UNSTEADY = 60000 = 3000 steady x 20 randomly-sampled rigid-body observers over T=[0,1].
+# Each observer is 6 scalars (a,b,c, adot,bdot,cdot); its transform is identity at t0, so
+# all 20 variants of a steady field share ONE ground-truth segmentation label.
+#
+# NB: materializing all 60000 unsteady velocity grids is ~39 GB. By default we render+save
+# the full 3000 steady set (cheap) and only WRITE a subset of unsteady variants for
+# verification; pass --full to stream all 60000 to disk in shards. The reported/target
+# totals always equal the paper regardless of how many are written.
+#
+# Run:  python VatistasFlowDatasetGenerator.py --config config/VatistasDataset.yaml
+#       python VatistasFlowDatasetGenerator.py --full        # write all 60000 (sharded, ~39GB)
+# ---------------------------------------------------------------------------
+seed: 7068
+
+fit_dir: outputs/vatistas_fit          # cached BEST fit (mean MSE 0.0094 = 34.7 dB PSNR)
+fit_config: config/FittingVatistas.yaml  # only used with --refit
+
+model:
+  bounds: {rc: [0.05, 2.0], n: [0.5, 6.0], s: [0.05, 5.0], t: [1.5]}
+
+# --- Steady field pool (paper: 3000 = 1400 + 1500 + 100) ---
+generate:
+  num_fields: 1400        # (a) random fields sampled from the fitted distribution
+  grid: 64                # render/output resolution on [-1,1]^2
+  min_vortices: 1
+  max_vortices: 2
+  enforce_spacing: true
+  min_contribution: 0.05
+fitted:
+  num_fields: null        # (b) fitted real-flow patches; null = use ALL 1500 cached fits
+  prefer_low_mse: true
+killing_fields:
+  num: 100                # (c) manually-added Killing fields (rigid-motion hard negatives:
+                          #     observer-producible -> label is EMPTY / not an objective vortex)
+  abc_range: [0.8, 0.8, 1.0]   # sampling half-range for the field's own (a, b, c)
+
+# --- Observers: 20 per steady field -> 60000 unsteady (paper) ---
+observer:
+  per_field: 20           # rigid-body observers per steady field (paper: 20)
+  timesteps: 24           # T frames per unsteady field
+  tmin: 0.0
+  tmax: 1.0               # paper observes over T~=[0,1]
+  center: [0.0, 0.0]
+  start_pos: [0.0, 0.0]
+  # 6 scalars per observer: a(t)=a0+adot*t, b(t)=b0+bdot*t, c(t)=c0+cdot*t
+  a0_range: 0.30          # |a0|,|b0| <= this
+  adot_range: 0.30        # |adot|,|bdot| <= this
+  c0_range: 0.60          # |c0| <= this
+  cdot_range: 0.60        # |cdot| <= this
+  make_labels: true       # transport the shared signed-distance vortex label (Eq. 5/8)
+
+output:
+  out_dir: outputs/vatistas_unsteady
+  save_plots: true
+  save_steady: true       # write the full 3000-field steady set (params+fields+labels)
+  # unsteady materialization (velocity grids are large):
+  unsteady_subset: 400    # how many unsteady variants to WRITE by default (verification)
+  shard_size: 2000        # unsteady fields per .npz shard (used with --full)

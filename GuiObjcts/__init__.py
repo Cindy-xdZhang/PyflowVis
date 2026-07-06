@@ -7,4 +7,6 @@ from .VisualizationEngine import *
 from .VertexArrayObject import *
 from .PlanarManifold import *
 from .FlowLineRenderObject import *
+from .IsoSurfaceObject import *
+from .VolumeRenderObject import *
 

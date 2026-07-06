@@ -38,6 +38,9 @@ class Camera(Object):
         # persist to load/save camera configuration
         self.create_variable_callback("position", np.array(position, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
         self.create_variable_callback("fov", fov, lambda x: self.updateMVPVariables(), True)
+        # Projection mode toggle (combo box in GUI). "orthographic" removes perspective
+        # foreshortening entirely, which is what you usually want for 2D flow fields.
+        self.create_variable_callback("projectionMode", ["perspective", "orthographic"], lambda x: self.updateMVPVariables(), True, True)
         self.create_variable_callback("targetDirection", np.array(self.init_targetDirection, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
         self.create_variable_callback("up", np.array(up, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
         self.create_variable("rotation_matrix", np.eye(4, dtype=np.float32), True,False)
@@ -107,6 +110,16 @@ class Camera(Object):
         distance_to_origin = np.linalg.norm(pos)
         near_plane = max(0.5, distance_to_origin * 0.1)  # 动态近平面
         far_plane = max(100.0, distance_to_origin * 10)    # 动态远平面
+
+        if self.getOptionValue("projectionMode") == "orthographic":
+            # Match the on-screen scale of the perspective view at the focal distance
+            # (assumed to be the scene center near the origin, consistent with the
+            # near/far heuristic above) so toggling does not jump the framing.
+            # half_height = focal_distance * tan(fov/2); ortho has no foreshortening.
+            half_height = max(distance_to_origin * np.tan(np.radians(fov) * 0.5), 1e-3)
+            half_width = half_height * self.aspect_ratio
+            return glm.ortho(-half_width, half_width, -half_height, half_height, near_plane, far_plane)
+
         return glm.perspective(glm.radians(fov), self.aspect_ratio, near_plane, far_plane)
     
 

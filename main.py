@@ -10,6 +10,8 @@ from  GuiObjcts.PlanarManifold import *
 from misc.fileMonitor import *
 from GuiObjcts.netCDFObject import *
 from GuiObjcts.FlowLineRenderObject import *
+from GuiObjcts.IsoSurfaceObject import *
+from GuiObjcts.VolumeRenderObject import *
 from GuiObjcts.Indicator import *
 from GuiObjcts.geometryRender import *
 from GuiObjcts.ActiveFieldObject import *
@@ -95,9 +97,13 @@ def buildWorkLoads(packageName:str):
             return NetCDFLoaderOBJ()
         elif ObjectName.lower()=="Flowline".lower():
             return FlowLineObject()
+        elif ObjectName.lower()=="IsoSurface".lower():
+            return IsoSurfaceObject()
+        elif ObjectName.lower()=="VolumeRender".lower():
+            return VolumeRenderObject()
 
     if packageName=="Basic2DFlow":
-        ObjectsNameList=["CoordinateSystem","PlanarManifold","ActiveField","VectorGlyph","Indicator","NetCDFLoader","Flowline"]
+        ObjectsNameList=["CoordinateSystem","PlanarManifold","ActiveField","VectorGlyph","Indicator","NetCDFLoader","Flowline","IsoSurface","VolumeRender"]
     elif packageName=="Basic3DFlow":
         pass
     else:
@@ -150,19 +156,19 @@ def main():
     #####################################################################################
     #########################reference frame transformation test#########################
     #####################################################################################
-    vectorField2d= rotation_four_center((64,64),64)
-    actFieldWidget.insertField("rfc",vectorField2d)
-    vectorField2d2= constant_rotation((64,64),64)
-    actFieldWidget.insertField("constant_rotation",vectorField2d2)
+    # vectorField2d= rotation_four_center((64,64),64)
+    # actFieldWidget.insertField("rfc",vectorField2d)
+    # vectorField2d2= constant_rotation((64,64),64)
+    # actFieldWidget.insertField("constant_rotation",vectorField2d2)
 
 
     #####################################################################################
     #########################3d flow vis test#########################
     #####################################################################################
-    # flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
-    # cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
-    # vectorField3d= NetCDFLoader.load_vector_field3d(cylider_netCDF,64);
-    # actFieldWidget.insertField("tornado3d",vectorField3d)
+    flow_asset_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData3D"
+    cylider_netCDF=os.path.join(flow_asset_folder,"tornado3d.nc")
+    vectorField3d= NetCDFLoader.load_vector_field3d(cylider_netCDF,64);
+    actFieldWidget.insertField("tornado3d",vectorField3d)
 
     
     #exmaple loading amria file

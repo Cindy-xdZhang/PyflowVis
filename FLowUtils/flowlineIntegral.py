@@ -1,10 +1,264 @@
 import numpy as np
 import torch
+from numba import njit, prange
 from .VectorField2d import UnsteadyVectorField2D
 from .VectorField3d import UnsteadyVectorField3D
 import importlib
 import logging
 from contextlib import contextmanager
+
+
+# =====================================================================================
+# Numba parallel batch integrators for 3D flowlines (Phase 2).
+#
+# The serial `compute_streamline_3D` / `compute_pathline_3D` above integrate one seed at
+# a time in pure Python (RK4 loop + list.append), which is the 3D interactivity killer.
+# The kernels below integrate ALL seeds in parallel (prange over seeds) with the same
+# trilinear/quadrilinear interpolation and the same RK4/Euler steps, writing straight
+# into a padded (N, maxLen, 4) buffer that the renderer turns into a VBO with numpy
+# (no per-vertex Python). Results match the serial path to float rounding (see test).
+# Only RK4/Euler are implemented here; other methods fall back to the serial path.
+# =====================================================================================
+
+@njit(fastmath=True, cache=True)
+def _interp3_trilinear(vol, dmin, ginv, xdim, ydim, zdim, x, y, z):
+    """Trilinear sample of a (Z,Y,X,3) volume; clamping matches _quadrilinear_interpolate_njit."""
+    gx = (x - dmin[0]) / ginv[0] if ginv[0] != 0.0 else 0.0
+    gy = (y - dmin[1]) / ginv[1] if ginv[1] != 0.0 else 0.0
+    gz = (z - dmin[2]) / ginv[2] if ginv[2] != 0.0 else 0.0
+    x0 = int(np.floor(gx)); x1 = int(np.ceil(gx))
+    y0 = int(np.floor(gy)); y1 = int(np.ceil(gy))
+    z0 = int(np.floor(gz)); z1 = int(np.ceil(gz))
+    if x0 < 0: x0 = 0
+    elif x0 > xdim - 1: x0 = xdim - 1
+    if x1 < 0: x1 = 0
+    elif x1 > xdim - 1: x1 = xdim - 1
+    if y0 < 0: y0 = 0
+    elif y0 > ydim - 1: y0 = ydim - 1
+    if y1 < 0: y1 = 0
+    elif y1 > ydim - 1: y1 = ydim - 1
+    if z0 < 0: z0 = 0
+    elif z0 > zdim - 1: z0 = zdim - 1
+    if z1 < 0: z1 = 0
+    elif z1 > zdim - 1: z1 = zdim - 1
+    wx = gx - x0; wy = gy - y0; wz = gz - z0
+    c00 = vol[z0, y0, x0] * (1.0 - wx) + vol[z0, y0, x1] * wx
+    c10 = vol[z0, y1, x0] * (1.0 - wx) + vol[z0, y1, x1] * wx
+    c01 = vol[z1, y0, x0] * (1.0 - wx) + vol[z1, y0, x1] * wx
+    c11 = vol[z1, y1, x0] * (1.0 - wx) + vol[z1, y1, x1] * wx
+    c0 = c00 * (1.0 - wy) + c10 * wy
+    c1 = c01 * (1.0 - wy) + c11 * wy
+    r = c0 * (1.0 - wz) + c1 * wz
+    return r[0], r[1], r[2]
+
+
+@njit(fastmath=True, cache=True)
+def _interp4_quadrilinear(field, dmin, ginv, xdim, ydim, zdim, tmin, tinv, tsteps, x, y, z, t):
+    """Quadrilinear sample of a (T,Z,Y,X,3) field: trilinear in space, linear in time."""
+    if tinv != 0.0:
+        tg = (t - tmin) / tinv
+    else:
+        tg = 0.0
+    t0 = int(np.floor(tg)); t1 = int(np.ceil(tg))
+    if t0 < 0: t0 = 0
+    elif t0 > tsteps - 1: t0 = tsteps - 1
+    if t1 < 0: t1 = 0
+    elif t1 > tsteps - 1: t1 = tsteps - 1
+    wt = tg - t0
+    ax, ay, az = _interp3_trilinear(field[t0], dmin, ginv, xdim, ydim, zdim, x, y, z)
+    bx, by, bz = _interp3_trilinear(field[t1], dmin, ginv, xdim, ydim, zdim, x, y, z)
+    return ax * (1.0 - wt) + bx * wt, ay * (1.0 - wt) + by * wt, az * (1.0 - wt) + bz * wt
+
+
+@njit(fastmath=True, cache=True)
+def _stream_one_dir_3d(vol, dmin, dmax, ginv, xdim, ydim, zdim, sx, sy, sz, signed_step, max_iter, method_id, buf):
+    """Integrate one streamline direction at a fixed time. Fills buf[:count] with stepped
+    positions (excluding the seed) and returns count. method_id: 1=RK4, else Euler."""
+    px = sx; py = sy; pz = sz
+    count = 0
+    for _ in range(max_iter):
+        if px < dmin[0] or px > dmax[0] or py < dmin[1] or py > dmax[1] or pz < dmin[2] or pz > dmax[2]:
+            break
+        if method_id == 1:
+            v1x, v1y, v1z = _interp3_trilinear(vol, dmin, ginv, xdim, ydim, zdim, px, py, pz)
+            v2x, v2y, v2z = _interp3_trilinear(vol, dmin, ginv, xdim, ydim, zdim, px + 0.5 * signed_step * v1x, py + 0.5 * signed_step * v1y, pz + 0.5 * signed_step * v1z)
+            v3x, v3y, v3z = _interp3_trilinear(vol, dmin, ginv, xdim, ydim, zdim, px + 0.5 * signed_step * v2x, py + 0.5 * signed_step * v2y, pz + 0.5 * signed_step * v2z)
+            v4x, v4y, v4z = _interp3_trilinear(vol, dmin, ginv, xdim, ydim, zdim, px + signed_step * v3x, py + signed_step * v3y, pz + signed_step * v3z)
+            dx = (signed_step / 6.0) * (v1x + 2.0 * v2x + 2.0 * v3x + v4x)
+            dy = (signed_step / 6.0) * (v1y + 2.0 * v2y + 2.0 * v3y + v4y)
+            dz = (signed_step / 6.0) * (v1z + 2.0 * v2z + 2.0 * v3z + v4z)
+        else:
+            v1x, v1y, v1z = _interp3_trilinear(vol, dmin, ginv, xdim, ydim, zdim, px, py, pz)
+            dx = signed_step * v1x; dy = signed_step * v1y; dz = signed_step * v1z
+        px += dx; py += dy; pz += dz
+        buf[count, 0] = px; buf[count, 1] = py; buf[count, 2] = pz
+        count += 1
+    return count
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def _batch_stream_3d(vol, dmin, dmax, ginv, xdim, ydim, zdim, seeds, abs_step, max_iter, method_id, time_val, out_pos, out_len):
+    """out_pos: (N, 2*max_iter+1, 4)=(x,y,z,t); out_len: (N,). Mirrors compute_streamline_3D."""
+    N = seeds.shape[0]
+    for s in prange(N):
+        fwd = np.empty((max_iter, 3), np.float32)
+        bwd = np.empty((max_iter, 3), np.float32)
+        sx = seeds[s, 0]; sy = seeds[s, 1]; sz = seeds[s, 2]
+        kf = _stream_one_dir_3d(vol, dmin, dmax, ginv, xdim, ydim, zdim, sx, sy, sz, abs_step, max_iter, method_id, fwd)
+        kb = _stream_one_dir_3d(vol, dmin, dmax, ginv, xdim, ydim, zdim, sx, sy, sz, -abs_step, max_iter, method_id, bwd)
+        idx = 0
+        for j in range(kb - 1, -1, -1):
+            out_pos[s, idx, 0] = bwd[j, 0]; out_pos[s, idx, 1] = bwd[j, 1]; out_pos[s, idx, 2] = bwd[j, 2]; out_pos[s, idx, 3] = time_val
+            idx += 1
+        out_pos[s, idx, 0] = sx; out_pos[s, idx, 1] = sy; out_pos[s, idx, 2] = sz; out_pos[s, idx, 3] = time_val
+        idx += 1
+        for j in range(kf):
+            out_pos[s, idx, 0] = fwd[j, 0]; out_pos[s, idx, 1] = fwd[j, 1]; out_pos[s, idx, 2] = fwd[j, 2]; out_pos[s, idx, 3] = time_val
+            idx += 1
+        out_len[s] = idx
+
+
+@njit(fastmath=True, cache=True)
+def _path_one_dir_3d(field, dmin, dmax, ginv, xdim, ydim, zdim, tmin, tinv, tsteps, sx, sy, sz, t_start, t_end, abs_step, max_iter, method_id, buf):
+    """Integrate one pathline direction (time-dependent). Fills buf[:count] with stepped
+    (x,y,z,t) (excluding the seed) and returns count. Mirrors pathline_integration_one_direction_3D."""
+    # Time is accumulated in float64 (like the serial reference) so the t>=t_end stop
+    # boundary is hit on the exact same step; positions accumulate in float32 (also like serial).
+    direction = 1.0 if t_end > t_start else -1.0
+    step = np.float64(abs_step) * direction
+    px = sx; py = sy; pz = sz
+    t = np.float64(t_start)
+    te = np.float64(t_end)
+    count = 0
+    for _ in range(max_iter):
+        if (direction > 0.0 and t >= te) or (direction < 0.0 and t <= te):
+            break
+        if px < dmin[0] or px > dmax[0] or py < dmin[1] or py > dmax[1] or pz < dmin[2] or pz > dmax[2]:
+            break
+        if method_id == 1:
+            v1x, v1y, v1z = _interp4_quadrilinear(field, dmin, ginv, xdim, ydim, zdim, tmin, tinv, tsteps, px, py, pz, t)
+            v2x, v2y, v2z = _interp4_quadrilinear(field, dmin, ginv, xdim, ydim, zdim, tmin, tinv, tsteps, px + 0.5 * step * v1x, py + 0.5 * step * v1y, pz + 0.5 * step * v1z, t + 0.5 * step)
+            v3x, v3y, v3z = _interp4_quadrilinear(field, dmin, ginv, xdim, ydim, zdim, tmin, tinv, tsteps, px + 0.5 * step * v2x, py + 0.5 * step * v2y, pz + 0.5 * step * v2z, t + 0.5 * step)
+            v4x, v4y, v4z = _interp4_quadrilinear(field, dmin, ginv, xdim, ydim, zdim, tmin, tinv, tsteps, px + step * v3x, py + step * v3y, pz + step * v3z, t + step)
+            dx = (step / 6.0) * (v1x + 2.0 * v2x + 2.0 * v3x + v4x)
+            dy = (step / 6.0) * (v1y + 2.0 * v2y + 2.0 * v3y + v4y)
+            dz = (step / 6.0) * (v1z + 2.0 * v2z + 2.0 * v3z + v4z)
+        else:
+            v1x, v1y, v1z = _interp4_quadrilinear(field, dmin, ginv, xdim, ydim, zdim, tmin, tinv, tsteps, px, py, pz, t)
+            dx = step * v1x; dy = step * v1y; dz = step * v1z
+        px = px + np.float32(dx); py = py + np.float32(dy); pz = pz + np.float32(dz)
+        t = t + step
+        buf[count, 0] = px; buf[count, 1] = py; buf[count, 2] = pz; buf[count, 3] = t
+        count += 1
+    return count
+
+
+@njit(parallel=True, fastmath=True, cache=True)
+def _batch_path_3d(field, dmin, dmax, ginv, xdim, ydim, zdim, tmin, tinv, tsteps, seeds, min_time, max_time, abs_step, max_iter, method_id, out_pos, out_len):
+    """out_pos: (N, 2*max_iter+1, 4)=(x,y,z,t); out_len:(N,). seeds:(N,4)=(x,y,z,t0). Mirrors compute_pathline_3D."""
+    N = seeds.shape[0]
+    for s in prange(N):
+        fwd = np.empty((max_iter, 4), np.float32)
+        bwd = np.empty((max_iter, 4), np.float32)
+        # seeds is float64 (time parity with the serial reference); positions run in float32.
+        sx = np.float32(seeds[s, 0]); sy = np.float32(seeds[s, 1]); sz = np.float32(seeds[s, 2]); t0 = seeds[s, 3]
+        kf = _path_one_dir_3d(field, dmin, dmax, ginv, xdim, ydim, zdim, tmin, tinv, tsteps, sx, sy, sz, t0, max_time, abs_step, max_iter, method_id, fwd)
+        kb = _path_one_dir_3d(field, dmin, dmax, ginv, xdim, ydim, zdim, tmin, tinv, tsteps, sx, sy, sz, t0, min_time, abs_step, max_iter, method_id, bwd)
+        idx = 0
+        for j in range(kb - 1, -1, -1):
+            out_pos[s, idx, 0] = bwd[j, 0]; out_pos[s, idx, 1] = bwd[j, 1]; out_pos[s, idx, 2] = bwd[j, 2]; out_pos[s, idx, 3] = bwd[j, 3]
+            idx += 1
+        out_pos[s, idx, 0] = sx; out_pos[s, idx, 1] = sy; out_pos[s, idx, 2] = sz; out_pos[s, idx, 3] = t0
+        idx += 1
+        for j in range(kf):
+            out_pos[s, idx, 0] = fwd[j, 0]; out_pos[s, idx, 1] = fwd[j, 1]; out_pos[s, idx, 2] = fwd[j, 2]; out_pos[s, idx, 3] = fwd[j, 3]
+            idx += 1
+        out_len[s] = idx
+
+
+def _method_id_or_none(method: str):
+    """Map an integrator name to the numba kernel id (1=RK4, 0=Euler); None if unsupported."""
+    m = str(method).upper()
+    if m == "RK4":
+        return 1
+    if m == "EULER":
+        return 0
+    return None
+
+
+def _field3d_as_numpy(vector_field: UnsteadyVectorField3D):
+    field = vector_field.field
+    if field is None:
+        return None
+    if isinstance(field, torch.Tensor):
+        field = field.detach().cpu().numpy()
+    return np.ascontiguousarray(field, dtype=np.float32)
+
+
+def compute_streamlines_3D_batch(vector_field: UnsteadyVectorField3D, seeds_xyz: np.ndarray, time: float,
+                                 step_size: float, max_iteration: int, method: str):
+    """Parallel batch streamline integration at a fixed time.
+
+    Returns (out_pos (N, 2*max_iter+1, 4)=(x,y,z,t), out_len (N,)) or None to signal the
+    caller to fall back to the serial per-seed path (unsupported method / empty input)."""
+    method_id = _method_id_or_none(method)
+    if method_id is None:
+        return None
+    field = _field3d_as_numpy(vector_field)
+    if field is None:
+        return None
+    seeds = np.ascontiguousarray(np.asarray(seeds_xyz, dtype=np.float32).reshape(-1, 3))
+    if seeds.shape[0] == 0:
+        return None
+
+    # Blend the two bracketing time slices into one steady snapshot (quadrilinear == snapshot+trilinear).
+    T = int(vector_field.time_steps)
+    tg = (time - vector_field.tmin) / vector_field.timeInterval if vector_field.timeInterval > 0 else 0.0
+    t0 = max(0, min(int(np.floor(tg)), T - 1))
+    t1 = max(0, min(int(np.ceil(tg)), T - 1))
+    wt = np.float32(tg - t0)
+    snap = ((1.0 - wt) * field[t0] + wt * field[t1]).astype(np.float32)
+
+    dmin = np.asarray(vector_field.domainMinBoundary, dtype=np.float32)
+    dmax = np.asarray(vector_field.domainMaxBoundary, dtype=np.float32)
+    ginv = np.asarray(vector_field.gridInterval, dtype=np.float32)
+    max_iter = int(max_iteration)
+    out_pos = np.zeros((seeds.shape[0], 2 * max_iter + 1, 4), dtype=np.float32)
+    out_len = np.zeros((seeds.shape[0],), dtype=np.int32)
+    _batch_stream_3d(snap, dmin, dmax, ginv, int(vector_field.Xdim), int(vector_field.Ydim), int(vector_field.Zdim),
+                     seeds, np.float32(abs(step_size)), max_iter, method_id, np.float32(time), out_pos, out_len)
+    return out_pos, out_len
+
+
+def compute_pathlines_3D_batch(vector_field: UnsteadyVectorField3D, seeds_xyzt: np.ndarray, min_time: float,
+                              max_time: float, step_size: float, max_iteration: int, method: str):
+    """Parallel batch pathline integration (bidirectional in time).
+
+    seeds_xyzt: (N,4)=(x,y,z,t0). Returns (out_pos, out_len) or None for serial fallback."""
+    method_id = _method_id_or_none(method)
+    if method_id is None:
+        return None
+    field = _field3d_as_numpy(vector_field)
+    if field is None:
+        return None
+    # float64 for all time-domain quantities (step, t0, bounds, tmin/interval) to match the
+    # serial reference's float64 time accumulation exactly; positions stay float32.
+    seeds = np.ascontiguousarray(np.asarray(seeds_xyzt, dtype=np.float64).reshape(-1, 4))
+    if seeds.shape[0] == 0:
+        return None
+
+    dmin = np.asarray(vector_field.domainMinBoundary, dtype=np.float32)
+    dmax = np.asarray(vector_field.domainMaxBoundary, dtype=np.float32)
+    ginv = np.asarray(vector_field.gridInterval, dtype=np.float32)
+    tinv = np.float64(vector_field.timeInterval if vector_field.time_steps > 1 else 0.0)
+    max_iter = int(max_iteration)
+    out_pos = np.zeros((seeds.shape[0], 2 * max_iter + 1, 4), dtype=np.float32)
+    out_len = np.zeros((seeds.shape[0],), dtype=np.int32)
+    _batch_path_3d(field, dmin, dmax, ginv, int(vector_field.Xdim), int(vector_field.Ydim), int(vector_field.Zdim),
+                   np.float64(vector_field.tmin), tinv, int(vector_field.time_steps),
+                   seeds, np.float64(min_time), np.float64(max_time), np.float64(abs(step_size)), max_iter,
+                   method_id, out_pos, out_len)
+    return out_pos, out_len
 
 
 def pathline_integration_one_direction_2D(

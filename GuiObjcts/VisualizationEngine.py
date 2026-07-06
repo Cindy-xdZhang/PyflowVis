@@ -92,7 +92,14 @@ class VisualizationEngine:
             gl.glBindVertexArray(0)
             gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
             gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
-    
+            # imgui's fixed-pipeline renderer samples its font atlas from texture unit 0 as a
+            # GL_TEXTURE_2D. Any object that bound a sampler texture (DVR's 3D volume, the 1D-array
+            # colormap, ...) leaves unit 0 on a non-2D target with the active unit off 0, which
+            # blanks the ENTIRE GUI. Reset the active unit + unbind those targets before imgui.
+            gl.glActiveTexture(gl.GL_TEXTURE0)
+            gl.glBindTexture(gl.GL_TEXTURE_3D, 0)
+            gl.glBindTexture(gl.GL_TEXTURE_1D_ARRAY, 0)
+
 
             imgui.new_frame()
             self.scene.drawGui()
@@ -129,9 +136,15 @@ def buildWorkLoads(packageName:str):
             return NetCDFLoaderOBJ()
         elif ObjectName.lower()=="Flowline".lower():
             return FlowLineObject()
+        elif ObjectName.lower()=="IsoSurface".lower():
+            from GuiObjcts.IsoSurfaceObject import IsoSurfaceObject
+            return IsoSurfaceObject()
+        elif ObjectName.lower()=="VolumeRender".lower():
+            from GuiObjcts.VolumeRenderObject import VolumeRenderObject
+            return VolumeRenderObject()
 
     if packageName=="Basic2DFlow":
-        ObjectsNameList=["CoordinateSystem","PlanarManifold","ActiveField","VectorGlyph","Indicator","NetCDFLoader","Flowline"]
+        ObjectsNameList=["CoordinateSystem","PlanarManifold","ActiveField","VectorGlyph","Indicator","NetCDFLoader","Flowline","IsoSurface","VolumeRender"]
     elif packageName=="Basic3DFlow":
         pass
     else:

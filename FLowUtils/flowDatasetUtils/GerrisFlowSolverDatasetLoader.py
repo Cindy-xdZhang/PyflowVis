@@ -1,6 +1,6 @@
 #=====================================================================================================================
 # this file is for  loading machine learning vector field 2d dataset
-# It depdens on  the AmiraLoader class in FLowUtils/netCDFLoader.py
+# It depdens on  the AmiraLoader class in FLowUtils/flowDatasetUtils/NetCDF_AmiraLoader.py
 #  Works with datasets like: https://www.research-collection.ethz.ch/entities/researchdata/52b7a501-c669-411b-9265-f3f039a28dbe
 #Original specification of the dataset:
 # """
@@ -22,16 +22,23 @@
 # resample_ratio_Spatial: 0.5
 # resample_ratio_Time: 0.25
 #=====================================================================================================================
-from GuiObjcts.ActiveFieldObject import *
-from FLowUtils.netCDFLoader import *
-import os
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 resample_ratio_Spatial=0.5
-resample_ratio_Time=0.25
+resample_ratio_Time=0.5
 
+from pathlib import Path
+import sys
+if __package__ in (None, ""):
+    project_root = Path(__file__).resolve().parents[2]
+    project_root_str = str(project_root)
+    if project_root_str not in sys.path:
+        sys.path.insert(0, project_root_str)
+
+# from GuiObjcts.ActiveFieldObject import *
+from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import AmiraLoader
+import os,time,requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 
@@ -142,42 +149,40 @@ def download_with_progress(url: str, dest_path: str, resume: bool = True, chunk_
     # Finalize: rename .part to final path
     os.replace(temp_path, dest_path)
 
-# def locate_dist_path(file_name: str):
-#     # resampled amira dataset, are saved with 1000 as catogory number, and the original amira dataset are saved with 0 as catogory number
-#     # e.g. 2013.am -> flowData2D\\GerrisFlowSolverData_2000_3000\\2013.am
-#     if file_name.endswith(".am"):
-#         file_name = file_name[:-3]
 
 
+#Gunther_GerrisSolver_ML_FlowMap_Dataset
+#A Fluid Flow Data Set for Machine Learning and its Application to Neural Flow Map Interpolation
+# Jakob Jakob, Markus Gross and Tobias Günther
+# IEEE Transactions on Visualization and Computer Graphics (IEEE Visualization), 2021
 
 
-def temp_resample_amira_dataset():
+def downloadGunther_resample_amira_dataset(Id_start: int = 0, Id_end: int = 1000, Id_step: int = 10):
     temp_amira_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverDataTemp"
-    resampled_amira_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\GerrisFlowSolverData0000_1000"
+    resampled_amira_folder="C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2D\\Gunther_GerrisSolver_ML_FlowMap_Dataset"
     if not os.path.exists(temp_amira_folder):
         os.makedirs(temp_amira_folder)
     if not os.path.exists(resampled_amira_folder):
         os.makedirs(resampled_amira_folder)
 
-    import time
 
     max_retries = 5
     retry_delay = 10  # 秒
 
-    for id in range(0, 1000,10):
+    for id in range(Id_start, Id_end,Id_step):
         id_str = f"{id:04d}"
-        dest_file = os.path.join(temp_amira_folder, f"{id_str}.am")
+        dest_temp_file = os.path.join(temp_amira_folder, f"{id_str}.am")
         dest_nc_file = os.path.join(resampled_amira_folder, f"{id_str}.am")
         if os.path.exists(dest_nc_file):
             continue
 
         # 下载部分加重试和异常处理
-        if not os.path.exists(dest_file):
+        if not os.path.exists(dest_temp_file):
             url = f"https://libdrive.ethz.ch/index.php/s/lv7dV40oYlkWJiC/download?path=%2F&files={id_str}.am"
             for attempt in range(max_retries):
                 try:
                     download_with_progress(
-                        url, dest_file, resume=True, chunk_size=8 * 1024 * 1024, timeout=60, retries=10
+                        url, dest_temp_file, resume=True, chunk_size=8 * 1024 * 1024, timeout=60, retries=10
                     )
                     break
                 except Exception as e:
@@ -187,16 +192,16 @@ def temp_resample_amira_dataset():
                     else:
                         print(f"[{id_str}] 多次重试后仍然下载失败，跳过该文件。")
                         continue  # 跳到下一个id
-            if not os.path.exists(dest_file):
+            if not os.path.exists(dest_temp_file):
                 print(f"[{id_str}] 文件依然不存在，跳过。")
                 continue
 
         # 加载、重采样、保存部分加异常处理和重试
         for attempt in range(max_retries):
             try:
-                vectorField2d = AmiraLoader.load_vector_field2d(dest_file)
+                vectorField2d = AmiraLoader.load_vector_field2d(dest_temp_file)
                 if vectorField2d is None:
-                    raise RuntimeError(f"[{id_str}] 加载Amira文件失败: {dest_file}")
+                    raise RuntimeError(f"[{id_str}] 加载Amira文件失败: {dest_temp_file}")
                 vectorField2d.resample2UnsteadyField((
                     int(vectorField2d.Xdim * resample_ratio_Spatial),
                     int(vectorField2d.Ydim * resample_ratio_Spatial),
@@ -212,8 +217,8 @@ def temp_resample_amira_dataset():
                 else:
                     print(f"[{id_str}] 多次重试后依然失败，跳过该文件。")
 
-        if os.path.exists(dest_file) and os.path.exists(dest_nc_file):
-            os.remove(dest_file)
+        if os.path.exists(dest_temp_file) and os.path.exists(dest_nc_file):
+            os.remove(dest_temp_file)
 
 
 
@@ -221,4 +226,4 @@ def temp_resample_amira_dataset():
 
 
 if __name__ == "__main__":
-    temp_resample_amira_dataset()
+    downloadGunther_resample_amira_dataset()

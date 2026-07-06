@@ -1,7 +1,6 @@
 from   .Object import *
 from  FLowUtils.VectorField2d import *
 from FLowUtils.VectorField3d import *
-import pygame
 from typeguard import typechecked
 from FLowUtils.ScalarField2d import *
 from .VisualizationEngine import getEngine
@@ -160,7 +159,8 @@ class ActiveFieldObj(Object):
         elif self.pause==False:
             self.pause=True
 
-    def eventCallBacks(self,event):        
+    def eventCallBacks(self,event):       
+        import pygame
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
             self.pause = not self.pause
             time=self.getValue("time")

@@ -562,8 +562,8 @@ def visualize_FTLEUpampling(true_grid: np.ndarray, pred_grid: np.ndarray,low_res
 
     if save_path is not None:
         plt.savefig(save_path, dpi=200)
-    if show:
-        plt.show(block=True)
+    # if show:
+    #     plt.show(block=True)
     plt.close(fig)
 
 

@@ -40,7 +40,9 @@ test:
   tasks: test_UpsamplingModel
   vectorfield: [doublegyre2d, cylinder2d]
   timesliceCount: 5          # number of time slices per test field
-  patchStride: 4            # sliding-window stride at inference (patchSize=dataset.patchSize=32)
+  patchStride: 4             # sliding-window stride at inference (patchSize=dataset.patchSize=32)
+  inferenceMode: fullgrid    # official metric: fullgrid (single conv pass) | sliding (tiled+blend)
+  compareInference: true     # also log the other mode each test to measure the A/B gap
 
 
 pnn:

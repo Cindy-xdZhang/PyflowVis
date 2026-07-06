@@ -77,30 +77,35 @@ class Indicator(Object):
         self.last_indicator_time = None
 
         
+    def _reseeding_bounds(self, field, margin):
+        """Domain bounds shrunk inwards by a fractional `margin`; returns (lo3, hi3, is3d).
+        For a 2D field the z extent is degenerate, so callers pin z=0 there."""
+        dmin = np.asarray(field.domainMinBoundary, dtype=np.float32)
+        dmax = np.asarray(field.domainMaxBoundary, dtype=np.float32)
+        span = dmax - dmin
+        return dmin + margin * span, dmax - margin * span, field.getDim() == 3
+
     def randomReseeding(self):
-        activeFieldWidget=self.getParentScene().getObject("ActiveField")
+        activeFieldWidget = self.getParentScene().getObject("ActiveField")
         if activeFieldWidget is None:
             return
-        activeVectorField=activeFieldWidget.getActiveField()
-        if activeVectorField is None:
+        field = activeFieldWidget.getActiveField()
+        if field is None:
             return
-        seeingCountPerAxis=self.getValue("SeedingCountPerAxis")
-        xrange = activeVectorField.domainMaxBoundary[0] - activeVectorField.domainMinBoundary[0]
-        yrange = activeVectorField.domainMaxBoundary[1] - activeVectorField.domainMinBoundary[1]
-        xmin, ymin, _ = activeVectorField.domainMinBoundary+0.01*np.array([xrange, yrange, 0])
-        xmax, ymax, _ = activeVectorField.domainMaxBoundary-0.01*np.array([xrange, yrange, 0])
-        xrange=xmax-xmin
-        yrange=ymax-ymin
-        rx=np.random.rand(seeingCountPerAxis)
-        ry=np.random.rand(seeingCountPerAxis)
-        xs=xmin+rx*xrange
-        ys=ymin+ry*yrange
-        # 将每个种子点表示为一个np.array3的列表
-        randomSeeds = [np.array([x, y, 0.0], dtype=np.float32) for x, y in zip(xs, ys)]
+        n = int(self.getValue("SeedingCountPerAxis"))
+        lo, hi, is3d = self._reseeding_bounds(field, 0.01)
+        xs = np.random.uniform(lo[0], hi[0], n)
+        ys = np.random.uniform(lo[1], hi[1], n)
+        # A 2D field lives on z=0; only a 3D field gets seeds spread through the z extent.
+        zs = np.random.uniform(lo[2], hi[2], n) if is3d else np.zeros(n)
+        seeds = [np.array([x, y, z], dtype=np.float32) for x, y, z in zip(xs, ys, zs)]
 
-        time=self.getParentScene().getTime()
-        groupIdtoOperate=self.getValue("activeSeedingGroup")
-        self.SetIndicators(randomSeeds, time, groupIdtoOperate, keep_seeding=self.getValue("keepSeeding"))
+        time = self.getParentScene().getTime()
+        keep = self.getValue("keepSeeding")
+        # Populate BOTH groups: pathline reads SeedingGroup0, streamline reads SeedingGroup1.
+        # Filling only the active group left streamlines (group 1) empty by default -> nothing drawn.
+        self.SetIndicators(seeds, time, 0, keep_seeding=keep)
+        self.SetIndicators(seeds, time, 1, keep_seeding=keep)
 
   
 
@@ -207,4 +212,26 @@ class Indicator(Object):
         getEngine().eventRegister.notifyEvent("seeding_changed")
 
     def denseReseeding(self):
-        pass
+        activeFieldWidget = self.getParentScene().getObject("ActiveField")
+        if activeFieldWidget is None:
+            return
+        field = activeFieldWidget.getActiveField()
+        if field is None:
+            return
+        n = max(2, int(self.getValue("SeedingCountPerAxis")))
+        lo, hi, is3d = self._reseeding_bounds(field, 0.05)
+        xs = np.linspace(lo[0], hi[0], n)
+        ys = np.linspace(lo[1], hi[1], n)
+        if is3d:
+            nz = min(n, 6)  # cap the 3rd axis so the count stays ~ n*n*6, not n**3
+            zs = np.linspace(lo[2], hi[2], nz)
+            gx, gy, gz = np.meshgrid(xs, ys, zs, indexing='ij')
+            seeds = [np.array([x, y, z], dtype=np.float32)
+                     for x, y, z in zip(gx.ravel(), gy.ravel(), gz.ravel())]
+        else:
+            gx, gy = np.meshgrid(xs, ys, indexing='ij')
+            seeds = [np.array([x, y, 0.0], dtype=np.float32)
+                     for x, y in zip(gx.ravel(), gy.ravel())]
+        time = self.getParentScene().getTime()
+        self.SetIndicators(seeds, time, 0, keep_seeding=False)
+        self.SetIndicators(seeds, time, 1, keep_seeding=False)

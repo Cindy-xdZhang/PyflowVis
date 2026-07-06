@@ -25,6 +25,9 @@ from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import (
 from FMT_Utils.FTLE_fitting_utils import *
 from FMT_Utils import debug_checks as dbg
 from FMT_Utils.model_zoo import *
+from FMT_Utils.flowmap_sr import (
+    FlowMapSRTrainDataset, build_FlowMapSR_test_dataset,
+    flowmap_unit_normalize, flowmap_unit_denormalize, ftle_from_endpos_grid)
 
 
 GLOBAL_WANDB_PROJECT_NAME="FlowMapTokenizer"
@@ -278,6 +281,27 @@ def _sliding_window_predict_flowmap(model, low_grid, pathlines, UPsampling, patc
     return (acc / wsum).astype(np.float32)
 
 
+def _fullgrid_predict_flowmap(model, low_grid, pathlines, UPsampling, device, offset_dist):
+    """Single fully-convolutional forward over the WHOLE low-res grid (no tiling, no blend).
+
+    These flow-map upsamplers are fully convolutional, so they accept any H x W via hw=.
+    This is the standard SR inference path; it avoids the patch-border artifacts and
+    overlap-averaging seams that sliding-window introduces. Same per-cell transforms as
+    training: raw -> to_relative -> normalize -> model -> inverse_normalize -> from_relative.
+    """
+    ny_low, nx_low = low_grid.shape[:2]
+    UP = int(UPsampling)
+    rel_scale = 2.0 * float(offset_dist)
+    low_flat = torch.from_numpy(low_grid).reshape(ny_low * nx_low, 5, 2, 3).float()
+    patch = flowmap_to_relative(low_flat.clone(), rel_scale)
+    fm = _normalize_flowmap(patch).reshape(1, ny_low * nx_low, 5, 2, 3).to(device).float()
+    pl = pathlines.unsqueeze(0).to(device).float() if pathlines is not None else None
+    pred = model(fm, pl, hw=(ny_low, nx_low)).to(device).float()
+    pred = _inverse_normalization(pred)
+    pred = flowmap_from_relative(pred, rel_scale)
+    return pred.reshape(ny_low * UP, nx_low * UP, 5, 2, 3).detach().cpu().numpy().astype(np.float32)
+
+
 def _flowmap_ftle_sensitivity_report(pred_grid, high_grid, offset_dist):
     """Quantify whether the model resolves the FTLE-relevant signal.
 
@@ -313,7 +337,10 @@ def _flowmap_ftle_sensitivity_report(pred_grid, high_grid, offset_dist):
 
 test_times=0
 
-def test_UpsamplingModel(config, model,test_dataset, device,visualize=True):
+def test_UpsamplingModel(config, model,test_dataset, device,visualize=True, show_plot=False):
+    # visualize: produce+save the FTLE figure (every 10 tests, and whenever show_plot).
+    # show_plot: pop an interactive (blocking) window; keep False for per-epoch eval so a
+    #            200-epoch run never stalls, set True only for the final best-checkpoint test.
     global test_times
     test_times += 1
     with torch.no_grad():
@@ -332,6 +359,18 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=True):
             # and defaults to half the patch (override via config test: block).
             patch_size = int(getattr(config.dataset, 'patchSize', 32))
             patch_stride = int(config.test.patchStride)
+            off = float(config.pcds.offset_dist)
+            # Inference mode for the official metric: 'fullgrid' (single conv pass, default)
+            # or 'sliding' (tiled+blended). compareInference logs BOTH every test so the cost
+            # of sliding can be measured against fullgrid on identical weights.
+            inference_mode = str(getattr(config.test, 'inferenceMode', 'fullgrid'))
+            compare_inference = bool(getattr(config.test, 'compareInference', False))
+
+            def _predict(mode, low_grid, pl):
+                if mode == 'sliding':
+                    return _sliding_window_predict_flowmap(
+                        model, low_grid, pl, UPsampling, patch_size, patch_stride, device, offset_dist=off)
+                return _fullgrid_predict_flowmap(model, low_grid, pl, UPsampling, device, offset_dist=off)
 
             def _ftle_grid_from_flowmap(field_grid):
                 # field_grid: np or torch [ny, nx, 5, 2, 3] -> FTLE np [ny, nx]
@@ -352,6 +391,7 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=True):
 
             mse_sum = mae_sum = maxe_sum = psnr_sum = 0.0
             psnr_bilinear_sum = psnr_cubic_sum = 0.0
+            psnr_alt_sum = 0.0  # the non-official inference mode (for compareInference)
             for test_i in range(sample_count):
                 low_grid = lowResFTLE_all[test_i]          # np [ny_low,nx_low,5,2,3]
                 high_grid = highResFTLE_all[test_i]        # np [ny_hi, nx_hi, 5,2,3]
@@ -359,16 +399,19 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=True):
                 ny_low, nx_low = low_grid.shape[:2]
                 ny_hi, nx_hi = high_grid.shape[:2]
 
-                # sliding-window inference: tile the low-res grid the same way training did,
-                # predict each patch, and blend overlapping high-res patches (raw coords out).
-                pred_grid = _sliding_window_predict_flowmap(
-                    model, low_grid, lowResPathlinesPreprocessed, UPsampling,
-                    patch_size, patch_stride, device,
-                    offset_dist=float(config.pcds.offset_dist))  # np [ny_hi,nx_hi,5,2,3]
-
                 label_ftle = _ftle_grid_from_flowmap(high_grid)
+
+                # official prediction via the configured inference mode
+                pred_grid = _predict(inference_mode, low_grid, lowResPathlinesPreprocessed)
                 pred_ftle = _ftle_grid_from_flowmap(pred_grid)
                 mse, mae, maxe, psnr = compute_metrics(label_ftle, pred_ftle)
+
+                # A/B: also score the other mode on the SAME weights to measure the gap
+                if compare_inference:
+                    alt_mode = 'sliding' if inference_mode == 'fullgrid' else 'fullgrid'
+                    alt_grid = _predict(alt_mode, low_grid, lowResPathlinesPreprocessed)
+                    _, _, _, psnr_alt = compute_metrics(label_ftle, _ftle_grid_from_flowmap(alt_grid))
+                    psnr_alt_sum += psnr_alt
 
                 if test_times == 1:
                     bil = _interp_flowmap(low_grid, ny_hi, nx_hi, 'bilinear')
@@ -386,10 +429,10 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=True):
                     _flowmap_ftle_sensitivity_report(pred_grid, high_grid,
                                                      offset_dist=float(config.pcds.offset_dist))
 
-                # Render the FTLE image for the last test slice. Always produce it on the
-                # FIRST test (test_times==1) so the whole pipeline can be eyeballed; block
-                # interactively only when visualize=True (avoid stalling per-epoch eval).
-                if (visualize and test_times %10==0) and test_i == sample_count - 1:
+                # Render the FTLE image for the last test slice. Save it every 10 tests (and
+                # on the final best-checkpoint test), but only POP a blocking window when
+                # show_plot is set, so a 200-epoch run saves figures without ever stalling.
+                if visualize and (test_times % 10 == 0 or show_plot) and test_i == sample_count - 1:
                     # The last test slice belongs to the last test field (fields are appended
                     # in order), so use that field's name + domain bounds for the render.
                     vf_cfg = config.test.vectorfield
@@ -401,7 +444,7 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=True):
                     save_path = os.path.join(vis_dir, f"{config['mode']}__{config['model']['NAME']}__{vf_name}_test{test_times}.png")
                     visualize_FTLEUpampling(label_ftle, pred_ftle, low_ftle,
                                             vectorfield.domainMinBoundary, vectorfield.domainMaxBoundary,
-                                            save_path=save_path, show=bool(visualize))
+                                            save_path=save_path, show=bool(show_plot))
                     logging.info(f"[FlowMap] saved FTLE visualization to {save_path}")
 
                 mse_sum += mse; mae_sum += mae; maxe_sum += maxe; psnr_sum += psnr
@@ -414,11 +457,71 @@ def test_UpsamplingModel(config, model,test_dataset, device,visualize=True):
                 psnr_bilinear = psnr_bilinear_sum / sample_count
                 psnr_cubic = psnr_cubic_sum / sample_count
                 logging.info(f"[FlowMap] baseline psnr_bilinear={psnr_bilinear:.6f}, psnr_cubic={psnr_cubic:.6f}")
+            if compare_inference:
+                alt_mode = 'sliding' if inference_mode == 'fullgrid' else 'fullgrid'
+                logging.info(f"[FlowMap][A/B] official={inference_mode} psnr={psnr:.2f} dB  |  "
+                             f"{alt_mode} psnr={psnr_alt_sum / sample_count:.2f} dB  "
+                             f"(delta={psnr - psnr_alt_sum / sample_count:+.2f} dB)")
             return {"mse": mse, "mae": mae, "maxe": maxe, "psnr": psnr}
         else:
             raise ValueError(f"TEST Failed: Unknown mode: {config['mode']} or test_dataset is None")
 
 
+def _sr_metrics(gt, pred):
+    """MSE/MAE/MaxE/PSNR in raw flow-map space (PSNR uses the GT dynamic range)."""
+    gt = np.asarray(gt, np.float32); pred = np.asarray(pred, np.float32)
+    mse = float(np.mean((gt - pred) ** 2))
+    mae = float(np.mean(np.abs(gt - pred)))
+    maxe = float(np.max(np.abs(gt - pred)))
+    rng = max(float(gt.max() - gt.min()), 1e-12)
+    psnr = float('inf') if mse <= 1e-20 else float(20 * np.log10(rng) - 10 * np.log10(mse))
+    return mse, mae, maxe, psnr
+
+
+def test_FlowMapSR(config, model, test_dataset, device, visualize=True, show_plot=False):
+    """Paper-style evaluation: predict the high-res flow map and report MSE/PSNR in
+    FLOW-MAP space against cubic / bilinear interpolation (Jakob et al. 2020)."""
+    global test_times
+    test_times += 1
+    k = int(config.dataset.UPsampling)
+    model.to(device).eval()
+    n = len(test_dataset)
+    acc = {m: np.zeros(4) for m in ('model', 'cubic', 'bilinear')}
+    with torch.no_grad():
+        for ti, s in enumerate(test_dataset):
+            lo, hi = s['lo'], s['hi']               # raw [ny,nx,2], [ny*k,nx*k,2]
+            ny_hi, nx_hi = hi.shape[:2]
+            # model: per-flow-map normalize (from low-res) -> net -> denormalize
+            lo_n, mean, scale = flowmap_unit_normalize(lo)
+            x = torch.from_numpy(lo_n).permute(2, 0, 1).unsqueeze(0).to(device).float()
+            pred_n = model(x)[0].permute(1, 2, 0)   # [ny_hi,nx_hi,2]
+            pred = flowmap_unit_denormalize(pred_n, mean, scale)
+            if pred.shape[:2] != (ny_hi, nx_hi):
+                pred = pred[:ny_hi, :nx_hi]
+            # interpolation baselines on the raw low-res flow map
+            lo_t = torch.from_numpy(lo).permute(2, 0, 1).unsqueeze(0).float()
+            cub = F.interpolate(lo_t, size=(ny_hi, nx_hi), mode='bicubic', align_corners=False)[0].permute(1, 2, 0).numpy()
+            bil = F.interpolate(lo_t, size=(ny_hi, nx_hi), mode='bilinear', align_corners=False)[0].permute(1, 2, 0).numpy()
+            for name, p in (('model', pred), ('cubic', cub), ('bilinear', bil)):
+                acc[name] += np.array(_sr_metrics(hi, p))
+
+            if visualize and (test_times % 10 == 0 or show_plot) and ti == n - 1:
+                xs, ys, tau = s['xs'], s['ys'], s['tau']
+                ftle_gt = ftle_from_endpos_grid(hi, xs, ys, tau)
+                ftle_pred = ftle_from_endpos_grid(pred, xs, ys, tau)
+                ftle_lo = ftle_from_endpos_grid(lo, xs[::k], ys[::k], tau)
+                vis_dir = os.path.join(config.cache_dir, "vis"); os.makedirs(vis_dir, exist_ok=True)
+                save_path = os.path.join(vis_dir, f"flowmapSR__{config['model']['NAME']}__{s['name']}_test{test_times}.png")
+                visualize_FTLEUpampling(ftle_gt, ftle_pred, ftle_lo, s['domMin'], s['domMax'],
+                                        save_path=save_path, show=bool(show_plot))
+                logging.info(f"[FlowMapSR] saved FTLE visualization to {save_path}")
+
+    res = {m: acc[m] / max(n, 1) for m in acc}
+    logging.info(f"[FlowMapSR] flow-map PSNR  model={res['model'][3]:.2f} dB  |  "
+                 f"cubic={res['cubic'][3]:.2f} dB  |  bilinear={res['bilinear'][3]:.2f} dB  "
+                 f"(model-cubic={res['model'][3]-res['cubic'][3]:+.2f} dB)")
+    return {"mse": float(res['model'][0]), "mae": float(res['model'][1]),
+            "maxe": float(res['model'][2]), "psnr": float(res['model'][3])}
 
 
 def train_model(config, model, dataset, device,test_dataset=None):
@@ -541,7 +644,8 @@ def train_model(config, model, dataset, device,test_dataset=None):
     if best_state_dict is not None:
         model.load_state_dict(best_state_dict)
         logging.info(f"[final] loaded best checkpoint with best psnr={best_psnr:.2f} dB")
-        test_result= task_init_fn(config, model,test_dataset, device=str(device), visualize=True) if task_init_fn is not None and callable(task_init_fn) else None
+        # Final eval on the best checkpoint: this is the ONLY call that pops a blocking window.
+        test_result= task_init_fn(config, model,test_dataset, device=str(device), visualize=True, show_plot=True) if task_init_fn is not None and callable(task_init_fn) else None
         if config['wandb'] and test_result is not None and isinstance(test_result,dict):            
             wandb.summary.update({"best_test_mse": test_result['mse'],"best_test_psnr": test_result['psnr'], "best_test_psnr_bilinear": test_result.get('psnr_bilinear', float('nan'))})
             for key, value in test_result.items():
@@ -625,6 +729,14 @@ if __name__=="__main__":
         cfg['lowResY']=patch_size
         model = build_model(cfg, device)
         train_model(cfg,model,dataset,device,test_dataset)
+    elif mode == 'flowmapSR':
+        # Paper-faithful flow-map super-resolution (Jakob et al. 2020): 2-channel end-position
+        # flow map, low-res = high-res subsampled by k, MSE/PSNR evaluated in flow-map space.
+        dataset = FlowMapSRTrainDataset(cfg, useCacheSystem=True)
+        test_dataset = build_FlowMapSR_test_dataset(cfg)
+        logging.info(f"flowmapSR task build_dataset done, train patches: {len(dataset)}")
+        model = build_model(cfg, device)
+        train_model(cfg, model, dataset, device, test_dataset)
     else:
         raise ValueError(f"Unknown mode: {mode}")
 

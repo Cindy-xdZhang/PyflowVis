@@ -1,0 +1,52 @@
+seed: 7068
+
+# Paper-faithful flow-map super-resolution (Jakob et al. 2020).
+# Flow map = 2-channel particle END position; eval in flow-map space vs cubic.
+
+# training configurations
+epochs: 200
+batch_size: 16
+print_freq: 200
+lr: 0.0001
+optimizer:
+  NAME: 'adam'
+  weight_decay: 0.0
+loss:
+  NAME: MSELoss
+model:
+  NAME: ESPCN_SR     # canonical 2-channel sub-pixel ESPCN
+  f1: 3
+  f2: 3
+  n1: 128            # paper: n1=n2=128
+  n2: 128
+
+mode: flowmapSR
+wandb: False
+debug: 0
+dataset:
+  trainTimesliceCount: 20
+  low_res_grid_sampling: 0.5   # high-res tracing sampling = low_res_grid_sampling * UPsampling
+  UPsampling: 2                # upscale factor k (2 or 4)
+  dat_dir: C:\\Users\\xingdi\\OneDrive - KAUST\\WorkingInProcess\\FLowVisAssets\\flowData2d
+  input_names: [cylinder2d, boussinesq, doublegyre2d, rfc2d, beads2d, pipedcylinder2d]
+  extension: nc
+  t_start: 0.1
+  t_target: 0.9
+  patchSize: 16                # LOW-res patch size (high-res patch = patchSize*UPsampling)
+  patchStride: 8
+  boundaryOffset: 0.05         # inset the seeding grid to limit particles exiting the domain
+
+# testing configurations
+test:
+  tasks: test_FlowMapSR
+  vectorfield: [doublegyre2d, cylinder2d]
+  timesliceCount: 5
+
+pcds:
+  dt: 0.005
+  max_iterations: 1000         # tau = dt * max_iterations = 5.0 (paper's regime: cubic ~40 dB)
+  sampled_points_per_line: 16
+  offset_dist: 0.005
+  num_cross_points_per_seeding: 5
+  normalized: False
+  localized: False

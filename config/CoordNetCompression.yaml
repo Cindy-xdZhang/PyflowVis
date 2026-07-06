@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# CoordNet INR compression of a time-varying volume (Han & Wang, TVCG 2023).
+# See docs/coordnet.md.  Run:  python CoordNetCompression.py --config config/CoordNetCompression.yaml
+#
+# The pipeline overfits an implicit neural representation f(x,y,z,t)->value to ALL voxels
+# of a volume; the network weights ARE the compressed data. Structured as a baseline
+# harness: swap `model`, `coord_transform`, or `partition` to compare variants.
+# ---------------------------------------------------------------------------
+seed: 0
+device: null                 # null -> cuda if available else cpu
+
+data:
+  source: synthetic          # synthetic | npy | raw   (synthetic runs with no external data)
+  # synthetic time-varying volume (moving Gaussian blobs + swirl); small so it runs fast.
+  synthetic_kind: blobs      # blobs | vortex
+  dim: [48, 48, 48]          # x, y, z
+  time_steps: 12             # t
+  # for source=npy: path to a .npy/.npz of shape (T, Z, Y, X) float; for raw: + dims/dtype
+  path: null
+  raw_dtype: float32
+  value_norm: minmax         # minmax -> scale values to [-1,1] using data min/max
+
+coord_transform:
+  name: identity             # identity | fourier   (fourier = positional encoding stub)
+  fourier_num_freqs: 6       # only used when name=fourier
+  fourier_scale: 6.0
+
+partition:
+  name: none                 # none (single global INR) | blocks (stub for per-block INRs)
+  blocks: [1, 1, 1]          # only used when name=blocks
+
+# The model under test. Run several by listing them under `compare` (see bottom).
+model:
+  name: coordnet             # coordnet | plain_siren
+  # Paper uses m=64, d=10 -- sized for LARGE volumes (e.g. 320x128x128x100 = 524M voxels),
+  # where 1.5M weights compress ~1400x. On the small demo volume below a big net would be
+  # LARGER than the data (CR<1), so we shrink it; raise m/d for real (large) volumes.
+  m: 32                      # initial neurons (paper: 64)
+  d: 8                       # depth: number of 4m->4m residual blocks (paper: 10)
+  omega_0: 30.0              # SIREN frequency (paper: 30)
+  final_activation: sine     # sine (paper) | linear | tanh  (linear/tanh help some baselines)
+  # plain_siren-only:
+  hidden_features: 256
+  hidden_layers: 5
+
+train:
+  # Paper: batch 32000, lr 1e-5, adam betas (0.9,0.999), wd 1e-6, 300 epochs.
+  # Defaults below are a fast demo; raise epochs/lr for quality (see docs).
+  epochs: 60
+  batch_size: 32000
+  lr: 3.0e-4                 # (paper uses 1e-5 for 300 epochs; higher lr converges faster in fewer epochs)
+  lr_final: 1.0e-5           # cosine-decay target lr (== lr disables decay); stabilizes late SIREN training
+  weight_decay: 1.0e-6
+  betas: [0.9, 0.999]
+  grad_clip: 1.0             # gradient-norm clip (0 = off); guards SIREN against late divergence
+  log_every: 5               # epochs
+  eval_every: 10             # epochs (full-volume reconstruction PSNR)
+
+compress:
+  weight_dtype: float32      # dtype the weights are counted/stored as (float32 | float16)
+  data_bytes_per_voxel: 4    # original data assumed float32 on disk
+
+# Optional: compare multiple models/variants in one run (overrides `model.name` per entry).
+# Each entry is merged onto the base `model`/`coord_transform`/`partition`. Leave empty to
+# just run the single `model` above.
+compare: []
+# example:
+# compare:
+#   - {tag: coordnet,     model: {name: coordnet}}
+#   - {tag: siren,        model: {name: plain_siren}}
+#   - {tag: coordnet_ff,  coord_transform: {name: fourier}}
+
+output:
+  out_dir: outputs/coordnet_compression
+  save_checkpoint: true      # save the compressed representation (network weights)
+  save_reconstruction: false # save the reconstructed volume (.npy) — large
