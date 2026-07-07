@@ -8,54 +8,86 @@ import glm
 import logging
 logger=logging.getLogger()
 
-def screen_to_arcball(x, y, width, height):
-    px = 1.0 - (x * 2.0) / width
-    py = (y * 2.0) / height - 1.0
-    distance = px * px + py * py
-    if distance <= 1.0:
-        return glm.vec3(px, py, glm.sqrt(1.0 - distance))
-    else:
-        return glm.normalize(glm.vec3(px, py, 0))
-    
-def glm_mat4_to_np_array(glm_mat):
+
+def _rotation_about_axis(axis, angle):
+    """Rodrigues rotation matrix (3x3) for a right-handed rotation of `angle`
+    radians about a (not necessarily unit) `axis`."""
+    a = np.asarray(axis, dtype=np.float32)
+    n = float(np.linalg.norm(a))
+    if n < 1e-12:
+        return np.eye(3, dtype=np.float32)
+    x, y, z = (a / n)
+    c = float(np.cos(angle))
+    s = float(np.sin(angle))
+    C = 1.0 - c
     return np.array([
-        [glm_mat[0][0], glm_mat[1][0], glm_mat[2][0], glm_mat[3][0]],
-        [glm_mat[0][1], glm_mat[1][1], glm_mat[2][1], glm_mat[3][1]],
-        [glm_mat[0][2], glm_mat[1][2], glm_mat[2][2], glm_mat[3][2]],
-        [glm_mat[0][3], glm_mat[1][3], glm_mat[2][3], glm_mat[3][3]]
+        [c + x*x*C,   x*y*C - z*s, x*z*C + y*s],
+        [y*x*C + z*s, c + y*y*C,   y*z*C - x*s],
+        [z*x*C - y*s, z*y*C + x*s, c + z*z*C  ],
     ], dtype=np.float32)
 
+
+def _normalize(v, fallback=None):
+    v = np.asarray(v, dtype=np.float32)
+    n = float(np.linalg.norm(v))
+    if n < 1e-8:
+        return np.asarray(fallback, dtype=np.float32) if fallback is not None else v
+    return v / n
+
+
 class Camera(Object):
+    """Orbit ("turntable") camera.
+
+    The camera always looks at a pivot point ``center`` from ``position`` (the
+    eye), with ``up`` kept level.  Dragging orbits the eye around the pivot
+    (yaw about the world-up axis + pitch about the camera-right axis) so the
+    scene never leaves the view, and the horizon never rolls.  Axis-view
+    buttons snap the eye onto a principal axis, so you can always return to a
+    clean front/top/side view.
+
+    Only ``viewMat`` / ``projMat`` (via :meth:`getScope`) and the
+    ``get_*_matrix`` helpers are consumed by the rest of the engine, so the
+    internal parameterization here is free to change.
+    """
+
     def __init__(self, fov, position, center, up, width, height):
         super().__init__("Camera")
-        # cache value for resetting the camera
-        self.init_fov = fov
+        # ---- cached values for reset ----
+        self.init_fov = float(fov)
         self.init_position = np.array(position, dtype=np.float32)
-        self.init_targetDirection = (np.array(center, dtype=np.float32) - self.init_position)
-        self.init_targetDirection = self.init_targetDirection / np.linalg.norm(self.init_targetDirection)
-        self.init_up =up/np.linalg.norm(up)
+        self.init_center = np.array(center, dtype=np.float32)
+        self.init_up = _normalize(up, fallback=[0.0, 1.0, 0.0])
+        # Fixed vertical reference the turntable yaws about. Kept constant so
+        # horizontal drags always spin around the same world axis.
+        self._world_up = np.array(self.init_up, dtype=np.float32)
 
-        # persist to load/save camera configuration
+        # ---- persistent / GUI-exposed state ----
         self.create_variable_callback("position", np.array(position, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
-        self.create_variable_callback("fov", fov, lambda x: self.updateMVPVariables(), True)
+        self.create_variable_callback("center", np.array(center, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
+        self.create_variable_callback("up", np.array(self.init_up, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
+        self.create_variable_callback("fov", float(fov), lambda x: self.updateMVPVariables(), True)
         # Projection mode toggle (combo box in GUI). "orthographic" removes perspective
         # foreshortening entirely, which is what you usually want for 2D flow fields.
         self.create_variable_callback("projectionMode", ["perspective", "orthographic"], lambda x: self.updateMVPVariables(), True, True)
-        self.create_variable_callback("targetDirection", np.array(self.init_targetDirection, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
-        self.create_variable_callback("up", np.array(up, dtype=np.float32), lambda x: self.updateMVPVariables(), True)
-        self.create_variable("rotation_matrix", np.eye(4, dtype=np.float32), True,False)
 
- 
         self.width = width
         self.height = height
         self.aspect_ratio = width / height
         self.last_mouse_pos = None
-        self._last_arcball_vec = None
         self.mouse_down = False
 
-        self.addAction("z positive", lambda object: object.look_at_z_positive())
-        self.addAction("z negative", lambda object: object.look_at_z_negative())
-        self.addAction("reset position", lambda object: object.resetCamera())
+        # ---- axis-aligned view presets ----
+        # Semantics: put the eye ON the given axis and look back at ``center``
+        # (i.e. "z positive" == camera on +Z looking toward -Z == facing the
+        # z-axis).  ``up`` is chosen so the horizon stays sensible.
+        self.addAction("x positive", lambda o: o.set_axis_view(( 1,  0,  0), (0, 1,  0)))
+        self.addAction("x negative", lambda o: o.set_axis_view((-1,  0,  0), (0, 1,  0)))
+        self.addAction("y positive", lambda o: o.set_axis_view(( 0,  1,  0), (0, 0, -1)))
+        self.addAction("y negative", lambda o: o.set_axis_view(( 0, -1,  0), (0, 0,  1)))
+        self.addAction("z positive", lambda o: o.set_axis_view(( 0,  0,  1), (0, 1,  0)))
+        self.addAction("z negative", lambda o: o.set_axis_view(( 0,  0, -1), (0, 1,  0)))
+        self.addAction("reset position", lambda o: o.resetCamera())
+
         self.MVPVariables = {"viewMat": None, "projMat": None}
         self.updateMVPVariables()
 
@@ -63,11 +95,10 @@ class Camera(Object):
         self.updateMVPVariables()
 
     def resetCamera(self):
-        self.updateValue("fov", self.init_fov)
-        self.updateValue("targetDirection", self.init_targetDirection)
-        self.updateValue("up", np.array(self.init_up, dtype=np.float32))
-        self.setValue("position", self.init_position)
-        self.updateValue("rotation_matrix", np.eye(4, dtype=np.float32))
+        self.setValue("fov", float(self.init_fov), callback=False)
+        self.setValue("position", np.array(self.init_position, dtype=np.float32), callback=False)
+        self.setValue("center", np.array(self.init_center, dtype=np.float32), callback=False)
+        self.setValue("up", np.array(self.init_up, dtype=np.float32), callback=False)
         self.updateMVPVariables()
 
     def updateMVPVariables(self):
@@ -79,50 +110,38 @@ class Camera(Object):
         return self.MVPVariables
 
     def get_view_matrix(self):
-        """Get the view matrix."""
-        pos = np.array(self.getValue("position"), dtype=np.float32)
+        """Get the view matrix (looks from ``position`` at ``center``)."""
+        eye = np.array(self.getValue("position"), dtype=np.float32)
+        center = np.array(self.getValue("center"), dtype=np.float32)
+        up = np.array(self.getValue("up"), dtype=np.float32)
 
-        # Apply camera rotation (column-vector convention): v' = R @ v
-        rotation_matrix = np.array(self.getValue("rotation_matrix"), dtype=np.float32)
-        target_dir = np.array(self.getValue("targetDirection"), dtype=np.float32)
-        up_dir = np.array(self.getValue("up"), dtype=np.float32)
+        forward = _normalize(center - eye, fallback=[0.0, 0.0, -1.0])
+        # Guard against a degenerate up (parallel to the view direction).
+        if float(np.linalg.norm(np.cross(forward, _normalize(up)))) < 1e-6:
+            up = self._world_up
+            if float(np.linalg.norm(np.cross(forward, up))) < 1e-6:
+                up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 
-        target4 = np.array([target_dir[0], target_dir[1], target_dir[2], 0.0], dtype=np.float32)
-        up4 = np.array([up_dir[0], up_dir[1], up_dir[2], 0.0], dtype=np.float32)
-        target_dir_new = (rotation_matrix @ target4)[:3]
-        up_dir_new = (rotation_matrix @ up4)[:3]
+        return glm.lookAt(glm.vec3(*eye), glm.vec3(*center), glm.vec3(*up))
 
-        # Robust normalize (avoid NaNs)
-        td_norm = np.linalg.norm(target_dir_new)
-        if td_norm > 1e-8:
-            target_dir_new = target_dir_new / td_norm
-        up_norm = np.linalg.norm(up_dir_new)
-        if up_norm > 1e-8:
-            up_dir_new = up_dir_new / up_norm
-
-        target_new = pos + target_dir_new
-        return glm.lookAt(glm.vec3(*pos), glm.vec3(*target_new), glm.vec3(*up_dir_new))
-    
     def get_projection_matrix(self):
         fov = self.getValue("fov")
-        # 根据相机位置动态调整近平面
-        pos = self.getValue("position")
-        distance_to_origin = np.linalg.norm(pos)
-        near_plane = max(0.5, distance_to_origin * 0.1)  # 动态近平面
-        far_plane = max(100.0, distance_to_origin * 10)    # 动态远平面
+        # Near/far scale with how far the eye is from the pivot it orbits.
+        eye = np.array(self.getValue("position"), dtype=np.float32)
+        center = np.array(self.getValue("center"), dtype=np.float32)
+        distance = float(np.linalg.norm(eye - center))
+        near_plane = max(0.5, distance * 0.1)
+        far_plane = max(100.0, distance * 10)
 
         if self.getOptionValue("projectionMode") == "orthographic":
-            # Match the on-screen scale of the perspective view at the focal distance
-            # (assumed to be the scene center near the origin, consistent with the
-            # near/far heuristic above) so toggling does not jump the framing.
-            # half_height = focal_distance * tan(fov/2); ortho has no foreshortening.
-            half_height = max(distance_to_origin * np.tan(np.radians(fov) * 0.5), 1e-3)
+            # Match the on-screen scale of the perspective view at the pivot
+            # distance so toggling does not jump the framing.
+            # half_height = distance * tan(fov/2); ortho has no foreshortening.
+            half_height = max(distance * np.tan(np.radians(fov) * 0.5), 1e-3)
             half_width = half_height * self.aspect_ratio
             return glm.ortho(-half_width, half_width, -half_height, half_height, near_plane, far_plane)
 
         return glm.perspective(glm.radians(fov), self.aspect_ratio, near_plane, far_plane)
-    
-
 
     def update_window_size(self, width, height):
         """Update the window size and recalculate the projection matrix."""
@@ -131,87 +150,109 @@ class Camera(Object):
         self.aspect_ratio = width / height
         self.updateMVPVariables()
 
-    def look_at_z_positive(self):
-        """Adjust the camera to look at the Z positive direction."""
-        targetDirection = np.array([0, 0, 1])
-        self.updateValue("targetDirection", targetDirection)
+    def set_axis_view(self, axis, up):
+        """Place the eye on ``axis`` (through the pivot) looking back at
+        ``center``, keeping the current orbit distance. Gives an exact,
+        repeatable front/top/side view."""
+        center = np.array(self.getValue("center"), dtype=np.float32)
+        eye = np.array(self.getValue("position"), dtype=np.float32)
+        distance = float(np.linalg.norm(eye - center))
+        if distance < 1e-6:
+            distance = float(np.linalg.norm(self.init_position - self.init_center)) or 1.0
+
+        axis = _normalize(axis, fallback=[0.0, 0.0, 1.0])
+        new_eye = center + axis * distance
+        self.setValue("position", np.array(new_eye, dtype=np.float32), callback=False)
+        self.setValue("up", _normalize(up, fallback=[0.0, 1.0, 0.0]), callback=False)
         self.updateMVPVariables()
 
-    def look_at_z_negative(self):
-        """Adjust the camera to look at the Z negative direction."""
-        targetDirection = np.array([0, 0, -1])
-        self.updateValue("targetDirection", targetDirection)
+    def orbit(self, dx, dy):
+        """Orbit the eye around ``center`` by a mouse delta (pixels).
+
+        Turntable convention (no quaternions, no roll):
+          * horizontal drag -> yaw about the world-up axis
+          * vertical drag   -> pitch about the camera-right axis, clamped away
+            from the poles so the view never flips
+        A fresh, level ``up`` is rebuilt every step, so the horizon stays flat
+        and returning near a principal axis is easy.
+        """
+        center = np.array(self.getValue("center"), dtype=np.float32)
+        eye = np.array(self.getValue("position"), dtype=np.float32)
+        up_stored = np.array(self.getValue("up"), dtype=np.float32)
+        world_up = self._world_up
+
+        offset = eye - center
+        dist = float(np.linalg.norm(offset))
+        if dist < 1e-8:
+            return
+
+        # Rotation per pixel: a full-window-height drag ~= 180 degrees.
+        k = np.pi / float(max(self.height, 1))
+        yaw = dx * k
+        pitch = dy * k
+
+        # 1) yaw about the world-up axis
+        offset = _rotation_about_axis(world_up, yaw) @ offset
+
+        # 2) pitch about the camera-right axis, clamped in polar angle so the
+        #    eye never crosses (or sits exactly on) a pole.
+        forward = _normalize(-offset)
+        right = np.cross(forward, world_up)
+        if float(np.linalg.norm(right)) < 1e-6:      # at a pole: use last up
+            right = np.cross(forward, up_stored)
+        right = _normalize(right, fallback=[1.0, 0.0, 0.0])
+
+        cos_polar = float(np.clip(np.dot(offset, world_up) / dist, -1.0, 1.0))
+        polar = float(np.arccos(cos_polar))          # 0 at +world_up, pi at -world_up
+        POLE = np.radians(2.0)
+        new_polar = float(np.clip(polar + pitch, POLE, np.pi - POLE))
+        offset = _rotation_about_axis(right, new_polar - polar) @ offset
+
+        # 3) rebuild a level up (kills any accumulated roll / drift)
+        forward = _normalize(-offset)
+        right = np.cross(forward, world_up)
+        if float(np.linalg.norm(right)) < 1e-6:
+            up = up_stored
+        else:
+            right = _normalize(right)
+            up = _normalize(np.cross(right, forward))
+
+        self.setValue("position", np.array(center + offset, dtype=np.float32), callback=False)
+        self.setValue("up", np.array(up, dtype=np.float32), callback=False)
         self.updateMVPVariables()
 
     def handle_mouse_move(self, x, y, up=False):
-        """Handle the mouse movement to rotate the camera around the target."""
+        """Orbit the camera from relative mouse motion."""
         if up is True:
             self.last_mouse_pos = None
-            self._last_arcball_vec = None
             return
         if self.last_mouse_pos is None:
             self.last_mouse_pos = (x, y)
-            self._last_arcball_vec = screen_to_arcball(x, y, self.width, self.height)
             return
 
+        lx, ly = self.last_mouse_pos
+        dx = x - lx
+        dy = y - ly
         self.last_mouse_pos = (x, y)
-        v0 = self._last_arcball_vec
-        v1 = screen_to_arcball(x, y, self.width, self.height)
-        self._last_arcball_vec = v1
-
-        # Arcball: rotate from v0 to v1 around axis = v0 x v1
-        axis = glm.cross(v0, v1)
-        axis_len = glm.length(axis)
-        if axis_len < 1e-7:
+        if dx == 0 and dy == 0:
             return
-        dot01 = float(glm.dot(v0, v1))
-        dot01 = max(-1.0, min(1.0, dot01))
-        angle = float(np.arccos(dot01))
-
-        ax = np.array([axis.x, axis.y, axis.z], dtype=np.float32) / float(axis_len)
-        c = float(np.cos(angle))
-        s = float(np.sin(angle))
-        C = 1.0 - c
-        x0, y0, z0 = float(ax[0]), float(ax[1]), float(ax[2])
-        r3 = np.array([
-            [c + x0*x0*C,     x0*y0*C - z0*s, x0*z0*C + y0*s],
-            [y0*x0*C + z0*s,  c + y0*y0*C,    y0*z0*C - x0*s],
-            [z0*x0*C - y0*s,  z0*y0*C + x0*s, c + z0*z0*C   ],
-        ], dtype=np.float32)
-        r4 = np.eye(4, dtype=np.float32)
-        r4[:3, :3] = r3
-
-        # Compose rotation in camera local space: R_new = R_current @ R_inc
-        rotation_matrix = np.array(self.getValue("rotation_matrix"), dtype=np.float32)
-        rotation_matrix = rotation_matrix @ r4
-        self.updateValue("rotation_matrix", rotation_matrix)
-
-        self.updateMVPVariables()
+        self.orbit(dx, dy)
 
     def pan(self, dx: float, dy: float, dz: float):
-        """
-        Pans the camera based on horizontal (dx) and vertical (dy) input values.
-        """
-        def _norm(v: np.ndarray) -> np.ndarray:
-            n = np.linalg.norm(v)
-            return v if n < 1e-8 else (v / n)
+        """Translate the whole rig (eye and pivot together) along the current
+        screen right / up / forward axes, so panning slides the view without
+        rotating it."""
+        center = np.array(self.getValue("center"), dtype=np.float32)
+        eye = np.array(self.getValue("position"), dtype=np.float32)
+        up = np.array(self.getValue("up"), dtype=np.float32)
 
-        rotation_matrix = np.array(self.getValue("rotation_matrix"), dtype=np.float32)
-        forward0 = np.array(self.getValue("targetDirection"), dtype=np.float32)
-        up0 = np.array(self.getValue("up"), dtype=np.float32)
+        forward = _normalize(center - eye, fallback=[0.0, 0.0, -1.0])
+        right = _normalize(np.cross(forward, up), fallback=[1.0, 0.0, 0.0])
+        up_vec = _normalize(np.cross(right, forward), fallback=[0.0, 1.0, 0.0])
 
-        f4 = np.array([forward0[0], forward0[1], forward0[2], 0.0], dtype=np.float32)
-        u4 = np.array([up0[0], up0[1], up0[2], 0.0], dtype=np.float32)
-        forward = _norm((rotation_matrix @ f4)[:3])
-        up_vec = _norm((rotation_matrix @ u4)[:3])
-        right = _norm(np.cross(forward, up_vec))
-
-        right_movement = right * dx
-        up_movement = up_vec * dy
-        z_movement = forward * dz
-
-        new_position = np.array(self.getValue("position") + right_movement + up_movement + z_movement, dtype=np.float32)
-        self.updateValue("position", new_position )
+        move = right * dx + up_vec * dy + forward * dz
+        self.setValue("position", np.array(eye + move, dtype=np.float32), callback=False)
+        self.setValue("center", np.array(center + move, dtype=np.float32), callback=False)
         self.updateMVPVariables()
 
     def zoom(self, direction):
@@ -256,6 +297,3 @@ class Camera(Object):
                 self.pan(0, 0, 0.1)  # Pan forward
             if keys[pygame.K_e]:
                 self.pan(0, 0, -0.1)  # Pan backward
-
-
-
