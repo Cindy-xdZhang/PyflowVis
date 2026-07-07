@@ -180,7 +180,7 @@ def train_pipeline():
         cfg['run_name']=run_Name
         logging.info(f"run name: {run_Name}, run tags: {runTags}")
         #get dataset realted config paramters,like PathlineGroupsCount, minV,maxV, etc.
-        # readDataSetRelatedConfig(cfg)
+        readDataSetRelatedConfig(cfg)
         model = build_model_from_cfg(cfg.model)
         model.to(cfg['device'])
     
