@@ -80,7 +80,9 @@ def init_color_maps_texture_array() -> tuple[int, list[str]]:
 
     glBindTexture(GL_TEXTURE_1D_ARRAY, 0)
     color_map_names=list(colorMapImages.keys())
-    return u_texture_array_index, color_map_names
+    # Also hand back the CPU-side resampled colormaps (each (target_width,3), float) so callers
+    # such as the DVR transfer-function LUT can bake colormap colors on the CPU.
+    return u_texture_array_index, color_map_names, resized_color_maps
 
 
 @singleton
@@ -89,7 +91,7 @@ class TextureManager:
         self.name=name
     
         #initBuiltInTextures()
-        self.BuiltItextureIDarray, self.BuiltInTextuireimageNames= init_color_maps_texture_array()
+        self.BuiltItextureIDarray, self.BuiltInTextuireimageNames, self.builtin_colormaps_cpu= init_color_maps_texture_array()
         #additional textures
         self.texturesOpenGLID= {}
         
@@ -107,6 +109,17 @@ class TextureManager:
     
     def getBuiltInTextureIdArray(self):
         return self.BuiltItextureIDarray
+
+    def getBuiltInColormapCPU(self, index:int):
+        """Return the CPU-side resampled colormap (target_width,3) float32 for the given built-in
+        colormap index (aligned with getBuiltInTextureNames()), used to bake DVR transfer-function
+        colors on the CPU. Returns None if unavailable."""
+        maps = getattr(self, "builtin_colormaps_cpu", None)
+        if not maps:
+            return None
+        if index < 0 or index >= len(maps):
+            index = 0
+        return np.asarray(maps[index], dtype=np.float32)
 
 
 def getTextureManager() -> TextureManager:
@@ -374,6 +387,7 @@ class ShaderManager(Object):
         self.add_shader_program("glyphInstancedMat","assets/shaders/glyph_instanced_vertex.glsl","assets/shaders/glyph_instanced_fragment.glsl")
         self.add_shader_program("isoSurfaceMat","assets/shaders/iso_surface_vertex.glsl","assets/shaders/iso_surface_fragment.glsl")
         self.add_shader_program("dvrMat","assets/shaders/dvr_vertex.glsl","assets/shaders/dvr_fragment.glsl")
+        self.add_shader_program("generalMeshMat","assets/shaders/general_mesh_vertex.glsl","assets/shaders/general_mesh_fragment.glsl")
         self.add_shader_program("planarManifoldMat","assets/shaders/planarManifold_vertex.glsl","assets/shaders/planarManifold_fragment.glsl")
         self.add_shader_program("corelineMat","assets/shaders/coreline_vertex.glsl","assets/shaders/coreline_fragment.glsl")
    

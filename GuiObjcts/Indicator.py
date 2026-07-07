@@ -70,7 +70,10 @@ class Indicator(Object):
         self.create_variable("SeedingCountPerAxis", 10, True)
 
         self.create_variable("keepSeeding", False, True)
-        self.create_variable("activeSeedingGroup", 0, True)
+        # Active seeding group: the next right-click seeds into THIS group. group0 feeds pathlines,
+        # group1 feeds streamlines. Both flow-line types can be active/visible at the same time; switch
+        # this to choose which one your next click seeds. Option index == group id (0/1).
+        self.create_variable_gui("activeSeedingGroup", ["group0 (pathline)", "group1 (streamline)"], True)
         self.create_variable_callback("SeedingGroup0", list([]), notifySeedingChanged,False)
         self.create_variable_callback("SeedingGroup1", list([]), notifySeedingChanged,False)
         self.last_indicator_pos = None
@@ -113,10 +116,20 @@ class Indicator(Object):
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 3:  # Right mouse button
                 seeding_plane=self.getParentScene().getObject("plane")
+                # Make sure the seeding plane matches the CURRENT active field before intersecting.
+                # Otherwise a plane still fit to a previous 2D field is a degenerate z=0 plane, so every
+                # seed (and thus every 3D streamline) starts at z=0 no matter where the plane appears to be.
+                # fitPlaneWithActiveField is idempotent for the same axis/NormalizedPosition, so this does
+                # not disturb a slice the user has positioned.
+                if seeding_plane is not None and hasattr(seeding_plane, "fitPlaneWithActiveField"):
+                    seeding_plane.fitPlaneWithActiveField()
                 hit,hit_pos=self.handleMouseRayIntersection(event.pos, seeding_plane)
                 if hit:
                     time=self.getParentScene().getTime()
-                    groupIdtoOperate=self.getValue("activeSeedingGroup")
+                    # options index == group id: 0 -> pathline (SeedingGroup0), 1 -> streamline (SeedingGroup1)
+                    _agOptions=self.getValue("activeSeedingGroup")
+                    _agSel=self.getOptionValue("activeSeedingGroup")
+                    groupIdtoOperate=_agOptions.index(_agSel) if _agSel in _agOptions else 0
                     keepSeeding=self.getValue("keepSeeding")
                     self.SetIndicator(hit_pos, time, group=groupIdtoOperate, keep_seeding=keepSeeding)
 

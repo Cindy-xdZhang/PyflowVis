@@ -18,6 +18,58 @@ from GuiObjcts.ActiveFieldObject import *
 
 
 
+class _LineBuffer:
+    """One GL_LINE_STRIP_ADJACENCY multi-draw buffer (vertex layout: pos(x,y,z) + (time, attrib)).
+    Pathlines and streamlines each own one so they render independently and never overwrite or
+    erase each other (they used to share a single VBO)."""
+
+    def __init__(self):
+        self.vertex_count = 0
+        self.offsets = np.array([], dtype=np.uint32)
+        self.sizes = np.array([], dtype=np.uint32)
+        self.vao_id = gl.glGenVertexArrays(1)
+        self.vbo_id = gl.glGenBuffers(1)
+        gl.glBindVertexArray(self.vao_id)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_id)
+        stride = 5 * 4  # 5 float32 = 20 bytes
+        gl.glEnableVertexAttribArray(0)  # layout(location=0) in vec3 in_position
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(0))
+        gl.glEnableVertexAttribArray(1)  # layout(location=1) in vec2 in_attribs(time, attrib)
+        gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(3 * 4))
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        gl.glBindVertexArray(0)
+
+    def upload_vertices(self, vertex_attributes):
+        va = np.ascontiguousarray(vertex_attributes, dtype=np.float32)
+        self.vertex_count = len(va)
+        gl.glBindVertexArray(self.vao_id)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_id)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, va.nbytes, va if va.size else None, gl.GL_STATIC_DRAW)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        gl.glBindVertexArray(0)
+
+    def set_indices(self, offsets, sizes):
+        self.offsets = np.array(offsets, dtype=np.uint32)
+        self.sizes = np.array(sizes, dtype=np.uint32)
+
+    def erase(self):
+        self.vertex_count = 0
+        self.offsets = np.array([], dtype=np.uint32)
+        self.sizes = np.array([], dtype=np.uint32)
+        gl.glBindVertexArray(self.vao_id)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_id)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, 0, None, gl.GL_DYNAMIC_DRAW)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        gl.glBindVertexArray(0)
+
+    def draw(self):
+        if self.vertex_count == 0 or len(self.offsets) == 0:
+            return
+        gl.glBindVertexArray(self.vao_id)
+        gl.glMultiDrawArrays(gl.GL_LINE_STRIP_ADJACENCY, self.offsets, self.sizes, len(self.offsets))
+        gl.glBindVertexArray(0)
+
+
 class FlowLineObject(Object):
     def __init__(self):
         super().__init__("Flowline")
@@ -133,7 +185,8 @@ class FlowLineObject(Object):
             
             seeds_data = self.indicatorObject.getValue("SeedingGroup0")
             if not seeds_data:
-                self.erase()
+                self.pathline_buf.erase()
+                self.pathline_dirty = False
                 return
 
             start_positions = np.array([p[0][:2] for p in seeds_data], dtype=np.float32)
@@ -167,7 +220,7 @@ class FlowLineObject(Object):
                 full_path = bwd_path + fwd_path
                 pathline_cache.append(full_path)
                 
-            self.MappingFlowlineAsRenderingVAO(pathline_cache)
+            self.MappingFlowlineAsRenderingVAO(pathline_cache, self.pathline_buf)
             self.pathline_dirty = False
         self.addAction("pathline_integrate_torch", pathline_integrate_torch_action)
 
@@ -175,17 +228,9 @@ class FlowLineObject(Object):
         self.material=material
 
     def erase(self) -> None:
-        self.vertex_count = 0
-        self.mOffsetIndices = []
-        self.mDrawSizes = []
-        # Bind VAO and VBO
-        gl.glBindVertexArray(self.vao_id)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_id)
-        # Upload empty data to clear buffer
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, 0, None, gl.GL_DYNAMIC_DRAW)
-        # Unbind
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
-        gl.glBindVertexArray(0)
+        # Clear both line buffers (kept for any external caller; internal code erases per-type).
+        self.pathline_buf.erase()
+        self.streamline_buf.erase()
 
 
     def postInit(self):
@@ -196,28 +241,11 @@ class FlowLineObject(Object):
             return
   
     def __initDynamicTypeGLContext__(self):
-        self.vertex_count = 0
-        self.mOffsetIndices = []
-        self.mDrawSizes = []
-
-        self.vao_id = gl.glGenVertexArrays(1)
-        self.vbo_id = gl.glGenBuffers(1)  # vertex buffer
-        gl.glBindVertexArray(self.vao_id)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_id)#link vao to vbo
-        # the vertex attribe is fixed as
-        # layout(location = 0) in vec3 in_position(x,y,z);
-        # layout(location = 1) in vec2 in_attribs(time,addtional_attibs);
-        stride = 5 * 4  # 5 float32 = 20 bytes
-        # layout(location = 0) in vec3 in_positions;
-        gl.glEnableVertexAttribArray(0)
-        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(0))
-        # layout(location = 1) in vec2 in_attribs;
-        gl.glEnableVertexAttribArray(1)
-        gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, stride, ctypes.c_void_p(3 * 4))
-        
-        
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
-        gl.glBindVertexArray(0)
+        # Pathlines and streamlines each get their OWN buffer, so they render independently and
+        # never overwrite/erase one another. Previously they shared one VBO, so clearing one
+        # seeding group (or a pathline erase on empty seeds) wiped the other's lines.
+        self.pathline_buf = _LineBuffer()
+        self.streamline_buf = _LineBuffer()
 
 
     def __resetFrameTransformationBuffers(self):
@@ -309,18 +337,18 @@ class FlowLineObject(Object):
             self.update_pathline()
         if self.getValue("streamline_active"):
             self.update_streamline()
-        
-        if self.vertex_count == 0:
-            return
-        # Bind VAO
-        if self.material is not None:
-            self.material.apply([self.parentScene, self.cameraObject,self])
 
-        gl.glBindVertexArray(self.vao_id)  
-        gl.glMultiDrawArrays(gl.GL_LINE_STRIP_ADJACENCY, self.mOffsetIndices, self.mDrawSizes, len(self.mOffsetIndices))
- 
-        # Unbind VAO
-        gl.glBindVertexArray(0)
+        draw_path = self.getValue("pathline_active") and self.pathline_buf.vertex_count > 0
+        draw_stream = self.getValue("streamline_active") and self.streamline_buf.vertex_count > 0
+        if not (draw_path or draw_stream):
+            return
+        # One material/uniform setup; pathline and streamline share the shader but their own VAOs.
+        if self.material is not None:
+            self.material.apply([self.parentScene, self.cameraObject, self])
+        if draw_path:
+            self.pathline_buf.draw()
+        if draw_stream:
+            self.streamline_buf.draw()
         gl.glUseProgram(0)
 
     def update_streamline(self,  attribs2=None):
@@ -341,7 +369,12 @@ class FlowLineObject(Object):
 
         time = actFieldWidget.time()
         seeds = self.indicatorObject.getValue("SeedingGroup1")
-        
+        # No streamline seeds -> clear ONLY the streamline buffer; pathlines are untouched.
+        if not seeds:
+            self.streamline_buf.erase()
+            self.streamline_dirty = False
+            return
+
         step_size = self.getValue("stepSize")
         max_iteration = self.getValue("maxIteration")
         method = self.getOptionValue("integrator")
@@ -350,19 +383,19 @@ class FlowLineObject(Object):
             (vector_field, pos3d, time, step_size, max_iteration, method)
             for pos3d, _ in seeds
         ]
-        
+
         if vector_field.getDim() == 3:
             # Fast path: numba parallel batch integration + numpy VBO assembly.
             seeds_xyz = np.array([np.asarray(pos3d, dtype=np.float32)[:3] for pos3d, _ in seeds], dtype=np.float32)
             batched = compute_streamlines_3D_batch(vector_field, seeds_xyz, time, step_size, max_iteration, method)
             if batched is not None:
-                self.MappingBatchedFlowlineAsRenderingVAO(*batched)
+                self.MappingBatchedFlowlineAsRenderingVAO(*batched, self.streamline_buf)
             else:  # unsupported integrator (e.g. RK5) -> serial fallback
                 self.streamline_cache = list(map(compute_streamline_3D, args_list))
-                self.MappingFlowlineAsRenderingVAO(self.streamline_cache)
+                self.MappingFlowlineAsRenderingVAO(self.streamline_cache, self.streamline_buf)
         else:
             self.streamline_cache = list(map(compute_streamline_2D, args_list))
-            self.MappingFlowlineAsRenderingVAO(self.streamline_cache)
+            self.MappingFlowlineAsRenderingVAO(self.streamline_cache, self.streamline_buf)
 
         self.streamline_dirty = False
 
@@ -393,6 +426,8 @@ class FlowLineObject(Object):
             seeds=self.indicatorObject.getValue("SeedingGroup0") # [(pos3D, time), ...]
             number_of_pathlines = len(seeds)
             if number_of_pathlines == 0:
+                self.pathline_buf.erase()
+                self.pathline_dirty = False
                 return
 
             min_time = vector_field.getMinTime()
@@ -407,7 +442,7 @@ class FlowLineObject(Object):
     
             if vector_field.getDim()==2:
                 self.pathline_cache = compute_pathline_2D_auto(args_list)
-                self.MappingFlowlineAsRenderingVAO(self.pathline_cache)
+                self.MappingFlowlineAsRenderingVAO(self.pathline_cache, self.pathline_buf)
             elif vector_field.getDim()==3:
                 # Fast path: numba parallel batch integration + numpy VBO assembly.
                 seeds_xyzt = np.array(
@@ -415,10 +450,10 @@ class FlowLineObject(Object):
                     dtype=np.float64)
                 batched = compute_pathlines_3D_batch(vector_field, seeds_xyzt, min_time, max_time, step_size, max_iteration, method)
                 if batched is not None:
-                    self.MappingBatchedFlowlineAsRenderingVAO(*batched)
+                    self.MappingBatchedFlowlineAsRenderingVAO(*batched, self.pathline_buf)
                 else:  # unsupported integrator -> serial fallback
                     self.pathline_cache = list(map(compute_pathline_3D, args_list))
-                    self.MappingFlowlineAsRenderingVAO(self.pathline_cache)
+                    self.MappingFlowlineAsRenderingVAO(self.pathline_cache, self.pathline_buf)
             self.pathline_dirty = False
 
     def __numpy_vec3Arrays_to_pathlines2D(self, numpy_pathlines:np.ndarray):
@@ -448,32 +483,14 @@ class FlowLineObject(Object):
         # convert labels from 1D array to list
         if labels is not None:
             labels = labels.tolist()
-        self.MappingFlowlineAsRenderingVAO(self.pathline_cache, labels)
+        self.MappingFlowlineAsRenderingVAO(self.pathline_cache, self.pathline_buf, labels)
         self.pathline_dirty = False
    
 
 
         
 
-    def updateMultiDrawIndices(self,line_offset_indices,line_sizes):
-        #const std::vector<GLint>& offsetIndices, const std::vector<GLsizei>& sizes
-        self.mOffsetIndices = np.array(line_offset_indices, dtype=np.uint32)
-        self.mDrawSizes = np.array(line_sizes, dtype=np.uint32)
-
-
-    def updateVertexAttributesBuffer(self, vertex_attributes):
-        """
-        vertex_attributes: np.ndarray, shape=(N, attr_dim), float32
-        """
-        self.vertex_count = len(vertex_attributes)
-        gl.glBindVertexArray(self.vao_id)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo_id)
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, vertex_attributes.nbytes, vertex_attributes, gl.GL_STATIC_DRAW)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
-        gl.glBindVertexArray(0)
-
-    
-    def MappingFlowlineAsRenderingVAO(self, pathline_cache, label_appending=None):
+    def MappingFlowlineAsRenderingVAO(self, pathline_cache, buf, label_appending=None):
         """
         pathline_cache: List[],每个元素是一条 pathline, pathline 是 (pos3d(x,y,z), t) 的 list
         or
@@ -482,6 +499,7 @@ class FlowLineObject(Object):
         """
         # 获取时间范围
         if not pathline_cache or not pathline_cache[0]:
+            buf.erase()
             return
         # 计算全局最小最大时间
         all_times = [t for path in pathline_cache for (_, t) in path]
@@ -550,11 +568,12 @@ class FlowLineObject(Object):
                     ])
         
         if not pathline_vertices:
+            buf.erase()
             return
-        self.updateVertexAttributesBuffer(np.array(pathline_vertices, dtype=np.float32))
-        self.updateMultiDrawIndices(pathline_offset_indices, pathline_sizes)
+        buf.upload_vertices(np.array(pathline_vertices, dtype=np.float32))
+        buf.set_indices(pathline_offset_indices, pathline_sizes)
 
-    def MappingBatchedFlowlineAsRenderingVAO(self, out_pos: np.ndarray, out_len: np.ndarray):
+    def MappingBatchedFlowlineAsRenderingVAO(self, out_pos: np.ndarray, out_len: np.ndarray, buf):
         """Build the render VBO directly from the padded batch-integrator output.
 
         out_pos: (N, maxLen, 4) = (x, y, z, t); out_len: (N,) valid point count per line.
@@ -578,7 +597,7 @@ class FlowLineObject(Object):
                     tmax_all = tmx
                 valid.append((i, L))
         if not valid:
-            self.erase()
+            buf.erase()
             return
         inv = 1.0 / (tmax_all - tmin_all) if tmax_all > tmin_all else 1.0
 
@@ -599,8 +618,8 @@ class FlowLineObject(Object):
             sizes.append(L + 2)
             off += L + 2
 
-        self.updateVertexAttributesBuffer(np.concatenate(verts_list, axis=0))
-        self.updateMultiDrawIndices(offsets, sizes)
+        buf.upload_vertices(np.concatenate(verts_list, axis=0))
+        buf.set_indices(offsets, sizes)
         
         
 

@@ -9,4 +9,5 @@ from .PlanarManifold import *
 from .FlowLineRenderObject import *
 from .IsoSurfaceObject import *
 from .VolumeRenderObject import *
+from .GeneralMeshRenderObject import *
 

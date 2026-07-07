@@ -142,9 +142,14 @@ def buildWorkLoads(packageName:str):
         elif ObjectName.lower()=="VolumeRender".lower():
             from GuiObjcts.VolumeRenderObject import VolumeRenderObject
             return VolumeRenderObject()
+        elif ObjectName.lower()=="GeneralMeshRenderer".lower():
+            from GuiObjcts.GeneralMeshRenderObject import GeneralMeshRenderObject
+            return GeneralMeshRenderObject()
 
     if packageName=="Basic2DFlow":
-        ObjectsNameList=["CoordinateSystem","PlanarManifold","ActiveField","VectorGlyph","Indicator","NetCDFLoader","Flowline","IsoSurface","VolumeRender"]
+        # NOTE: VolumeRender (DVR) is kept LAST so it composites over all opaque geometry and can
+        # clamp its rays to the finished depth buffer (depth-aware compositing).
+        ObjectsNameList=["CoordinateSystem","PlanarManifold","ActiveField","VectorGlyph","Indicator","NetCDFLoader","Flowline","IsoSurface","GeneralMeshRenderer","VolumeRender"]
     elif packageName=="Basic3DFlow":
         pass
     else:
