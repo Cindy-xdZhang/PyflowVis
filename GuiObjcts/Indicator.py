@@ -119,8 +119,9 @@ class Indicator(Object):
                 # Make sure the seeding plane matches the CURRENT active field before intersecting.
                 # Otherwise a plane still fit to a previous 2D field is a degenerate z=0 plane, so every
                 # seed (and thus every 3D streamline) starts at z=0 no matter where the plane appears to be.
-                # fitPlaneWithActiveField is idempotent for the same axis/NormalizedPosition, so this does
-                # not disturb a slice the user has positioned.
+                # The refit is deterministic from axis/NormalizedPosition/domain, so it reproduces the SAME
+                # slice the user positioned (it does re-tessellate + re-upload the plane, but only on this
+                # right-click, so the cost is negligible).
                 if seeding_plane is not None and hasattr(seeding_plane, "fitPlaneWithActiveField"):
                     seeding_plane.fitPlaneWithActiveField()
                 hit,hit_pos=self.handleMouseRayIntersection(event.pos, seeding_plane)

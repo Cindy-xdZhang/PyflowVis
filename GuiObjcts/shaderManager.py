@@ -38,7 +38,7 @@ def load_images_from_folder(folder_path,extension="png"):
     return image_dict
 
 
-def init_color_maps_texture_array() -> tuple[int, list[str]]:
+def init_color_maps_texture_array() -> tuple[int, list[str], list[np.ndarray]]:
     # Using 1D texture array for color maps
     u_texture_array_index = glGenTextures(1)
     glBindTexture(GL_TEXTURE_1D_ARRAY, u_texture_array_index)

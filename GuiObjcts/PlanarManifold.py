@@ -46,6 +46,11 @@ class PlanarManifold(VertexArrayObject):
 
    
     def fitPlaneWithActiveField(self):
+        # actFieldObject is only wired up in postInit and may be absent when the scene has no
+        # ActiveField (or on an early call); guard so this degrades gracefully instead of raising
+        # AttributeError on self.actFieldObject.getActiveField().
+        if self.actFieldObject is None:
+            return
         vectorField = self.actFieldObject.getActiveField()
         if vectorField is None:
             return

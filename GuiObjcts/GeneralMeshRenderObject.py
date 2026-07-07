@@ -310,6 +310,7 @@ class _Renderable(Object):
         self.create_variable("baseColor", [0.85, 0.4, 0.25, 1.0], False, False)
         self.create_variable("colorMap", -1, False, False)
         self._accum = []
+        self._centroid = np.zeros(3, dtype=np.float32)   # object-space center, for transparency sort
 
     def upload(self, verts, indices=None):
         verts = np.ascontiguousarray(verts, dtype=np.float32)
@@ -319,6 +320,8 @@ class _Renderable(Object):
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
         gl.glBufferData(gl.GL_ARRAY_BUFFER, verts.nbytes, verts if verts.size else None, gl.GL_DYNAMIC_DRAW)
         self.vertex_count = int(verts.shape[0])
+        self._centroid = (verts[:, 0:3].mean(axis=0).astype(np.float32)
+                          if verts.shape[0] > 0 else np.zeros(3, dtype=np.float32))
         if indices is not None and len(indices) > 0:
             idx = np.ascontiguousarray(indices, dtype=np.uint32).reshape(-1)
             gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.ebo)
@@ -358,6 +361,13 @@ class _Renderable(Object):
         else:
             gl.glDrawArrays(gl.GL_TRIANGLES, 0, self.vertex_count)
         gl.glBindVertexArray(0)
+
+    def world_centroid(self):
+        """World-space center of the geometry (modelMat applied to the object-space centroid),
+        used to depth-sort transparent renderables back-to-front."""
+        m = np.asarray(self.getValue("modelMat"), dtype=np.float32)
+        c = np.array([self._centroid[0], self._centroid[1], self._centroid[2], 1.0], dtype=np.float32)
+        return (m @ c)[:3]
 
     def dispose(self):
         try:
@@ -619,19 +629,47 @@ class GeneralMeshRenderObject(VertexArrayObject):
             gl.glDisable(gl.GL_CULL_FACE)
 
     def _draw_collection(self, collection, allow_transparent=False):
-        for r in collection.values():
-            if not r.visible:
-                continue
-            transparent = allow_transparent and (GROUP_TRANSPARENT in r.tags or GROUP_CORELINE_SURFACES in r.tags)
-            if transparent:
-                gl.glEnable(gl.GL_BLEND)
-                gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-                gl.glDepthMask(gl.GL_FALSE)
+        renderables = [r for r in collection.values() if r.visible]
+        if not renderables:
+            return
+
+        def _is_transparent(r):
+            return allow_transparent and (GROUP_TRANSPARENT in r.tags or GROUP_CORELINE_SURFACES in r.tags)
+
+        opaque = [r for r in renderables if not _is_transparent(r)]
+        transparent = [r for r in renderables if _is_transparent(r)]
+
+        # Opaque first, with depth writes on so they occlude correctly.
+        for r in opaque:
             self.material.apply([self.parentScene, self.cameraObject, self, r])
             r.draw()
-            if transparent:
-                gl.glDisable(gl.GL_BLEND)
-                gl.glDepthMask(gl.GL_TRUE)
+
+        if not transparent:
+            return
+
+        # Transparent next: draw back-to-front (farthest first) so src-over alpha blending
+        # composites in the right order. Depth writes off, depth test still on.
+        eye = None
+        if self.cameraObject is not None:
+            try:
+                p = self.cameraObject.getValue("position")
+                eye = np.array([float(p[0]), float(p[1]), float(p[2])], dtype=np.float32)
+            except Exception:
+                eye = None
+        if eye is not None:
+            def _sq_dist_to_eye(r):
+                d = r.world_centroid() - eye
+                return float(np.dot(d, d))
+            transparent.sort(key=_sq_dist_to_eye, reverse=True)
+
+        gl.glEnable(gl.GL_BLEND)
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        gl.glDepthMask(gl.GL_FALSE)
+        for r in transparent:
+            self.material.apply([self.parentScene, self.cameraObject, self, r])
+            r.draw()
+        gl.glDisable(gl.GL_BLEND)
+        gl.glDepthMask(gl.GL_TRUE)
 
     # ------------------------------------------------------------- GUI / tag manager
 

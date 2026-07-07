@@ -74,9 +74,12 @@ vec4 DVR_OS()
         discard;
     tEnter = max(tEnter, 0.0);
 
-    // Depth-aware occlusion: stop the ray at the nearest opaque surface along it (world units;
-    // object == world here since the volume's modelMat is identity). Volume in front of geometry
-    // still shows; volume behind it is skipped — instead of the whole ray being depth-culled.
+    // Depth-aware occlusion: stop the ray at the nearest opaque surface along it. Volume in front
+    // of geometry still shows; volume behind it is skipped — instead of the whole ray being culled.
+    // NOTE: tEnter/tExit are OBJECT-space parameters (from the OS box test above), so the scene hit
+    // must be parameterized in object space too. Transform the reconstructed world hit back through
+    // invModel and project onto rayDirOS. Doing the clamp in object space keeps it correct even if
+    // the volume's modelMat is ever non-identity/scaled — do NOT compare a world-space t to tExit.
     if (uUseSceneDepth != 0) {
         vec2 suv = gl_FragCoord.xy / uViewport;
         float dz = texture(uSceneDepth, suv).r;
@@ -84,7 +87,8 @@ vec4 DVR_OS()
             vec4 ndc = vec4(suv * 2.0 - 1.0, dz * 2.0 - 1.0, 1.0);
             vec4 wp = uInvViewProj * ndc;
             wp /= wp.w;
-            float tScene = dot(wp.xyz - camPos, rayDirWS);
+            vec3 wpOS = (invModel * vec4(wp.xyz, 1.0)).xyz;
+            float tScene = dot(wpOS - rayOriginOS, rayDirOS);
             tExit = min(tExit, tScene);
         }
     }
