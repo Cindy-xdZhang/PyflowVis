@@ -31,6 +31,8 @@ def main():
     ap.add_argument("--tau", type=float, default=0.05)
     ap.add_argument("--absorb_min_pixels", type=int, default=0,
                     help=">0: post-merge absorb smaller regions (spec deviation)")
+    ap.add_argument("--alloc", default="uniform", choices=["uniform", "pixels"],
+                    help="per-INR budget split (uniform = spec; pixels = proportional)")
     ap.add_argument("--n_windows", type=int, default=2)
     ap.add_argument("--allow_full_window", action="store_true",
                     help="DIAGNOSTIC: permit n_windows=1 (violates the <=T/2 spec rule)")
@@ -49,7 +51,7 @@ def main():
 
     assert args.epochs <= 1000, "hard rule: <= 1000 epochs"
     cfg = ExpCfg(field=args.field, m_base=args.m_base, d_base=args.d_base,
-                 k_cell=args.k_cell, tau=args.tau,
+                 k_cell=args.k_cell, tau=args.tau, alloc=args.alloc,
                  absorb_min_pixels=args.absorb_min_pixels, n_windows=args.n_windows,
                  allow_full_window=args.allow_full_window,
                  min_steps_per_epoch=args.min_steps_per_epoch,

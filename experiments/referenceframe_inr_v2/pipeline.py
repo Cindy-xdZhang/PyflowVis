@@ -107,6 +107,7 @@ class ExpCfg:
     d_base: int = 4             # baseline depth (also used for region INRs)
     k_cell: int = 2             # minimal cell size (k x k pixels)
     tau: float = 0.05           # merge tolerance
+    alloc: str = "uniform"      # per-INR budget split: uniform (spec) | pixels
     absorb_min_pixels: int = 0  # >0: absorb smaller regions post-hoc (spec deviation)
     n_windows: int = 2          # time windows (window length <= T/2)
     allow_full_window: bool = False   # diagnostic only: permit n_windows=1
@@ -196,6 +197,12 @@ def run_proposed(fd: FieldData, cfg: ExpCfg, parts: list[WindowPartition],
     n_inrs = sum(p.n_regions for p in parts)
     share = int(budget_factor * B / n_inrs)
     d_r = cfg.d_base
+    # pixel-proportional allocation (docs par.5 open question 1): weight each
+    # (window, region) INR's share by its sample count instead of uniformly.
+    # Motivated by cylinder v2.3: uniform gave the 92%-of-pixels region B/5 while
+    # 4-pixel stragglers overfit 256 samples with the same share (MSE 1e-7).
+    total_wpix = sum(float((p.labels_pixels == r_i).sum()) * (p.it1 - p.it0)
+                     for p in parts for r_i in range(p.n_regions))
 
     recon = np.full(fd.shape, np.nan)
     details = []
@@ -218,7 +225,11 @@ def run_proposed(fd: FieldData, cfg: ExpCfg, parts: list[WindowPartition],
             coords_n = np.concatenate([ximm.encode(samples.xi),
                                        samples.tn[:, None].astype(np.float32)], axis=1)
             vals_n = vmm.encode(samples.vtil)
-            m_r = pick_m_for_budget(share, d_r)
+            if cfg.alloc == "pixels":
+                w_share = int(budget_factor * B * samples.xi.shape[0] / total_wpix)
+            else:
+                w_share = share
+            m_r = pick_m_for_budget(w_share, d_r)
             tag = f"{fd.name}/{mode_name} w{w_i}r{r_i} m={m_r}"
             model, st = train_inr_best_of_seeds(coords_n, vals_n, m_r, d_r,
                                                 cfg.train_cfg(), device,

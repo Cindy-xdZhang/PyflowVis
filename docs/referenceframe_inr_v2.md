@@ -268,6 +268,40 @@ E1a）。v2.3 已把步数归一化（两窗每 INR 64k 步 = 单窗），窗口
 排除 ⇒ 方法必须把窗口数做成数据自适应（RFC 正确答案 = 1 窗），并把"每 INR 的优化预算"作为
 recipe 的显式维度。
 
+### 4.4c 跨机复现（Ibex，本地→push→pull→sbatch 全流程验证，2026-07-13）
+
+Ibex（Linux, cu118, V100|A100；作业 48759543/44，`slurm_logs/RFv2.*`）vs 本地（Win11, cu126,
+RTX3090），同代码 commit `3e25405`、同 v2.3 recipe、同种子协议：验证套件 T1–T4 **全过**；
+rfc 六个数字最大偏差 **0.25 dB**、排序与派生结论全部复现（observer 消融隔离贡献 +4.74↔+4.76、
+等参 observer 增益 +5.20↔+5.39、窗口税 −5.62↔−5.76）。数据路径经 `PYFLOWVIS_DATA2D` 环境
+变量适配（Ibex: `/home/zhanx0o/DeepVortex/FLowDataFolder`）。
+
+| 模式（rfc, v2.3） | 本地 | Ibex |
+|---|---|---|
+| baseline | 56.23 | 56.29 |
+| pro_budget | 55.81 | 55.92 |
+| pro_quality | 63.80 | 63.72 |
+| no_observer | 51.07 | 51.16 |
+| 单窗 INR(observed) @B | 61.43 | 61.68 |
+| 单窗 INR(v) @B | 56.23 | 56.29 |
+
+### 4.4d cylinder2d v2.3 正式结果（本地，best-of-2，`outputs/v23_cyl.log`）
+
+| 模式 | PSNR | 参数量 | #INR (N/窗口) |
+|---|---|---|---|
+| **baseline** | **68.02** | 1,486,538 | 1 |
+| pro_budget | 54.38 | 1,432,390 | 5 (3,2) |
+| pro_quality (3B) | 62.76 | 4,363,990 | 5 (3,2) |
+| no_observer | 53.54 | 1,432,390 | 5 (3,2) |
+
+读数：①v2.3 修复确认——baseline 从 v2.2 recipe 的 23.29 恢复到 **68.02**（超过 v1 的 ~50 dB
+锚点：102k 步 + 余弦 + clip 的效果）；②observer 在涡街上的隔离贡献仅 **+0.84 dB**
+（54.38−53.54）——物理上符合预期，涡街本质非刚体可解释（与 §4.2 分区干跑的结论互证）；
+③**均分预算是 −13.6 dB 差距的主因**：τ=0.1 分区 = "1 巨区(≈92% 像素) + 4 个微小区"，均分使
+巨区只拿 B/5（m=28）而 4 像素小区用同额参数把 256 个样本过拟合到 MSE 1e-7（浪费 ~60% 预算）；
+pro_quality 巨区 m=49 也仅 3.9e-6 vs baseline 全场 1.07e-6。⇒ 已实现 `--alloc pixels`
+（按样本数比例分配，§5 开放问题 1 的第一个候选），cylinder 重跑排队中。
+
 ### 4.5 "窗口为何伤 RFC"归因实验（agent，v2.1 recipe 下）
 
 用户质疑（正确）：RFC 的 killing observer 时不变，切不切窗口 observer/observed field 都一样，
