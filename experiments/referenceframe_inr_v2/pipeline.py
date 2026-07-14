@@ -100,6 +100,24 @@ def load_field(name: str) -> FieldData:
         else:
             f.resample2UnsteadyField((128, 75, 225))
         return _from_unsteady(name, f)
+    if name.startswith("gerris") and name[len("gerris"):].isdigit():
+        # GerrisTinySet: 8 independent unsteady 2D Gerris flows, one per .am file.
+        # gerris0..gerris7 select the i-th .am (sorted). Load ONE file only (not the
+        # whole ~2GB set) and downsample to (T,X,Y)=(128,128,256), matching the
+        # cylinder/boussinesq experiment scale so PSNR numbers are comparable.
+        idx = int(name[len("gerris"):])
+        from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import AmiraLoader
+        folder = DATA_DIR / "Gunther_GerrisSolver_ML_FlowMap_TinyTest"
+        am_files = sorted(folder.glob("*.am"))
+        if not am_files:
+            raise FileNotFoundError(
+                f"no .am files in {folder} -- set PYFLOWVIS_DATA2D to the folder "
+                f"holding Gunther_GerrisSolver_ML_FlowMap_TinyTest")
+        if idx >= len(am_files):
+            raise IndexError(f"gerris{idx}: only {len(am_files)} .am files in {folder}")
+        f = AmiraLoader.load_vector_field2d(str(am_files[idx]))
+        f.resample2UnsteadyField((128, 128, 256))   # (T, X, Y)
+        return _from_unsteady(name, f)
     raise ValueError(f"unknown field '{name}'")
 
 
