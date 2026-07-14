@@ -416,25 +416,32 @@ def load_UnsteadyVectorFields_general(flowDataFolder,vector_field_names: list[st
             UnsteadyVectorFields.append(double_gyre_2D([256,128],64))
         elif name == "rfc2d":
             UnsteadyVectorFields.append(rotation_four_center([128,128],32))
-        elif "gerrisflowsolverData" in name.lower():
-            #laod amira fiels from the folder GerrisFlowSolverData
-            amira_folder=os.path.join(flowDataFolder, name)
-            if os.path.isdir(amira_folder):
-                logging.info(f"[load_UnsteadyVectorFields_general] load amira files from {amira_folder}")
-                am_files_list=[]
-                for file in os.listdir(amira_folder):
-                    if file.endswith(".am"):
-                        am_file_path=os.path.join(amira_folder, file)
-                        load_vector_field2d=amiraLoader.load_vector_field2d(am_file_path)
-                        if load_vector_field2d is None:
-                            print(f"[load_UnsteadyVectorFields_general] load {file} failed. Skip this field.")
-                            continue
-                        UnsteadyVectorFields.append(load_vector_field2d)
-                        am_files_list.append(file)
-                if len(am_files_list)==0:
-                    logging.warning(f"[load_UnsteadyVectorFields_general] no .am files found in {amira_folder}. Skip this field.")
-                else:
-                    logging.info(f"[load_UnsteadyVectorFields_general] load {len(am_files_list)} .am files from {amira_folder}: {am_files_list}")
+        elif os.path.isdir(os.path.join(flowDataFolder, name)) and \
+                any(f.endswith(".am") for f in os.listdir(os.path.join(flowDataFolder, name))):
+            # Generic Amira folder: flowDataFolder/<name>/ holds one or more .am files.
+            # Each .am is a complete unsteady 2D field (e.g. GerrisTinySet: 8 files -> 8 fields).
+            # Loaded in sorted filename order so field order is deterministic and matches the files.
+            amira_folder = os.path.join(flowDataFolder, name)
+            logging.info(f"[load_UnsteadyVectorFields_general] load amira files from {amira_folder}")
+            am_files_list = []
+            for file in sorted(os.listdir(amira_folder)):
+                if not file.endswith(".am"):
+                    continue
+                am_file_path = os.path.join(amira_folder, file)
+                try:
+                    load_vector_field2d = amiraLoader.load_vector_field2d(am_file_path)
+                except Exception as e:
+                    print(f"[load_UnsteadyVectorFields_general] load {file} failed: {e}. Skip this field.")
+                    continue
+                if load_vector_field2d is None:
+                    print(f"[load_UnsteadyVectorFields_general] load {file} failed. Skip this field.")
+                    continue
+                UnsteadyVectorFields.append(load_vector_field2d)
+                am_files_list.append(file)
+            if len(am_files_list) == 0:
+                logging.warning(f"[load_UnsteadyVectorFields_general] no loadable .am files in {amira_folder}. Skip this field.")
+            else:
+                logging.info(f"[load_UnsteadyVectorFields_general] loaded {len(am_files_list)} .am files from {amira_folder}: {am_files_list}")
         else:
             try:
                 vectorfield_datapath=os.path.join(flowDataFolder, f"{name}.nc")
