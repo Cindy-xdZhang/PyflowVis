@@ -84,7 +84,8 @@ class FlowLineObject(Object):
         self.__initDynamicTypeGLContext__()
         #  material
         self.create_variable("modelMat",np.eye(4,dtype=np.float32),False,False)
-        self.material = Material("flowlineMaterial",  "flowlineMat",texture0="builtIn")
+        self.material = Material("flowlineMaterial",  "flowlineMat",texture0="builtIn")          # 2D: screen-facing ribbon
+        self.material3d = Material("flowline3dMaterial", "flowline3dMat", texture0="builtIn")     # 3D: real tube, keeps z
         self.setMaterial(self.material)
 
 
@@ -342,9 +343,15 @@ class FlowLineObject(Object):
         draw_stream = self.getValue("streamline_active") and self.streamline_buf.vertex_count > 0
         if not (draw_path or draw_stream):
             return
+        # Pick the 2D vs 3D flowline material by the active field's dimension: the 2D shader flattens
+        # z to 0 (a screen-facing ribbon), the 3D shader keeps the full 3D position and builds a real
+        # tube. Using the 2D shader on a 3D field is what pinned every 3D flowline onto the z=0 plane.
+        _af = getattr(self, "activeFieldWidget", None)
+        _field = _af.getActiveField() if _af is not None else None
+        mat = self.material3d if (_field is not None and _field.getDim() == 3) else self.material
         # One material/uniform setup; pathline and streamline share the shader but their own VAOs.
-        if self.material is not None:
-            self.material.apply([self.parentScene, self.cameraObject, self])
+        if mat is not None:
+            mat.apply([self.parentScene, self.cameraObject, self])
         if draw_path:
             self.pathline_buf.draw()
         if draw_stream:

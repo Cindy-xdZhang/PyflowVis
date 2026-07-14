@@ -1,0 +1,54 @@
+[
+  {
+    "field": "boussinesq",
+    "N": 3,
+    "weight": "uniform",
+    "gamma": 0.5,
+    "epochs": 1000,
+    "budget": 3940000.0,
+    "baseline_psnr": 41.0186972774853,
+    "proposed_psnr": 45.36796181492505,
+    "delta": 4.349264537439751,
+    "proposed_params": 3942918,
+    "killing": 1152
+  },
+  {
+    "field": "boussinesq",
+    "N": 3,
+    "weight": "pixels",
+    "gamma": 0.5,
+    "epochs": 1000,
+    "budget": 3940000.0,
+    "baseline_psnr": 41.0186972774853,
+    "proposed_psnr": 43.61432019357305,
+    "delta": 2.5956229160877484,
+    "proposed_params": 3939408,
+    "killing": 1152
+  },
+  {
+    "field": "boussinesq",
+    "N": 3,
+    "weight": "residual",
+    "gamma": 0.5,
+    "epochs": 1000,
+    "budget": 3940000.0,
+    "baseline_psnr": 41.0186972774853,
+    "proposed_psnr": 44.00779146744951,
+    "delta": 2.989094189964206,
+    "proposed_params": 3940889,
+    "killing": 1152
+  },
+  {
+    "field": "boussinesq",
+    "N": 3,
+    "weight": "respix",
+    "gamma": 0.5,
+    "epochs": 1000,
+    "budget": 3940000.0,
+    "baseline_psnr": 41.0186972774853,
+    "proposed_psnr": 44.088211457135486,
+    "delta": 3.0695141796501844,
+    "proposed_params": 3937695,
+    "killing": 1152
+  }
+]

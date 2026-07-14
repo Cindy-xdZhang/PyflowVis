@@ -127,15 +127,20 @@ pip install -r requirements.txt
           
 ```
 
-### Build Vatistas velocity data generator
-Due to the size of dataset, we can't share it here, but you can request by contact my email or generate the sythetic Vatistas dataset by yourself: Built the project using CMAKE, and  then open the FlowGenerator.sln in visual studio and generate your dataset.
-```
-cd  CppProjects
-Git submodule update --init
-mkdir build 
+### Build the Vatistas Velocity Data Generator
+
+You can either build the data generator yourself, particularly if you want to extend the dataset by fitting additional flow datasets with parametrized Vatistas vortex models, or download the pre-generated Vatistas dataset from Zenodo:
+
+<https://zenodo.org/records/21277295>
+
+To build the generator, initialize the required Git submodules and configure the project using CMake:
+
+```bash
+cd CppProjects
+git submodule update --init
+mkdir build
 cd build
-cmake ..  -B .
-```
+cmake .. -B .
 
 ### Training and Testing the Vortex Transformer
 Once the dataset is generated, you can train the model:

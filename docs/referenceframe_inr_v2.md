@@ -180,6 +180,7 @@ per-component minmax → [-1,1]（baseline 用全场 per-component minmax，对�
 | Verify_alloc_1.1 | 设计选择验证：预算分配 均分 vs 按像素比例（cylinder τ=0.1） | 运行中，`outputs/v23_cyl_allocpx.log` |
 | Verify_seedstability_1.1 | cylinder baseline 补种子（钉死跨机 10 dB 抖动区间） | 排队中，`outputs/v23_cylbase_s2.log` |
 | Other_tworotor_1.1 | 探索：双转子合成场（方法理想正例，定义见 §3 T4） | 排队中，`outputs/v23_tworotor.log` |
+| Verify_tau_1.1 | 设计选择验证：τ 敏感性（τ→N→PSNR），pro_quality vs baseline；cylinder τ∈{0.005..0.1}/absorb=64（M=21/14/4/5/3）、boussinesq τ∈{0.1..0.5}/absorb=256（M=24/21/15/7/2），2 seeds/点 | Ibex job 48814029（20 并行任务），`outputs/ibex_tausweep/` |
 | （非实验）正确性验证套件 / 归一化审计 | validate_rfc.py / audit_normalization.py | §3 / §4.8 无（代码内） |
 
 （已废弃的 v2.0/v2.1/v2.2 recipe 下的运行只留档不编号，见各小节标注。）

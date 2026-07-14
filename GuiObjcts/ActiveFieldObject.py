@@ -135,6 +135,38 @@ class ActiveFieldObj(Object):
 
         self.addAction("load scalar field",loadActiveFieldAction)
 
+        # ── Reference-frame optimization (killing / Günther17) ────────────────
+        # 对当前 active field 做参考系优化，把观察者场 u 与观测场 v-u 插回可视化。
+        # 详见 docs/referenceframeOptimization.md, FLowUtils/ReferenceFrameOptimization.py
+        self.create_variable("RFO_neighborhood", 4, True)  # Günther 逐点邻域半径 U
+
+        def RFO_action(mode: str):
+            actFieldWidget: ActiveFieldObj = self
+            vector_field = actFieldWidget.getActiveField()
+            name = actFieldWidget.getActiveFieldName()
+            if vector_field is None:
+                logging.getLogger().warning("RFO: no active field selected")
+                return
+            from FLowUtils.ReferenceFrameOptimization import (
+                killing_optimization_2d, killing_optimization_3d,
+                gunther17_optimization_2d, gunther17_optimization_3d,
+            )
+            is3d = vector_field.getDim() == 3
+            nb = int(self.getValue("RFO_neighborhood"))
+            if mode == "killing":
+                res = (killing_optimization_3d if is3d else killing_optimization_2d)(vector_field)
+                if res.params is not None and len(res.params) > 2:
+                    logging.getLogger().info(
+                        f"RFO killing '{name}': params mean over t = {np.round(res.params[1:-1].mean(0), 4)}")
+            else:
+                res = (gunther17_optimization_3d if is3d else gunther17_optimization_2d)(vector_field, neighborhood=nb)
+            actFieldWidget.insertField(f"{name}_{mode}_u", res.u_field)            # 观察者场 u
+            actFieldWidget.insertField(f"{name}_{mode}_v-u", res.v_minus_u_field)  # 观测场 v-u
+            logging.getLogger().info(f"RFO {mode} '{name}': inserted '{name}_{mode}_u' and '{name}_{mode}_v-u'")
+
+        self.addAction("RFO killing (observer u + v-u)", lambda *a, **k: RFO_action("killing"))
+        self.addAction("RFO gunther17 (observer u + v-u)", lambda *a, **k: RFO_action("gunther"))
+
         self.activeField= {}
 
     def requestScalarField(self):

@@ -1,0 +1,15 @@
+[
+  {
+    "field": "boussinesq",
+    "psnr_last": 52.371539463587325,
+    "psnr_best": 52.371539463587325,
+    "params": 1486538,
+    "m": 64,
+    "d": 10,
+    "omega": 30.0,
+    "lr": 1e-05,
+    "batch": 32000,
+    "weight_decay": 1e-06,
+    "epochs": 300
+  }
+]

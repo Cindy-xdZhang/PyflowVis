@@ -1,0 +1,16 @@
+[
+  {
+    "field": "cylinder2d",
+    "N": 5,
+    "weight": "uniform",
+    "gamma": 0.5,
+    "epochs": 1000,
+    "budget": 3940000.0,
+    "observer": false,
+    "baseline_psnr": NaN,
+    "proposed_psnr": 46.107653953749406,
+    "delta": NaN,
+    "proposed_params": 3945610,
+    "killing": 0
+  }
+]
