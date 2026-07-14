@@ -39,12 +39,12 @@ if [ "$i" -lt 8 ]; then
   echo "=== boussinesq mode=$mode seed=$s ==="
   python -u run_experiment.py --field boussinesq --m_base 64 --d_base 10 \
       --tau 0.2 --absorb_min_pixels 256 --modes "$mode" --seed "$s" --n_seeds 1 \
-      --out_dir "outputs/ibex_v23_bouss/${mode}_s${s}"
+      --out_dir "outputs/ibex_v23_bouss/${mode}_s${s}" || exit 1
 else
   s=$((i - 8 + 10))
   echo "=== cylinder2d baseline seed=$s ==="
   python -u run_experiment.py --field cylinder2d --m_base 64 --d_base 10 \
       --tau 0.1 --modes baseline --seed "$s" --n_seeds 1 \
-      --out_dir "outputs/ibex_v23_cylbase/s${s}"
+      --out_dir "outputs/ibex_v23_cylbase/s${s}" || exit 1
 fi
 echo "=== DONE task $i ==="

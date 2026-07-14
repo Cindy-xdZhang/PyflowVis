@@ -87,11 +87,17 @@ def load_field(name: str) -> FieldData:
         return FieldData("tworotor", synth.two_rotor_field(xs, ys, ts), xs, ys, ts)
     if name in ("cylinder2d", "boussinesq"):
         from FLowUtils.flowDatasetUtils.NetCDF_AmiraLoader import NetCDFLoader
+        fn = DATA_DIR / f"{name}.nc"
+        if not fn.exists():
+            raise FileNotFoundError(
+                f"dataset file not found: {fn} -- set the PYFLOWVIS_DATA2D env var "
+                f"to the folder holding {name}.nc on this machine")
+        f = NetCDFLoader.load_vector_field2d(str(fn), 800, 960)
+        if f is None:
+            raise RuntimeError(f"NetCDFLoader returned None for {fn} (corrupt file?)")
         if name == "cylinder2d":
-            f = NetCDFLoader.load_vector_field2d(str(DATA_DIR / "cylinder2d.nc"), 800, 960)
             f.resample2UnsteadyField((128, 320, 80))     # in place; (T, X, Y) tuple!
         else:
-            f = NetCDFLoader.load_vector_field2d(str(DATA_DIR / "boussinesq.nc"), 800, 960)
             f.resample2UnsteadyField((128, 75, 225))
         return _from_unsteady(name, f)
     raise ValueError(f"unknown field '{name}'")
