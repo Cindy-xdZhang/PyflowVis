@@ -498,8 +498,9 @@ raw 坐标残差 ReLU 在该场收敛健康。
 | gerris4 | 64/10 | 0.7 | 0 | 先导 τ=0.6 TIMEOUT→0.7 重跑配置（N≈11）|
 
 输出 `outputs/Verify_arch_1.1/{field}_{model}_{mode}_s{seed}/`。**Ibex jobs**：
-baseline 20 任务 = job 48900605（commit 7cebf9f，3B→4B 变更不影响 baseline）；
-pro_quality 20 任务在 4B 变更后取消重提 = job（重提后回填）（commit 见 git log，4B 口径）。
+baseline 20 任务 = job **48900605**（commit 7cebf9f；3B→4B 变更不影响 baseline）；
+pro_quality 20 任务在 4B 变更后取消重提 = job **48901021**（commit 8be61e5，4B 口径，
+`sbatch --array=<pro_quality 索引> refframe_v2_arch.sh`）。
 
 ### 4.5 "窗口为何伤 RFC"归因实验（agent，v2.1 recipe 下）
 
