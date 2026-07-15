@@ -492,7 +492,8 @@ raw 坐标残差 ReLU 在该场收敛健康。
 | gerris0 | 64/10 | 0.6 | 0 | Verify_gerristiny_1.1 先导（9 INR）|
 | gerris4 | 64/10 | 0.7 | 0 | 先导 τ=0.6 TIMEOUT→0.7 重跑配置（N≈11）|
 
-输出 `outputs/Verify_arch_1.1/{field}_{model}_{mode}_s{seed}/`；Ibex job id：（提交后回填）。
+输出 `outputs/Verify_arch_1.1/{field}_{model}_{mode}_s{seed}/`；**Ibex job 48900605**
+（40 array 任务，2026-07-15 提交，commit 7cebf9f）。
 
 ### 4.5 "窗口为何伤 RFC"归因实验（agent，v2.1 recipe 下）
 

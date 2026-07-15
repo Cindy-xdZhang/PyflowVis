@@ -71,8 +71,10 @@
    而非细分工具；boussinesq 的 70.43 胜点提示"每窗全局 observer"可能是最实用形态。
 3. **压缩口径翻盘的前提**：大网稳定性（初始化/训练方案，如 SIREN 频率调度、warmup、或换
    FF+ReLU 对照）+ "比例+容量下限"的预算分配。不解决这两个，pro_budget 无法与 baseline 竞争。
-   （进展 2026-07-15：架构对照的脚手架已就位——v_MLP0.0 / v_FINER0.0 冒烟通过，主文档 §1b；
-   正式对比前先做各架构 lr 检查 + ≥8 种子分布。）
+   （进展 2026-07-15：v_MLP0.0 / v_FINER0.0 已部署 **Verify_arch_1.1**（Ibex job 48900605，
+   40 任务：5 场 × 2 架构 × baseline/pro_quality × 2 种子取均值；lr 试点定 mlp 3e-4 /
+   finer 1e-4，官方 FINER 5e-4 在深骨架坍缩），主文档 §1b/§4.4j。**协议变更**：epochs 硬上限
+   放宽到 2000；不再强制各架构 epoch/lr 与 baseline 对齐；种子协议 2-seed 取均值取代 best-of-k。）
 4. **补缺**：Other_tworotor_1.1（双转子理想正例的 INR 实验，队列中断未跑，一条命令可补：
    `python run_experiment.py --field tworotor --tau 0.05 --absorb_min_pixels 64 --m_base 24 --d_base 4 --n_seeds 3`）；
    boussinesq 本地对照的 pro 模式（Ibex 已覆盖，可选）。
