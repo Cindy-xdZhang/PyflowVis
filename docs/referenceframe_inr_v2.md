@@ -519,10 +519,17 @@ pro_quality 20 任务在 4B 变更后取消重提 = job **48901021**（commit 8b
 4. **修正**：finer 大网组合（cylinder/boussinesq 的 bl+pq、gerris0 bl，各 2 种子）以
    lr **3e-5** = job **48916196**、lr **1e-5** = job **48916197** 重跑（脚本 `RFV2_LR`
    覆盖，输出目录带 `_lr{LR}` 后缀不覆盖原结果）；已确定报废的 boussinesq finer pq@1e-4
-   （48901021_22/23）提前取消止损。rfc 的 finer@1e-4 结果健康、保留。gerris0 pq(m=42)
-   与 gerris4(m=38) 的 finer 任务待跑完再定是否补重跑。⇒ finer 的 lr 按网宽分档
-   （小网 1e-4 / 大网取 3e-5 与 1e-5 中收敛更好者），最终口径以重跑结果为准并在结果
-   表中注明每个数字的 lr。
+   （48901021_22/23）提前取消止损。rfc 的 finer@1e-4 结果健康、保留。gerris4 finer
+   baseline@1e-4 完成后确认同样坍缩（16.0/36.6）→ 补交重跑 jobs **48931725**（3e-5）/
+   **48931726**（1e-5）。⇒ finer 的 lr 按网宽分档（小网 1e-4 / 大网取 3e-5 与 1e-5 中
+   收敛更好者），最终口径以重跑结果为准并在结果表中注明每个数字的 lr。
+5. **lr 重跑首批回收（3e-5 大胜，且超过 coordnet 历史最好值）**：cylinder finer
+   baseline@3e-5 = **73.37/73.98**（coordnet 好盆地 ≈70.0，8 种子中位 69.6）；
+   boussinesq finer baseline@3e-5 = **70.83/70.94**（coordnet best-of-2 = 68.47）——
+   两场均为两种子一致、无双峰。@1e-5 则明显低一档（cyl 70.37/69.71、bouss 65.91）⇒
+   大网 finer 口径取 **3e-5**。遗留问题：pq@3e-5 出现种子分裂（bouss 71.91 vs 56.04；
+   cyl s7777 仅 50.48）——m=90/57 的 pq 大 INR 在 3e-5 下仍有残余不稳定，1e-5 的 pq
+   对照在跑，回收后再定 pq 口径。
 
 ### 4.5 "窗口为何伤 RFC"归因实验（agent，v2.1 recipe 下）
 
