@@ -3,7 +3,8 @@
 Modes (all share the frozen training recipe and the same CoordNet class):
   baseline     one CoordNet(m_B, d_B) fits v(x,y,t) directly            budget B
   pro_budget   tau-merge regions, per-region observed-field INRs        total <= B
-  pro_quality  same, per-INR share = 3B / #INRs                         total <= 3B
+  pro_quality  same, per-INR share = 4B / #INRs                         total <= 4B
+               (3B before 2026-07-15; historical numbers keep the 3B label)
   no_observer  same partition & budgets as pro_budget but q == 0        total <= B
                (fits raw v per region -> isolates the observer's contribution)
 """
@@ -318,7 +319,9 @@ def run_experiment(cfg: ExpCfg, log=print) -> dict:
         elif mode == "pro_budget":
             res = run_proposed(fd, cfg, parts, device, 1.0, True, mode, log=log)
         elif mode == "pro_quality":
-            res = run_proposed(fd, cfg, parts, device, 3.0, True, mode, log=log)
+            # 4B since 2026-07-15 (user spec change); all runs up to and including
+            # Verify_tau_1.1 / gerris pilot used 3B -- do not mix the two labels.
+            res = run_proposed(fd, cfg, parts, device, 4.0, True, mode, log=log)
         elif mode == "no_observer":
             res = run_proposed(fd, cfg, parts, device, 1.0, False, mode, log=log)
         else:

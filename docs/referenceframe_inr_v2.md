@@ -179,7 +179,10 @@ per-component minmax → [-1,1]（baseline 用全场 per-component minmax，对�
 |---|---|---|
 | `baseline` | B（单网络） | CoordNet 直接拟合 v(x,y,t) |
 | `pro_budget` | B/M（均分） | 总参数 ≤ B；m_r 取满足闭式参数公式的最大整数（d 同 baseline） |
-| `pro_quality` | 3B/M | 总参数 ≤ 3B，只比 PSNR |
+| `pro_quality` | 4B/M | 总参数 ≤ 4B，只比 PSNR |
+
+**pro_quality 规格变更（2026-07-15，用户明示）**：3B → **4B**。§4.4b–§4.4i 的全部历史
+pro_quality 数字均为 **3B 口径**（引用须注明）；4B 自 Verify_arch_1.1（§4.4j）起生效。
 | `no_observer`（消融） | B/M | 分区与 pro_budget 完全相同，但 q≡0（拟合原始 v）——隔离 observer 的贡献 |
 
 **字节核算**：总字节 = Σ参数×4 + 边信息（killing 参数 N·T_w·3×4B + cell 标签图 + 每区域
@@ -217,7 +220,7 @@ per-component minmax → [-1,1]（baseline 用全场 per-component minmax，对�
 | Verify_seedstability_1.1 | cylinder baseline 补种子（钉死跨机 10 dB 抖动区间） | 排队中，`outputs/v23_cylbase_s2.log` |
 | Other_tworotor_1.1 | 探索：双转子合成场（方法理想正例，定义见 §3 T4） | 排队中，`outputs/v23_tworotor.log` |
 | Verify_tau_1.1 | 设计选择验证：τ 敏感性（τ→N→PSNR），pro_quality vs baseline；cylinder τ∈{0.005..0.1}/absorb=64（M=21/14/4/5/3）、boussinesq τ∈{0.1..0.5}/absorb=256（M=24/21/15/7/2），2 seeds/点 | Ibex job 48814029（20 并行任务），`outputs/ibex_tausweep/` |
-| Verify_arch_1.1 | 架构变体 v_MLP0.0 / v_FINER0.0：各架构**自身** baseline vs pro_quality(3B)，5 场 × 2 架构 × 2 模式 × 2 种子 = 40 独立任务；**2-seed 均值协议** | §4.4j，`outputs/Verify_arch_1.1/`，Ibex job 见 §4.4j |
+| Verify_arch_1.1 | 架构变体 v_MLP0.0 / v_FINER0.0：各架构**自身** baseline vs pro_quality(**4B**)，5 场 × 2 架构 × 2 模式 × 2 种子 = 40 独立任务；**2-seed 均值协议** | §4.4j，`outputs/Verify_arch_1.1/`，Ibex job 见 §4.4j |
 | （非实验）正确性验证套件 / 归一化审计 | validate_rfc.py / audit_normalization.py | §3 / §4.8 无（代码内） |
 
 （已废弃的 v2.0/v2.1/v2.2 recipe 下的运行只留档不编号，见各小节标注。）
@@ -458,7 +461,9 @@ normalized MSE 卡在 7e-2（完全拟合失败），而这些区域恰是速度
 ### 4.4j Verify_arch_1.1：架构变体正式对比（v_MLP0.0 / v_FINER0.0，Ibex 部署 2026-07-15，结果待回收）
 
 **问题**：观察者变换的收益是否依赖 SIREN？每个架构对比**自己的** baseline（直接拟合 v）
-vs **自己的** pro_quality（τ-合并分区 + observed field，3B）。
+vs **自己的** pro_quality（τ-合并分区 + observed field，**4B**——规格变更见 §2.5，
+故与 §4.4d–i 的 coordnet pro_quality 3B 数字**不同预算、不可直接对比**；本实验的对照
+是架构内 baseline vs pro_quality）。
 
 **协议变更（本实验起生效，用户 2026-07-15 明示）**：
 1. epochs 硬上限 1000 → **2000**（`run_experiment.py` 断言同步放宽）；**不再要求各架构
@@ -492,8 +497,9 @@ raw 坐标残差 ReLU 在该场收敛健康。
 | gerris0 | 64/10 | 0.6 | 0 | Verify_gerristiny_1.1 先导（9 INR）|
 | gerris4 | 64/10 | 0.7 | 0 | 先导 τ=0.6 TIMEOUT→0.7 重跑配置（N≈11）|
 
-输出 `outputs/Verify_arch_1.1/{field}_{model}_{mode}_s{seed}/`；**Ibex job 48900605**
-（40 array 任务，2026-07-15 提交，commit 7cebf9f）。
+输出 `outputs/Verify_arch_1.1/{field}_{model}_{mode}_s{seed}/`。**Ibex jobs**：
+baseline 20 任务 = job 48900605（commit 7cebf9f，3B→4B 变更不影响 baseline）；
+pro_quality 20 任务在 4B 变更后取消重提 = job（重提后回填）（commit 见 git log，4B 口径）。
 
 ### 4.5 "窗口为何伤 RFC"归因实验（agent，v2.1 recipe 下）
 
