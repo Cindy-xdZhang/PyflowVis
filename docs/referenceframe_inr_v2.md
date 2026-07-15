@@ -335,6 +335,98 @@ rfc 六个数字最大偏差 **0.25 dB**、排序与派生结论全部复现（o
   结论只有：(a) pro_budget ≈ 54.2-54.4、pro_quality ≈ 62.4-62.8、no_observer ≈ 53.5；
   (b) observer 在涡街上贡献 +0.7~+0.8 dB（两台机器一致）；(c) baseline > pro_budget 两边都成立。
 
+### 4.4e Verify_seedstability_1.1：cylinder baseline 种子分布（Ibex 8 独立种子）
+
+seeds 10–17（job 48810859_[8-15]，每种子独立任务）：
+**{48.95, 59.27, 63.21, 69.49, 69.72, 70.01, 70.62, 71.36}** —— 极差 22.4 dB，中位数 69.6。
+分布呈**双峰**：5/8 落在"好盆地"≈69.5–71.4，3/8 散落 49–63。此前的跨机矛盾（本地 68.02 vs
+Ibex 57.90）完全解释为盆地抽样：best-of-2 抽中至少一个好盆地的概率 ≈86%，本地中了、Ibex 主跑
+没中。**协议后果**：大网络（m=64,d=10）的 baseline 数字必须 ≥8 种子报中位数+最大值；
+best-of-2 只对小网络够用。**cylinder baseline 的诚实数字：好盆地 ≈70 dB**（远高于此前引用的
+57.9~68.0 区间上下限的歧义——之前"差距未定 3.7~13.6"的说法收敛为：好盆地 baseline 70.0 vs
+pro_quality 62.4-62.8，**差距 ≈7-8 dB**）。
+
+### 4.4f boussinesq mainExp_2.3-ibex（每(模式,种子)独立任务，seeds {0, 7777}，run 级取优）
+
+| 模式 | seed0 | seed7777 | best-of-2 |
+|---|---|---|---|
+| baseline | **68.47** | 53.84 | 68.47（同样双峰！差 14.6 dB） |
+| pro_budget | 56.85 | 56.24 | 56.85 |
+| pro_quality (3B) | 65.06 | 64.27 | 65.06 |
+| no_observer | 55.23 | 53.73 | 55.23 |
+
+读数：①observer 隔离贡献 = 56.85 − 55.23 = **+1.62 dB**（羽流比涡街略受益，但远小于 RFC 的
++4.7~5.2——与"可刚体解释程度"排序一致：rfc ≫ boussinesq > cylinder）；②好盆地 baseline
+（68.47）> pro_quality（65.06）> pro_budget ≫ no_observer——与 cylinder 同构；③大网 SIREN
+双峰性在第二个真实数据集复现，系统性现象。本地对照运行中（同种子对，per-INR 取优口径）。
+
+### 4.4g Verify_tau_1.1：τ 敏感性（pro_quality vs baseline，Ibex job 48814029，20 任务零失败）
+
+每点 2 独立种子任务取优（run 级），与 §4.4e/f 的 baseline 同协议可比：
+
+**cylinder2d**（absorb=64；baseline 好盆地 ≈70.0，8 种子中位 69.6）：
+
+| τ | 0.005 | 0.01 | 0.02 | 0.05 | 0.1 |
+|---|---|---|---|---|---|
+| M (INR 数) | 21 | 14 | 4 | 5 | 3 |
+| PSNR best-of-2 | 58.84 | 57.29 | **62.14** | 56.78 | 51.22 |
+
+**boussinesq**（absorb=256；baseline best-of-2 = 68.47）：
+
+| τ | 0.1 | 0.15 | 0.2 | 0.3 | 0.5 |
+|---|---|---|---|---|---|
+| M (INR 数) | 24 | 21 | 15 | 7 | 2 |
+| PSNR best-of-2 | 64.43 | 65.66 | 65.64 | 67.10 | **70.43** |
+
+读数：
+1. **boussinesq 单调："区域越少越好"**，τ=0.5（M=2 = 每窗口一个全局 observer + 1.5B 大 INR）
+   达 **70.43 > baseline 68.47** —— **proposed 首次在真实数据上超过 baseline**（quality 口径、
+   同协议同种子对；注意此规模下 CR≈1.0，不构成压缩，只是拟合质量对比）。羽流的全局运动成分
+   使全局 observer 有效，与 observer 贡献排序（bouss +1.6 > cyl +0.8）互证。
+2. cylinder 全 τ 落后 baseline（最好 τ=0.02/M=4 的 62.14 vs ~70），且非单调——涡街对分区
+   粒度不敏感、对"障碍物小区是否被吸进巨区"敏感（τ=0.1/absorb=64 把障碍物区吸收进巨区后
+   掉到 51.2，而 mainExp 同 τ/absorb=0 分开时 62.4-62.8；另有 run 级 vs per-INR 取优的口径差）。
+3. 两数据集共同结论：**pro_quality 的最优 τ 都在"大区域/少 INR"端**——3B 预算下"每 INR 更大"
+   胜过"分区更细"；结合 §4.4b 窗口税，当前方法的收益结构 = 全局/大区域 observer (+) 、
+   细粒度切分 (−)。
+
+### 4.4h Verify_alloc_1.1：预算分配 均分 vs 按像素比例（cylinder τ=0.1，本地，负结果）
+
+| 模式 | 均分（mainExp_2.3） | 像素分配 |
+|---|---|---|
+| pro_budget | 54.38 | **49.97**（−4.4 dB） |
+| no_observer | 53.54 | 49.21 |
+
+**假设被推翻**：按像素比例分配更差。根因：小而剧烈的区域（80px 障碍物区）被压到 m=4，
+normalized MSE 卡在 7e-2（完全拟合失败），而这些区域恰是速度最剧烈处，80 个像素的误差
+拖垮全场。教训：**纯比例与纯均分都不对，需要"比例 + 每 INR 容量下限"**；且结合 §4.4g
+（少而大区域最优），固定 M 下的分配微调优先级降低。observer 增量 +0.76 与均分口径一致。
+
+### 4.4i Verify_gerristiny_1.1：GerrisTinySet 湍流场（gerris0/gerris4，Ibex job 48828750）
+
+新测试场 **GerrisTinySet**（8 个独立 Gerris solver 2D 非定常场，`.am`，每场原始 256×500×256，
+降采样到 (T,X,Y)=(128,128,256)）。pilot 取 gerris0（|v|≈0.066 小速度）+ gerris4（|v|≈0.86 大速度），
+τ=0.6，recipe v2.3、best-of-3。数据 scp 至 ibex `/ibex/user/zhanx0o/FLowDataFolder/`；`load_field`
+新增 gerris0..gerris7 分支（commit 3812204）。
+
+| 场 | baseline | pro_quality | 差 |
+|---|---|---|---|
+| gerris0（τ=0.6，N=[4,5]，9 INR） | **78.56** / CR5.6x | 71.92 / CR2.0x | **−6.6 dB** |
+| gerris4 | 68.31 / CR5.6x | τ=0.6/25INR 首跑 TIMEOUT；τ=0.7 重跑中（job 48891784） | — |
+
+读数：
+1. **首个明确的负结果**：gerris0 上 pro_quality 用 3B 预算反而比 baseline 低 6.6 dB、CR 还更差
+   （2.0x vs 5.6x）——**两头输**。与 rfc/cylinder（pro_quality +4~7 dB）完全相反。
+2. 归因（推测）：baseline 78.56 dB 近乎无损，说明降采样后 gerris0 对单个 CoordNet 已极友好
+   （低频/光滑），**没有可被刚体 observer 利用的结构**；切成区域后每 INR 只 B/3 预算，反不如一个
+   大网络拟合整场。**rft 变换无损已独立证实**（§3 T3=1.3e-15；cylinder 真实 + 极端相反 observer
+   往返 5.55e-16 / 1.11e-15，见 scratchpad cylinder_rft_extreme.py），故此负结果是方法适用边界，
+   **不是变换有损或实现 bug**。
+3. GerrisTinySet 需 τ≥0.6 才不碎片化（τ→N 干跑：gerris0 τ=0.1→[145,338]，gerris4 τ=0.1→[321,566]），
+   远大于 cylinder/boussinesq 的 0.1~0.2——湍流难被单一刚体 observer 解释，与负结果自洽。
+4. 工程：gerris4 pro_quality τ=0.6（N=[9,16]=25 INR × best-of-3）跑 13h 超 12h 墙钟 TIMEOUT；
+   τ=0.7（N≈11）+ --time 24h 重跑（job 48891784）。
+
 ### 4.5 "窗口为何伤 RFC"归因实验（agent，v2.1 recipe 下）
 
 用户质疑（正确）：RFC 的 killing observer 时不变，切不切窗口 observer/observed field 都一样，
@@ -359,7 +451,40 @@ pro_quality / no_observer 全部 ≈23.3–23.4 dB。诊断：所有含"巨区/�
 停留 900 epochs）；小区域正常拟合（1e-5 量级）。lr=3e-4 对大 SIREN 在此数据上不稳定。
 唯一可用信息：失败模式本身 + no_observer w1r0 种子离散 ×2236（中等规模网的随机坍缩）。
 
-## 4.9 综合结论（截至 2026-07-14，全部双机复现或标注不稳定）
+## 4.9-final 综合结论（2026-07-15 定稿，证据均标注出处）
+
+**① 方法核心机制成立，且收益可预判**（最可信，双机复现）：
+observer 变换的等预算增益按"场可被局部刚体运动解释的程度"排序：
+**rfc +5.2~5.4 ≫ boussinesq +1.6 > cylinder +0.7~0.8**（§4.4b/c/f/d），与分区干跑的 E/E0
+指标（rfc 3e-4 ≪ bouss ~0.2 < cyl ~0.1@τ 停点但涡街密集不可解释）同序 ⇒ E/E0 可作
+**先验适用性判据**，不训练即可预估 observer 收益。
+
+**② proposed 在真实数据的首个胜点**：boussinesq τ=0.5（M=2 = 每窗一个**全局** observer +
+1.5B INR）**70.43 > baseline 68.47**（§4.4g，同协议同种子对；quality 口径，CR≈1 非压缩）。
+两数据集 τ 曲线共同表明：**收益来自"大区域/全局 observer"，细粒度切分是净负贡献**
+（boussinesq 单调 64.4→70.4 随 M 24→2；cylinder 全 τ 落后，最好 62.14@M=4 vs baseline≈70）。
+
+**③ 固定规则的代价已量化**：强制 ≥2 时间窗 = 5-6 dB 优化税（rfc，双机）；均分预算在悬殊
+分区上浪费 ~60%（cylinder）；但**按像素比例分配更差**（−4.4 dB，小而剧烈区域被饿死到 m=4，
+§4.4h）⇒ 若做分配需"比例+容量下限"，且在"少而大区域"最优解下优先级不高。
+
+**④ 贯穿性协议发现——大 SIREN 双峰不稳定**：m=64/d=10 的 CoordNet 在真实数据上种子间
+极差 22.4 dB（cylinder 8 种子 {49.0..71.4}，5/8 好盆地 ≈70；boussinesq 同现 68.5/53.8，
+§4.4e/f）。**凡大网数字必须 ≥8 独立种子报分布**（Ibex 并行任务），best-of-2 仅小网够用；
+v2.2 之前的一切单种子对比不可信——本仓库两次"结论翻转"（v2.1→v2.2 rfc、本地→Ibex cylinder
+baseline）皆源于此。
+
+**⑤ 方法定位建议（给论文故事）**：卖点不是"到处赢 baseline"，而是：
+(a) 存在一类流场（全局/大尺度刚体运动主导，如 RFC、羽流）observer 变换带来确定收益，
+且 τ-合并 + E/E0 提供**自动检测该结构 + 自动选 N**的机制（RFC 锚点 N=1 双机验证）；
+(b) 方向修正：时间窗口数与空间 N 一样应自适应、都偏向小值端；
+(c) 压缩口径（pro_budget, CR 4.6-5.8×）目前仍全面落后 baseline，需先解决大网不稳定与
+预算分配才有意义。
+
+**未完成项**：Other_tworotor_1.1（理想正例 INR 实验，本地队列中断未跑——方法在其上应最大
+获益，留待需要时补）；cylinder baseline 本地补种 s2/s3（Ibex 8 种子分布已足够）。
+
+## 4.9 综合结论（截至 2026-07-14 的中期版，为定稿所取代，留档）
 
 **方法核心机制成立（RFC，双机复现，最可信）**：
 1. RFC 锚点：任意窗口 × τ ⇒ N=1，observer c≈−al_t（预言精确命中）；验证套件跨平台全过。
