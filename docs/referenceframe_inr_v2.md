@@ -502,6 +502,28 @@ baseline 20 任务 = job **48900605**（commit 7cebf9f；3B→4B 变更不影响
 pro_quality 20 任务在 4B 变更后取消重提 = job **48901021**（commit 8be61e5，4B 口径，
 `sbatch --array=<pro_quality 索引> refframe_v2_arch.sh`）。
 
+**中期发现与 lr 修正（2026-07-15 晚，22/40 完成时）**：
+
+1. **v_MLP0.0 全部健康且种子极稳**（两种子差 ≤0.5 dB）：rfc bl 51.7/51.3、pq(4B)
+   65.7/65.5；cylinder bl 58.50/58.51；boussinesq bl 55.9/55.8；gerris0 bl 66.5/66.7；
+   gerris4 bl 55.8/55.9 —— **大 SIREN 的双峰种子不稳定（§4.9④）在残差 ReLU 上未出现**。
+2. **v_FINER0.0 小网优异、大网坍缩**：rfc（m=24/29）bl 60.7/63.6、**pq(4B) 79.4/78.8**
+   （rfc 全历史最高）；但 m≥57 的大网在持续 lr=1e-4 下坍缩——cylinder bl 24.5/23.3、
+   boussinesq bl 24.2/24.4、gerris0 bl s7777 30.7。轨迹证据：cylinder ep100 即落入
+   3.278e-2 均值流吸引子（与 §4.6 v2.2 SIREN@3e-4 同值）且到 ep1700 未逃逸；boussinesq
+   从 ep100 的 6.7e-3 **反向恶化**到 2.35e-2。m=38 的 gerris4 finer pq 区域健康（1.0e-4
+   @ep800）⇒ 坍缩阈值在 m≈50 附近。
+3. **试点方法教训（重要）**：§4.4j 的本地坍缩检查用"100ep 余弦"调度（lr 快速衰减，
+   ep100 时已≈1e-6），而部署是"2000ep 余弦"（lr≈1e-4 维持数百 ep）——同峰值 lr、不同
+   调度长度，试点因此漏报。**lr 稳定性检查必须在与部署一致的调度形状/长度下做。**
+4. **修正**：finer 大网组合（cylinder/boussinesq 的 bl+pq、gerris0 bl，各 2 种子）以
+   lr **3e-5** = job **48916196**、lr **1e-5** = job **48916197** 重跑（脚本 `RFV2_LR`
+   覆盖，输出目录带 `_lr{LR}` 后缀不覆盖原结果）；已确定报废的 boussinesq finer pq@1e-4
+   （48901021_22/23）提前取消止损。rfc 的 finer@1e-4 结果健康、保留。gerris0 pq(m=42)
+   与 gerris4(m=38) 的 finer 任务待跑完再定是否补重跑。⇒ finer 的 lr 按网宽分档
+   （小网 1e-4 / 大网取 3e-5 与 1e-5 中收敛更好者），最终口径以重跑结果为准并在结果
+   表中注明每个数字的 lr。
+
 ### 4.5 "窗口为何伤 RFC"归因实验（agent，v2.1 recipe 下）
 
 用户质疑（正确）：RFC 的 killing observer 时不变，切不切窗口 observer/observed field 都一样，
