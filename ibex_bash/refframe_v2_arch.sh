@@ -61,6 +61,13 @@ mode=${MODES[$(((j / 2) % 2))]}
 s=${SEEDS[$((j % 2))]}
 
 if [ "$model" == "mlp" ]; then LR=3e-4; else LR=1e-4; fi
+# Optional lr override for reruns (finer big-net collapse at sustained 1e-4,
+# docs par.4.4j): submit e.g.
+#   sbatch --export=ALL,RFV2_LR=1e-5 --array=12,13,20,21,28,29 <this script>
+# Overridden runs write to a *_lr<LR> suffixed out_dir so they never clobber
+# the original results.
+OUTSUF=""
+if [ -n "$RFV2_LR" ]; then LR=$RFV2_LR; OUTSUF="_lr${LR}"; fi
 
 if [[ "$field" == gerris* ]]; then
   export PYFLOWVIS_DATA2D=/ibex/user/zhanx0o/FLowDataFolder
@@ -78,5 +85,5 @@ python -u run_experiment.py --field "$field" --model "$model" \
     --m_base "$mb" --d_base "$db" --tau "$tau" --absorb_min_pixels "$absorb" \
     --modes "$mode" --epochs 2000 --lr "$LR" --lr_final 1e-6 \
     --seed "$s" --n_seeds 1 \
-    --out_dir "outputs/Verify_arch_1.1/${field}_${model}_${mode}_s${s}" || exit 1
+    --out_dir "outputs/Verify_arch_1.1/${field}_${model}_${mode}_s${s}${OUTSUF}" || exit 1
 echo "=== DONE task $i ==="
