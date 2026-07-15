@@ -77,6 +77,42 @@ Volumes via a Coordinate-Based Neural Network*, IEEE TVCG 29(12), 2023。
   （步数归一后窗口惩罚从 −1.27 dB 收窄到 −0.31 dB，单 seed 噪声内）。正式数字以 v2.3 全套
   best-of-seeds 为准。
 
+## 1b. INR 架构变体：v_MLP0.0 / v_FINER0.0（2026-07-15，仅冒烟验证，无正式数字）
+
+动机：§4.9④ 大 SIREN 双峰不稳定，handover 下一步清单第 3 条要求非 SIREN 架构对照。两个
+变体都**完全保留 CoordNet 骨架**（encoder k→m→2m→4m→d×(4m→4m)；残差块 = 主路两层 +
+in≠out 时投影 skip + (main+skip)/2；decoder = 一个残差块 4m→p），只改激活函数与初始化 ⇒
+每个 nn.Linear 形状与 CoordNet 相同，闭式参数公式 / `pick_m_for_budget` / 字节口径对所有
+变体**逐位成立**（实测 4 组 (m,d) 含 m=64,d=10 的 1,486,538 全部相等；`train_inr` 内的
+参数量断言对所有变体保留）。
+
+| 版本 | `--model` | 激活 | 初始化 | 备注 |
+|---|---|---|---|---|
+| v_MLP0.0 | `mlp` | 每块主路隐层一个 ReLU，块输出保持线性（块输出若过 ReLU 会把 (main+skip)/2 钳到 ≥0，无法表示 [-1,1] 值域） | Kaiming-uniform（ReLU 增益）、bias=0 | 原始 (x,y,t) 坐标、无位置编码——加 Fourier features（傅里叶特征位置编码）会改 in_dim、破坏参数对等，属将来单独的版本 |
+| v_FINER0.0 | `finer` | 变周期 sine：sin(ω·(\|z\|+1)·z), z=Wx+b（FINER, Liu et al., CVPR 2024） | SIREN 权重初始化；首层 bias 可选 U(±k)，k=`--finer_first_bias_scale`（官方 repo 默认 None=标准 bias 初始化；(\|z\|+1) 因子按官方默认不参与反传，scale_req_grad=False） | ω=30 与 CoordNet 相同 |
+
+代码路径：`models_alt.py`（模型与工厂 `build_inr_model`）→ `inr.train_inr(model_name=...)`
+→ `pipeline.ExpCfg.model` → `run_experiment.py --model {coordnet,mlp,finer}`。默认
+`coordnet`，既有实验路径完全不受影响。
+
+**冒烟验证**（本地 RTX3090，rfc，v2.3 recipe，epochs=20、n_seeds=1、tau=0.05；日志
+`outputs/smoke_arch/{vMLP0.0,vFINER0.0,coordnet_ref}_rfc_smoke.log`。目的只有"能跑 + 在
+收敛"，**20 epochs 的 PSNR 无科学意义、禁止引用为结论**）：
+
+| `--model` | baseline MSE 轨迹（ep5→20） | baseline PSNR | pro_budget PSNR | 跑通模式 |
+|---|---|---|---|---|
+| coordnet（参照） | 5.48e-2 → 1.96e-2 | 23.17 | 23.39 | baseline / pro_budget |
+| mlp | 8.90e-2 → 8.04e-2 | 16.97 | 17.80 | 全部 4 模式 ✓ |
+| finer | 8.03e-2 → 4.58e-2 | 19.44 | 18.96 | baseline / pro_budget |
+
+读数（工程判断，非科学结论）：三者每条 MSE 轨迹均单调下降 = 都在收敛；20 epochs 下
+coordnet > finer > mlp 符合预期——sine 系网络对低频光滑场收敛快，而 raw 坐标 ReLU MLP 有
+spectral bias（谱偏置：ReLU 网络先拟合低频、难以拟合高频的已知性质），且 v2.3 recipe 的
+lr=1e-5 是按 SIREN 稳定性调的，对 MLP 可能偏小。**正式对比（1.0 版本）前必须：①对每个
+架构做 recipe 适配检查（至少 lr 扫描），否则会把"recipe 不适配"误判成"架构差"；②沿用
+best-of-seeds 协议并记录 seed spread（检验换架构是否消除 §4.9④ 的双峰不稳定——这正是
+引入它们的首要动机）。**
+
 ## 2. 方法 v2.0 规格
 
 ### 2.1 记号与 killing 最小二乘（2D 低阶）
@@ -146,7 +182,7 @@ per-component minmax → [-1,1]（baseline 用全场 per-component minmax，对�
 | `pro_quality` | 3B/M | 总参数 ≤ 3B，只比 PSNR |
 | `no_observer`（消融） | B/M | 分区与 pro_budget 完全相同，但 q≡0（拟合原始 v）——隔离 observer 的贡献 |
 
-**字节诚实核算**：总字节 = Σ参数×4 + 边信息（killing 参数 N·T_w·3×4B + cell 标签图 + 每区域
+**字节核算**：总字节 = Σ参数×4 + 边信息（killing 参数 N·T_w·3×4B + cell 标签图 + 每区域
 ξ-bbox/值域/宽度 m_r）。压缩比 = 原始数据字节 / 总字节。"observer 系数代价可忽略"必须由
 数字支撑，不能只是口号。
 
@@ -162,7 +198,7 @@ per-component minmax → [-1,1]（baseline 用全场 per-component minmax，对�
 | T1 | 人工构造：steady 四涡胞 s(x,y) 叠加已知全局旋转相机 ω₀（解析生成 v=R(−ω₀t)s(R(ω₀t)x)−ω₀x⊥） | 全局 killing 解 c≈−ω₀、(a,b)≈0、E/E0≪1 |
 | T2 | 仓库 RFC（`rotation_four_center`，al_t=1，相机项 = −x⊥ ⇒ 预言 c_true=−1.0） | 任意窗口（n_windows=2、4 都测）τ-合并结果 **N=1**；解出 c(t)≈−1.0 |
 | T3 | 往返恒等：随机 q、随机场，用"完美 INR"（直接回代 ṽ）重建 | ‖v̂−v‖∞ < 1e-10 |
-| T4 | 反例控制——**双转子合成场**（CLI 名 `tworotor`，`synth.two_rotor_field`）：左半 = steady 涡对图案 + 绕 c₁ 角速度 ω₁ 的旋转相机，右半 = 另一图案 + 绕 c₂ 角速度 ω₂（≠ω₁）的相机；每半可被各自 killing observer 精确 steady 化，但无全局解 | N≥2；两半内部区域各自解出 c≈−ω₁ / −ω₂；不塌缩成 1 |
+
 
 ## 4. 实验版本表
 
@@ -181,6 +217,7 @@ per-component minmax → [-1,1]（baseline 用全场 per-component minmax，对�
 | Verify_seedstability_1.1 | cylinder baseline 补种子（钉死跨机 10 dB 抖动区间） | 排队中，`outputs/v23_cylbase_s2.log` |
 | Other_tworotor_1.1 | 探索：双转子合成场（方法理想正例，定义见 §3 T4） | 排队中，`outputs/v23_tworotor.log` |
 | Verify_tau_1.1 | 设计选择验证：τ 敏感性（τ→N→PSNR），pro_quality vs baseline；cylinder τ∈{0.005..0.1}/absorb=64（M=21/14/4/5/3）、boussinesq τ∈{0.1..0.5}/absorb=256（M=24/21/15/7/2），2 seeds/点 | Ibex job 48814029（20 并行任务），`outputs/ibex_tausweep/` |
+| Verify_arch_1.1 | 架构变体 v_MLP0.0 / v_FINER0.0：各架构**自身** baseline vs pro_quality(3B)，5 场 × 2 架构 × 2 模式 × 2 种子 = 40 独立任务；**2-seed 均值协议** | §4.4j，`outputs/Verify_arch_1.1/`，Ibex job 见 §4.4j |
 | （非实验）正确性验证套件 / 归一化审计 | validate_rfc.py / audit_normalization.py | §3 / §4.8 无（代码内） |
 
 （已废弃的 v2.0/v2.1/v2.2 recipe 下的运行只留档不编号，见各小节标注。）
@@ -201,15 +238,6 @@ T3 往返 1.3e-15；T4 双转子反例 N≥2、每半 c=−0.801/+1.385（真值
 
 ### 4.3 端到端结果
 
-| 版本/recipe | 数据集 | 模式 | PSNR | 参数量 | 总字节 | CR | #INR (N/窗口) | 出处 |
-|---|---|---|---|---|---|---|---|---|
-| v2.0（300ep, lr1e-5，已废弃：全体欠训练） | rfc | baseline | 32.17 | 99,154 | 396,656 | 5.3× | 1 | 终端记录 2026-07-12 |
-| 〃 | rfc | pro_budget | 27.09 | 88,948 | 360,724 | 5.8× | 2 (1,1) | 〃 |
-| 〃 | rfc | pro_quality | 30.56 | 288,628 | 1,159,444 | 1.8× | 2 (1,1) | 〃 |
-| 〃 | rfc | no_observer | 22.40 | 88,948 | 359,956 | 5.8× | 2 (1,1) | 〃 |
-
-v2.0 recipe 唯一可用的干净结论：同分区同预算下 observer 的隔离贡献 = pro_budget − no_observer
-= 27.09 − 22.40 = **+4.69 dB**（两侧欠训练程度相同，差值可归因）。baseline 对比因欠训练不采信。
 
 | 版本/recipe | 数据集 | 模式 | PSNR | 参数量 | 总字节 | CR | #INR (N/窗口) | 出处 |
 |---|---|---|---|---|---|---|---|---|
@@ -427,6 +455,45 @@ normalized MSE 卡在 7e-2（完全拟合失败），而这些区域恰是速度
 4. 工程：gerris4 pro_quality τ=0.6（N=[9,16]=25 INR × best-of-3）跑 13h 超 12h 墙钟 TIMEOUT；
    τ=0.7（N≈11）+ --time 24h 重跑（job 48891784）。
 
+### 4.4j Verify_arch_1.1：架构变体正式对比（v_MLP0.0 / v_FINER0.0，Ibex 部署 2026-07-15，结果待回收）
+
+**问题**：观察者变换的收益是否依赖 SIREN？每个架构对比**自己的** baseline（直接拟合 v）
+vs **自己的** pro_quality（τ-合并分区 + observed field，3B）。
+
+**协议变更（本实验起生效，用户 2026-07-15 明示）**：
+1. epochs 硬上限 1000 → **2000**（`run_experiment.py` 断言同步放宽）；**不再要求各架构
+   epoch/lr 与 coordnet baseline 对齐**——只看收敛后性能，论文只汇报模型大小。
+2. lr 按架构由本地试点选定（下表）；lr_final=1e-6 余弦；其余沿 v2.3（自适应 batch
+   ≥64 步/epoch、grad-clip 1.0、minmax 归一化）。
+3. **种子协议：2 个独立种子 {0, 7777}，结论取均值**（取代 best-of-k；每任务 n_seeds=1，
+   无编码期种子搜索）。⚠️ 与旧 best-of 口径的数字**不可直接混排**，跨协议引用须注明。
+
+**lr 试点（本地 RTX3090，日志 `outputs/lrpilot/*/`）**：
+
+| 架构 | 候选 lr | rfc 200ep baseline PSNR | cylinder m=64,d=10 100ep 坍缩检查 | 选定 |
+|---|---|---|---|---|
+| mlp | 1e-4 / 3e-4 | 41.86 / **44.75** | 3e-4：MSE 1.3e-2→7.0e-5、50.06 dB、无坍缩 | **3e-4** |
+| finer | 1e-4 / 5e-4（官方） | **48.15** / 15.66（坍缩） | 1e-4：MSE 2.2e-2→3.5e-5、53.00 dB、无坍缩 | **1e-4** |
+
+试点发现（有独立价值）：①FINER 官方 lr=5e-4（为 3 隐层浅网调的）搬到深 CoordNet 骨架
+**即坍缩**——rfc 小网 m=24,d=4 都从 epoch 50 起钉死在 MSE 1.087e-1，"sine 系高 lr 坍缩"
+现象跨激活函数复现（与 §4.6 SIREN@3e-4 同族）；②lr=1e-4 的 FINER 100ep 就在 cylinder
+大网到 53.0 dB（参照：coordnet v2.3 recipe 300ep = 45.64）；③mlp@3e-4 100ep 50.1 dB，
+raw 坐标残差 ReLU 在该场收敛健康。
+
+**运行矩阵**（`ibex_bash/refframe_v2_arch.sh`，array 40 任务 ≤32 并发，24h 墙钟，
+[a100|v100]，一任务=一 (field, model, mode, seed)）：
+
+| field | m/d | τ | absorb | 配置依据 |
+|---|---|---|---|---|
+| rfc | 24/4 | 0.05 | 0 | mainExp_2.3（每窗 N=1）|
+| cylinder2d | 64/10 | 0.1 | 0 | mainExp_2.3 pro_quality 62.4-62.8（M=5，cylinder 历史最佳）|
+| boussinesq | 64/10 | 0.5 | 256 | Verify_tau_1.1 胜点 70.43（M=2）|
+| gerris0 | 64/10 | 0.6 | 0 | Verify_gerristiny_1.1 先导（9 INR）|
+| gerris4 | 64/10 | 0.7 | 0 | 先导 τ=0.6 TIMEOUT→0.7 重跑配置（N≈11）|
+
+输出 `outputs/Verify_arch_1.1/{field}_{model}_{mode}_s{seed}/`；Ibex job id：（提交后回填）。
+
 ### 4.5 "窗口为何伤 RFC"归因实验（agent，v2.1 recipe 下）
 
 用户质疑（正确）：RFC 的 killing observer 时不变，切不切窗口 observer/observed field 都一样，
@@ -451,7 +518,7 @@ pro_quality / no_observer 全部 ≈23.3–23.4 dB。诊断：所有含"巨区/�
 停留 900 epochs）；小区域正常拟合（1e-5 量级）。lr=3e-4 对大 SIREN 在此数据上不稳定。
 唯一可用信息：失败模式本身 + no_observer w1r0 种子离散 ×2236（中等规模网的随机坍缩）。
 
-## 4.9-final 综合结论（2026-07-15 定稿，证据均标注出处）
+## 4.9- 综合结论（2026-07-15 稿，证据均标注出处）
 
 **① 方法核心机制成立，且收益可预判**（最可信，双机复现）：
 observer 变换的等预算增益按"场可被局部刚体运动解释的程度"排序：
@@ -481,30 +548,7 @@ baseline）皆源于此。
 (c) 压缩口径（pro_budget, CR 4.6-5.8×）目前仍全面落后 baseline，需先解决大网不稳定与
 预算分配才有意义。
 
-**未完成项**：Other_tworotor_1.1（理想正例 INR 实验，本地队列中断未跑——方法在其上应最大
-获益，留待需要时补）；cylinder baseline 本地补种 s2/s3（Ibex 8 种子分布已足够）。
 
-## 4.9 综合结论（截至 2026-07-14 的中期版，为定稿所取代，留档）
-
-**方法核心机制成立（RFC，双机复现，最可信）**：
-1. RFC 锚点：任意窗口 × τ ⇒ N=1，observer c≈−al_t（预言精确命中）；验证套件跨平台全过。
-2. **observer 变换在等参数、等步数下让 CoordNet 拟合显著更好：+5.2~+5.4 dB**（单窗诊断，
-   本地 61.43 / Ibex 61.68 vs 56.23/56.29）；消融口径（同分区同预算去掉 observer）+4.7 dB。
-3. pro_quality(3B) 在 RFC 上全场最佳 63.7-63.8。
-
-**方法边界（cylinder，涡街=本质非定常）**：observer 只值 +0.7~+0.8 dB（双机一致）——
-参考系变换的收益与"场可被局部刚体运动解释的程度"绑定，E/E0 干跑指标（rfc 3e-4 vs cylinder
-0.05-0.1@τ 停止点）提前预示了这一点，可作为**先验判据**。
-
-**两大工程杠杆（比 observer 本身影响更大）**：
-1. 预算分配：均分对"1 巨区+众小区"分区形状灾难性浪费（~60% 预算喂给 <1% 像素）；
-   `--alloc pixels` 实验在途。
-2. 训练不稳定性：SIREN 种子混沌贯穿始终（v2.2 ×52.9、cylinder baseline 跨机 10 dB），
-   best-of-k 是必要非充分——大网在难数据上 k=2 不够；凡引用"baseline 领先/落后"必须先看
-   该模式的 seed spread。
-
-**固定规则的代价**：强制 ≥2 时间窗在 RFC 上是 5-6 dB 优化税（非方法本质，双机复现）⇒
-窗口数应数据自适应（时间轴自底向上合并，与空间 N 同构）。
 
 ## 5. 开放问题（诚实记录）
 

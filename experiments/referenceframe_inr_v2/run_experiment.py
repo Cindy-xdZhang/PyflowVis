@@ -25,6 +25,11 @@ def main():
     ap.add_argument("--field", default="rfc",
                     help="rfc | rfc128 | tworotor | beads2d | cylinder2d | boussinesq")
     ap.add_argument("--modes", default="baseline,pro_budget,pro_quality,no_observer")
+    ap.add_argument("--model", default="coordnet", choices=["coordnet", "mlp", "finer"],
+                    help="INR architecture: coordnet (SIREN, default) | "
+                         "mlp (v_MLP0.0 residual ReLU) | finer (v_FINER0.0)")
+    ap.add_argument("--finer_first_bias_scale", type=float, default=None,
+                    help="FINER first-layer bias U(+-k); default None = repo default")
     ap.add_argument("--m_base", type=int, default=24)
     ap.add_argument("--d_base", type=int, default=4)
     ap.add_argument("--k_cell", type=int, default=2)
@@ -42,6 +47,8 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--lr_final", type=float, default=1e-6)
     ap.add_argument("--grad_clip", type=float, default=1.0)
+    ap.add_argument("--log_every", type=int, default=100,
+                    help="epoch-MSE print interval (use a small value for smoke runs)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n_seeds", type=int, default=3,
                     help="v2.2: best-of-k seeds per INR (encode-time search)")
@@ -49,14 +56,17 @@ def main():
     ap.add_argument("--out_dir", default=str(_HERE / "outputs"))
     args = ap.parse_args()
 
-    assert args.epochs <= 1000, "hard rule: <= 1000 epochs"
-    cfg = ExpCfg(field=args.field, m_base=args.m_base, d_base=args.d_base,
+    assert args.epochs <= 2000, "hard rule: <= 2000 epochs (relaxed from 1000, user 2026-07-15)"
+    cfg = ExpCfg(field=args.field, model=args.model,
+                 finer_first_bias_scale=args.finer_first_bias_scale,
+                 m_base=args.m_base, d_base=args.d_base,
                  k_cell=args.k_cell, tau=args.tau, alloc=args.alloc,
                  absorb_min_pixels=args.absorb_min_pixels, n_windows=args.n_windows,
                  allow_full_window=args.allow_full_window,
                  min_steps_per_epoch=args.min_steps_per_epoch,
                  epochs=args.epochs, batch_size=args.batch_size, lr=args.lr,
                  lr_final=args.lr_final, grad_clip=args.grad_clip,
+                 log_every=args.log_every,
                  seed=args.seed, n_seeds=args.n_seeds, device=args.device,
                  out_dir=str(Path(args.out_dir) / args.field),
                  modes=tuple(s.strip() for s in args.modes.split(",") if s.strip()))

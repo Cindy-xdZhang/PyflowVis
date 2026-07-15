@@ -4,7 +4,9 @@ see docs/referenceframe_inr_v2.md par.1) so baseline and proposed use the same c
 
 Frozen training recipe v2.3 (docs par.1, applied IDENTICALLY to every mode):
 Adam(0.9, 0.999), weight decay 1e-6, MSE, coords/values pre-normalized to [-1, 1],
-1000 epochs (hard cap), lr 1e-5 cosine-decayed to 1e-6, grad-clip 1.0, and an
+1000 epochs default (hard cap 2000 since 2026-07-15; per-architecture lr allowed
+for the non-SIREN variants, see docs par.4.4j), lr 1e-5 cosine-decayed to 1e-6,
+grad-clip 1.0, and an
 ADAPTIVE batch: batch = min(32000, max(1, n_samples // min_steps_per_epoch)) with
 min_steps_per_epoch = 64, so every INR gets >= 64 optimizer steps per epoch
 regardless of how many samples it owns.
@@ -36,7 +38,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from CoordNetCompression import CoordNet  # noqa: E402  (verified baseline model class)
+from CoordNetCompression import CoordNet  # noqa: E402,F401  (verified baseline model class)
+from models_alt import build_inr_model  # noqa: E402  (v_MLP0.0 / v_FINER0.0 variants)
 
 
 def setup_determinism(seed: int = 0) -> None:
@@ -107,11 +110,17 @@ class MinMax:
 
 def train_inr(coords_n: np.ndarray, values_n: np.ndarray, m: int, d: int,
               cfg: TrainCfg, device: torch.device, seed: int, tag: str = "",
-              log=print) -> tuple[torch.nn.Module, dict]:
-    """Fit CoordNet to pre-normalized (coords_n in [-1,1]^k, values_n in [-1,1]^p)."""
+              log=print, model_name: str = "coordnet",
+              model_kwargs: dict | None = None) -> tuple[torch.nn.Module, dict]:
+    """Fit an INR to pre-normalized (coords_n in [-1,1]^k, values_n in [-1,1]^p).
+
+    model_name: 'coordnet' (default, SIREN CoordNet) | 'mlp' (v_MLP0.0) |
+    'finer' (v_FINER0.0). All variants share the CoordNet skeleton, so the
+    closed-form parameter count holds for every one (asserted below)."""
     k, p = coords_n.shape[1], values_n.shape[1]
     torch.manual_seed(seed)
-    model = CoordNet(k, p, m=m, d=d, omega_0=30.0, final_activation="sine").to(device)
+    model = build_inr_model(model_name, k, p, m=m, d=d,
+                            **(model_kwargs or {})).to(device)
     n_params = sum(pp.numel() for pp in model.parameters())
     assert n_params == coordnet_num_params(m, d, k, p), "param formula drift"
 
@@ -147,14 +156,16 @@ def train_inr(coords_n: np.ndarray, values_n: np.ndarray, m: int, d: int,
         if (ep + 1) % cfg.log_every == 0 or ep == cfg.epochs - 1:
             log(f"    [{tag}] epoch {ep+1}/{cfg.epochs} lr={cur_lr:.1e} mse={last_mse:.3e}")
     stats = {"params": int(n_params), "m": m, "d": d, "n_samples": int(n),
-             "train_time_s": time.time() - t0,
+             "model": model_name, "train_time_s": time.time() - t0,
              "last_mse": last_mse, "best_mse": best_mse}
     return model, stats
 
 
 def train_inr_best_of_seeds(coords_n: np.ndarray, values_n: np.ndarray, m: int, d: int,
                             cfg: TrainCfg, device: torch.device, seed_base: int,
-                            n_seeds: int, tag: str = "", log=print
+                            n_seeds: int, tag: str = "", log=print,
+                            model_name: str = "coordnet",
+                            model_kwargs: dict | None = None
                             ) -> tuple[torch.nn.Module, dict]:
     """v2.2 protocol: train the same INR with n_seeds derived seeds and keep the
     weights with the lowest final MSE. Rationale: SIREN convergence is chaotically
@@ -167,7 +178,8 @@ def train_inr_best_of_seeds(coords_n: np.ndarray, values_n: np.ndarray, m: int, 
     for si in range(n_seeds):
         seed = seed_base + 7777 * si
         model, st = train_inr(coords_n, values_n, m, d, cfg, device, seed=seed,
-                              tag=f"{tag} s{si}", log=log)
+                              tag=f"{tag} s{si}", log=log, model_name=model_name,
+                              model_kwargs=model_kwargs)
         all_mse.append(st["last_mse"])
         if best is None or st["last_mse"] < best[1]["last_mse"]:
             best = (model, st)

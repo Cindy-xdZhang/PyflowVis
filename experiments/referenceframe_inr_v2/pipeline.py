@@ -127,6 +127,10 @@ def load_field(name: str) -> FieldData:
 @dataclass
 class ExpCfg:
     field: str = "rfc"
+    model: str = "coordnet"     # INR architecture: coordnet (SIREN, default) |
+                                # mlp (v_MLP0.0 residual ReLU) | finer (v_FINER0.0)
+    finer_first_bias_scale: float | None = None  # FINER first-layer bias U(+-k);
+                                # None = official repo default (standard bias init)
     m_base: int = 24            # baseline CoordNet width  -> budget B
     d_base: int = 4             # baseline depth (also used for region INRs)
     k_cell: int = 2             # minimal cell size (k x k pixels)
@@ -143,6 +147,7 @@ class ExpCfg:
     lr_final: float = 1e-6
     grad_clip: float = 1.0
     weight_decay: float = 1e-6
+    log_every: int = 100        # epoch-MSE print interval (dense for smoke runs)
     seed: int = 0
     n_seeds: int = 3            # v2.2: best-of-k seeds per INR (encode-time search)
     device: str = ""            # "" -> cuda if available
@@ -153,7 +158,12 @@ class ExpCfg:
         return TrainCfg(epochs=self.epochs, batch_size=self.batch_size,
                         min_steps_per_epoch=self.min_steps_per_epoch,
                         lr=self.lr, lr_final=self.lr_final, grad_clip=self.grad_clip,
-                        weight_decay=self.weight_decay)
+                        weight_decay=self.weight_decay, log_every=self.log_every)
+
+    def model_kwargs(self) -> dict:
+        if self.model == "finer" and self.finer_first_bias_scale is not None:
+            return {"first_bias_scale": self.finer_first_bias_scale}
+        return {}
 
 
 def budget_B(cfg: ExpCfg) -> int:
@@ -178,7 +188,9 @@ def run_baseline(fd: FieldData, cfg: ExpCfg, device, log=print) -> dict:
     model, st = train_inr_best_of_seeds(coords_n, vals_n, cfg.m_base, cfg.d_base,
                                         cfg.train_cfg(), device, seed_base=cfg.seed,
                                         n_seeds=cfg.n_seeds,
-                                        tag=f"{fd.name}/baseline", log=log)
+                                        tag=f"{fd.name}/baseline", log=log,
+                                        model_name=cfg.model,
+                                        model_kwargs=cfg.model_kwargs())
     pred_n = eval_inr(model, coords_n, device)
     recon = vmm.decode(pred_n).reshape(fd.shape)
     psnr = vpsnr(recon, fd.data)
@@ -258,7 +270,9 @@ def run_proposed(fd: FieldData, cfg: ExpCfg, parts: list[WindowPartition],
             model, st = train_inr_best_of_seeds(coords_n, vals_n, m_r, d_r,
                                                 cfg.train_cfg(), device,
                                                 seed_base=cfg.seed + 1000 * w_i + r_i,
-                                                n_seeds=cfg.n_seeds, tag=tag, log=log)
+                                                n_seeds=cfg.n_seeds, tag=tag, log=log,
+                                                model_name=cfg.model,
+                                                model_kwargs=cfg.model_kwargs())
             pred_n = eval_inr(model, coords_n, device)
             vtil_pred = vmm.decode(pred_n)
             scatter_reconstruction(recon, samples, vtil_pred)
@@ -288,7 +302,8 @@ def run_experiment(cfg: ExpCfg, log=print) -> dict:
     device = torch.device(cfg.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     fd = load_field(cfg.field)
     log(f"[{fd.name}] shape (T,Y,X,2)={fd.shape}, data={fd.data_bytes()/2**20:.2f} MiB, "
-        f"B={budget_B(cfg)} params (m={cfg.m_base}, d={cfg.d_base}), device={device}")
+        f"B={budget_B(cfg)} params (m={cfg.m_base}, d={cfg.d_base}), "
+        f"model={cfg.model}, device={device}")
 
     results = {}
     parts = None

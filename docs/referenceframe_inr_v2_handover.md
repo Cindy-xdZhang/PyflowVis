@@ -20,6 +20,9 @@
 - `partition.py` 自底向上 τ-合并（**残差比准则** ρ=E/E0≤τ）+ 可选小区域吸收（absorb_min_pixels）；
 - `frame.py` 帧积分 + pushforward + 逆变换（训练样本=区域像素的精确 pullback，无插值/无 blend）；
 - `inr.py` 训练（v2.3 冻结 recipe + best-of-k seeds）、预算→网宽闭式公式；
+- `models_alt.py` INR 架构变体 **v_MLP0.0**（残差 ReLU）/ **v_FINER0.0**（FINER 变周期
+  sine），`run_experiment.py --model {coordnet,mlp,finer}` 选择；与 CoordNet 骨架逐层同形
+  ⇒ 参数量公式/预算口径不变（主文档 §1b；仅冒烟验证，无正式数字）；
 - `pipeline.py` 四模式管线（baseline / pro_budget / pro_quality / no_observer 消融）+ 数据加载
   （`PYFLOWVIS_DATA2D` 环境变量指数据目录）；
 - `validate_rfc.py` 正确性验证套件（T1 闭式解收敛 / T2 RFC N=1 / T3 往返 1e-15 / T4 双转子反例）；
@@ -68,6 +71,8 @@
    而非细分工具；boussinesq 的 70.43 胜点提示"每窗全局 observer"可能是最实用形态。
 3. **压缩口径翻盘的前提**：大网稳定性（初始化/训练方案，如 SIREN 频率调度、warmup、或换
    FF+ReLU 对照）+ "比例+容量下限"的预算分配。不解决这两个，pro_budget 无法与 baseline 竞争。
+   （进展 2026-07-15：架构对照的脚手架已就位——v_MLP0.0 / v_FINER0.0 冒烟通过，主文档 §1b；
+   正式对比前先做各架构 lr 检查 + ≥8 种子分布。）
 4. **补缺**：Other_tworotor_1.1（双转子理想正例的 INR 实验，队列中断未跑，一条命令可补：
    `python run_experiment.py --field tworotor --tau 0.05 --absorb_min_pixels 64 --m_base 24 --d_base 4 --n_seeds 3`）；
    boussinesq 本地对照的 pro 模式（Ibex 已覆盖，可选）。
