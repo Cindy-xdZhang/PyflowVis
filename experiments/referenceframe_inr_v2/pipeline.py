@@ -143,6 +143,9 @@ class ExpCfg:
     budget_frac: float = 0.0    # >0: strict-compression budget = frac * raw field
                                 # bytes; overrides B (m_base then ignored for the
                                 # baseline width). pro_quality must not use it.
+    max_inrs: int = 0           # >0: hard cap on total INR count -- fail loudly if
+                                # the partition yields more (user 2026-07-16: tiny
+                                # budgets must not be split across many regions)
     k_cell: int = 2             # minimal cell size (k x k pixels)
     tau: float = 0.05           # merge tolerance
     alloc: str = "uniform"      # per-INR budget split: uniform (spec) | pixels
@@ -354,6 +357,12 @@ def run_experiment(cfg: ExpCfg, log=print) -> dict:
     if any(m != "baseline" for m in cfg.modes):
         log(f"[{fd.name}] tau-merge partition:")
         parts = compute_partitions(fd, cfg, log=log)
+        if cfg.max_inrs > 0:
+            m_tot = sum(p.n_regions for p in parts)
+            assert m_tot <= cfg.max_inrs, (
+                f"partition yields {m_tot} INRs > max_inrs={cfg.max_inrs} "
+                f"(tau={cfg.tau}, absorb={cfg.absorb_min_pixels}, "
+                f"n_windows={cfg.n_windows}) -- refusing to split the budget")
 
     for mode in cfg.modes:
         log(f"[{fd.name}] === mode {mode} ===")

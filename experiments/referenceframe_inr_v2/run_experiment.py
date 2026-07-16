@@ -44,6 +44,8 @@ def main():
     ap.add_argument("--alloc", default="uniform", choices=["uniform", "pixels"],
                     help="per-INR budget split (uniform = spec; pixels = proportional)")
     ap.add_argument("--n_windows", type=int, default=2)
+    ap.add_argument("--max_inrs", type=int, default=0,
+                    help=">0: fail if the partition yields more total INRs than this")
     ap.add_argument("--allow_full_window", action="store_true",
                     help="DIAGNOSTIC: permit n_windows=1 (violates the <=T/2 spec rule)")
     ap.add_argument("--epochs", type=int, default=1000)
@@ -69,7 +71,7 @@ def main():
                  budget_frac=args.budget_frac,
                  k_cell=args.k_cell, tau=args.tau, alloc=args.alloc,
                  absorb_min_pixels=args.absorb_min_pixels, n_windows=args.n_windows,
-                 allow_full_window=args.allow_full_window,
+                 allow_full_window=args.allow_full_window, max_inrs=args.max_inrs,
                  min_steps_per_epoch=args.min_steps_per_epoch,
                  epochs=args.epochs, batch_size=args.batch_size, lr=args.lr,
                  lr_final=args.lr_final, grad_clip=args.grad_clip,
