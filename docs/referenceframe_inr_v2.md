@@ -264,6 +264,7 @@ B 换成 **f × 原始场 float32 字节**，且约束对象是**总字节（参
 | Verify_tau_1.1 | 设计选择验证：τ 敏感性（τ→N→PSNR），pro_quality vs baseline；cylinder τ∈{0.005..0.1}/absorb=64（M=21/14/4/5/3）、boussinesq τ∈{0.1..0.5}/absorb=256（M=24/21/15/7/2），2 seeds/点 | Ibex job 48814029（20 并行任务），`outputs/ibex_tausweep/` |
 | Verify_arch_1.1 | 架构变体 v_MLP0.0 / v_FINER0.0：各架构**自身** baseline vs pro_quality(**4B**)，5 场 × 2 架构 × 2 模式 × 2 种子 = 40 独立任务；**2-seed 均值协议** | §4.4j，`outputs/Verify_arch_1.1/`，Ibex job 见 §4.4j |
 | mainExp_compress_1.1 | 严格压缩口径主实验：总字节（参数+边信息）≤ {5,10,20}% × 原始场字节，各架构（coordnet/mlp）自身 baseline vs pro_budget（分区+RFT），rfc/cylinder2d/boussinesq，72 任务，2-seed 均值 | §4.4k，`outputs/mainExp_compress_1.1/`，Ibex job 48967626 |
+| Verify_compresswin_1.1 | 压缩口径翻盘 sweep：boussinesq coordnet τ×lr×窗口数（**M≤3 硬约束**）+ rfc coordnet 单窗闭环，5%/10% 预算，baseline 同步 sweep lr，epochs 1000 | §4.4l，`outputs/Verify_compresswin_1.1/`，Ibex job 49000294 |
 | （非实验）正确性验证套件 / 归一化审计 | validate_rfc.py / audit_normalization.py | §3 / §4.8 无（代码内） |
 
 （已废弃的 v2.0/v2.1/v2.2 recipe 下的运行只留档不编号，见各小节标注。）
@@ -728,6 +729,42 @@ boussinesq（M=2）：
 4. 工程注记：pro 的 m_r 取整在 M=2 的 5% 档最多浪费 ~8% 预算（boussinesq pro 用掉
    89.6% vs bl 97.6%），对结论方向无影响但对 pro 略不利；如需公平到字节级可加
    "剩余预算给最大区域"的再分配（未做）。
+
+### 4.4l Verify_compresswin_1.1：压缩口径翻盘 sweep（boussinesq coordnet τ×lr×窗口数，M≤3；Ibex 部署 2026-07-16，结果待回收）
+
+**验收标准（用户 2026-07-16 定，项目级约束）**：只接受 cylinder2d 上 proposed 无法提高
+coordnet（SIREN）；**其他所有数据集上 proposed 不得比对应架构的纯 INR baseline 更差**。
+§4.4k 中 boussinesq coordnet −2.7、rfc coordnet −3.0~−6.1 均不满足 ⇒ 本实验找翻盘配置。
+
+**新约束与依据（用户同日定）**：
+1. **总 INR 数 M ∈ [1,3] 硬约束**——压缩预算本来就小，切 M 份后每网参数 ≈ 预算/M，
+   区域一多每个网络就没有拟合能力（§4.4k cylinder M=5 在 5% 档 m_r=13 即此病）。
+   管线新增 `--max_inrs`：分区结果超限直接报错，不允许静默跑碎片化配置。
+2. M=1 只能由单时间窗实现 ⇒ **"≥2 窗"规则在本实验按用户指令解除**（`--allow_full_window`
+   臂），亦有 §4.4b 依据：窗口切分 = 5-6 dB 优化税，RFC 单窗等参 observer 增益 +4.7~5.2。
+3. **epochs 2000 → 1000**（用户：压缩只看收敛后性能，1000 足够）。
+4. lr 对 **baseline 同步 sweep**——5-10% 档网络小（m=13~35），v2.3 的 lr=1e-5 是按大
+   SIREN 稳定性调的，小网偏小（§4.4b"小网低 lr 收敛慢"）；只调 pro 的 lr 不可信，
+   两侧同 grid 才能报"最优对最优"。
+
+**τ→M 干跑（boussinesq，absorb=256，本地 2026-07-16）**：
+1 窗：τ=0.5→**M=1**、0.4→2、0.35→3（0.3→6 超限）；2 窗：τ=0.5→[1,1]=**2**（旧工作点）、
+0.4→[1,2]=**3**（0.35→5 超限）。
+
+**运行矩阵（120 任务，job 49000294，array 0-119%32，12h，coordnet，1000ep，2 种子均值）**：
+- boussinesq（d=10）：{bl + 5 个 pro 臂：w1M1(τ=.5)/w1M2(.4)/w1M3(.35)/w2M2(.5)/w2M3(.4)}
+  × frac {5%,10%} × lr {1e-5, 3e-5, 1e-4, 3e-4} × 2 种子 = 96；
+- rfc 闭环块（d=4，验收标准同样要求 rfc 不输）：{bl, w1M1(τ=.05，即 §4.4b 等参赢点配置)}
+  × frac {5%,10%} × lr {1e-5, 1e-4, 3e-4} × 2 种子 = 24。
+预算规划（budget_calc，d=10）：bouss 5% M=1/2/3 → m_r=24/16/13，10% → 34/24/19；
+M=1 时 pro 与 bl **同宽度**（5% 均 m=24、10% 均 m=34）——对比退化为"observed field vs
+raw field 等参等步"，最干净的归因形态。
+脚本 `ibex_bash/refframe_v2_compresswin.sh`（commit 8e7f05c），输出
+`outputs/Verify_compresswin_1.1/{field}_{arm}_f{frac}_lr{LR}_s{seed}/`。
+
+**读结果协议**：主对比 = 同 lr 配对（pro@lr vs bl@lr）+ 最优对最优（各自 lr 内取最好臂，
+编码期搜索对称合法）；⚠ 规则同 §4.4j；lr=3e-4 臂若坍缩（§4.6 大网均值流吸引子为 m=64
+现象，小网未知）如实记录。
 
 用户质疑（正确）：RFC 的 killing observer 时不变，切不切窗口 observer/observed field 都一样，
 结果不该变。归因实验（`outputs/diag_agent_*.log`）：
