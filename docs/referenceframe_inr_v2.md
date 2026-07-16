@@ -21,6 +21,43 @@
    （旧文档第 7 节自认）。
 5. 结论反复翻转（N=1 由正转负等），无法追溯。
 
+## 0b. 项目叙事修订：Story v1 → v2（用户 2026-07-16 定）
+
+**旧叙事（Story v1，项目最初构思）**：CoordNet + reference frame transformation（参考系
+变换，下称 RFT）拟合 observed field，会比 CoordNet 直接拟合原场更好——即"RFT 提高
+SIREN/CoordNet"。
+
+**新叙事（Story v2，自本日起）**：不再主张"RFT 能提高 SIREN/CoordNet"；主张 **RFT 是
+架构无关（architecture-agnostic）的增益模块：任意架构的 INR + RFT 都可获得一定程度的
+性能提高**。
+
+**为什么改（证据，均出自 §4.4j / §4.9）**：
+1. SIREN 系（正弦激活）网络——CoordNet、FINER 皆属此类——**天生擅长拟合 cylinder 这类
+   卡门涡街准周期振荡场**（频谱窄带，与正弦基函数天然匹配）：FINER 直拟合 cylinder
+   baseline 达 **73.7 dB**，超过 coordnet 好盆地（≈70）与一切 pro 配置。在这类数据上
+   给频域架构叠加 RFT 很难再有效提高：coordnet pro 输 7-8 dB、finer pro 更差且不稳定、
+   mlp pro 也仅 −0.6 打平。**cylinder 类"全域窄带振荡"场是 RFT 的不适用边界**（E/E0
+   先验判据在 §4.9① 已预示：涡街不可被局部刚体运动解释）。
+2. 架构对照实验（Verify_arch_1.1）显示 RFT 增益**并非 SIREN 专属，且在非频域架构上更
+   普遍**：残差 ReLU MLP（无频域先验）上 pro 在 4/5 场架构内取胜（+2.1~+14.1）；FINER
+   在 rfc +17.0；而 coordnet 只在全局运动主导的场（rfc、boussinesq）受益。
+
+**新叙事当前的证据边界（诚实记录，防止超卖）**：
+- 支持最强：v_MLP0.0（4/5 场胜、种子稳定）；rfc 上三架构全胜（coordnet 等参 +4.7~5.2、
+  mlp +14.1、finer +17.0）。
+- 尚未闭合：①FINER 大 INR × observed field 训练不稳定（§4.4j 读数 3），"任意架构"要
+  站住需给出 FINER 的稳定配方或明确声明其适用条件；②mlp/finer 的架构内增益目前是
+  quality 口径（pro=4B vs baseline=B，**非等参**）——等参/等步数的 observer 隔离归因
+  链只在 coordnet 上做过（单窗诊断 +4.7~5.2，§4.4b），mlp/finer 的 no_observer 消融
+  与等预算对照**待补**，这是 Story v2 成立的关键实验缺口；③gerris finer pro 低 lr
+  重跑未回收。
+- 与 §4.9⑤ 的关系：§4.9⑤"存在一类流场 + 自动检测机制"的定位保留，其中与 SIREN/
+  CoordNet 绑定的表述由本节取代。
+
+**对后续实验的指引（优先级）**：补 v_MLP/v_FINER 的等参消融（no_observer、单窗
+observed field 诊断）→ 使"任意架构 + RFT ⇒ 提高"具备与 coordnet 同级的归因链；
+FINER×observed field 稳定化作为 Verify_arch_1.2。
+
 ## 1. Baseline：CoordNet 复现验证（已核对论文原文，冻结）
 
 论文：Han & Wang, *CoordNet: Data Generation and Visualization Generation for Time-Varying
