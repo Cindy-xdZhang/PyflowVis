@@ -7,6 +7,12 @@ Modes (all share the frozen training recipe and the same CoordNet class):
                (3B before 2026-07-15; historical numbers keep the 3B label)
   no_observer  same partition & budgets as pro_budget but q == 0        total <= B
                (fits raw v per region -> isolates the observer's contribution)
+
+Strict-compression budgets (mainExp_compress_1.1): cfg.budget_frac > 0 replaces
+the B-derived budget with frac * raw-field-bytes for baseline / pro_budget /
+no_observer -- baseline width is solved from the budget, proposed deducts the
+exact side info first, and both assert total_bytes <= frac * field bytes.
+Sizing preview: budget_calc.py.
 """
 from __future__ import annotations
 
@@ -134,6 +140,9 @@ class ExpCfg:
                                 # None = official repo default (standard bias init)
     m_base: int = 24            # baseline CoordNet width  -> budget B
     d_base: int = 4             # baseline depth (also used for region INRs)
+    budget_frac: float = 0.0    # >0: strict-compression budget = frac * raw field
+                                # bytes; overrides B (m_base then ignored for the
+                                # baseline width). pro_quality must not use it.
     k_cell: int = 2             # minimal cell size (k x k pixels)
     tau: float = 0.05           # merge tolerance
     alloc: str = "uniform"      # per-INR budget split: uniform (spec) | pixels
@@ -186,7 +195,15 @@ def baseline_coords_values(fd: FieldData) -> tuple[np.ndarray, np.ndarray, MinMa
 
 def run_baseline(fd: FieldData, cfg: ExpCfg, device, log=print) -> dict:
     coords_n, vals_n, vmm = baseline_coords_values(fd)
-    model, st = train_inr_best_of_seeds(coords_n, vals_n, cfg.m_base, cfg.d_base,
+    side_bytes = 10 * 4     # coord ranges (6) + value lo/hi (4) floats
+    m_b = cfg.m_base
+    if cfg.budget_frac > 0:
+        budget_p = int((cfg.budget_frac * fd.data_bytes() - side_bytes) // 4)
+        m_b = pick_m_for_budget(budget_p, cfg.d_base)
+        log(f"  budget_frac={cfg.budget_frac}: {budget_p:,} params allowed -> "
+            f"m={m_b} d={cfg.d_base} ({coordnet_num_params(m_b, cfg.d_base):,} params;"
+            f" m_base ignored)")
+    model, st = train_inr_best_of_seeds(coords_n, vals_n, m_b, cfg.d_base,
                                         cfg.train_cfg(), device, seed_base=cfg.seed,
                                         n_seeds=cfg.n_seeds,
                                         tag=f"{fd.name}/baseline", log=log,
@@ -195,9 +212,11 @@ def run_baseline(fd: FieldData, cfg: ExpCfg, device, log=print) -> dict:
     pred_n = eval_inr(model, coords_n, device)
     recon = vmm.decode(pred_n).reshape(fd.shape)
     psnr = vpsnr(recon, fd.data)
-    side_bytes = 10 * 4     # coord ranges (6) + value lo/hi (4) floats
     total_bytes = st["params"] * 4 + side_bytes
+    if cfg.budget_frac > 0:
+        assert total_bytes <= cfg.budget_frac * fd.data_bytes(), "over byte budget"
     return {"mode": "baseline", "psnr": psnr, "params_total": st["params"],
+            "budget_frac": cfg.budget_frac,
             "side_info_bytes": side_bytes, "total_bytes": total_bytes,
             "compression_ratio": fd.data_bytes() / total_bytes,
             "n_inrs": 1, "regions_per_window": [1],
@@ -232,7 +251,24 @@ def run_proposed(fd: FieldData, cfg: ExpCfg, parts: list[WindowPartition],
     T, Y, X, _ = fd.shape
     B = budget_B(cfg)
     n_inrs = sum(p.n_regions for p in parts)
-    share = int(budget_factor * B / n_inrs)
+    if cfg.budget_frac > 0:
+        # strict-compression budget: frac * raw field bytes covers params AND
+        # side info; deduct the exact side info (known from the partition,
+        # mirrors the accumulation in the training loop below) before splitting.
+        side_planned = 0
+        for part in parts:
+            tw = part.it1 - part.it0
+            side_planned += part.labels_cells.size * 2
+            side_planned += part.n_regions * (
+                ((tw * 3 * 4) if use_observer else 0) + (4 + 4) * 4 + 2)
+        params_pool = int((cfg.budget_frac * fd.data_bytes() - side_planned) // 4)
+        assert params_pool > n_inrs, "budget_frac too small for side info"
+        share = params_pool // n_inrs
+        log(f"  budget_frac={cfg.budget_frac}: pool {params_pool:,} params after "
+            f"{side_planned:,} B side info -> share {share:,}/INR (x{n_inrs})")
+    else:
+        params_pool = None
+        share = int(budget_factor * B / n_inrs)
     d_r = cfg.d_base
     # pixel-proportional allocation (docs par.5 open question 1): weight each
     # (window, region) INR's share by its sample count instead of uniformly.
@@ -263,7 +299,8 @@ def run_proposed(fd: FieldData, cfg: ExpCfg, parts: list[WindowPartition],
                                        samples.tn[:, None].astype(np.float32)], axis=1)
             vals_n = vmm.encode(samples.vtil)
             if cfg.alloc == "pixels":
-                w_share = int(budget_factor * B * samples.xi.shape[0] / total_wpix)
+                pool = params_pool if params_pool is not None else budget_factor * B
+                w_share = int(pool * samples.xi.shape[0] / total_wpix)
             else:
                 w_share = share
             m_r = pick_m_for_budget(w_share, d_r)
@@ -287,8 +324,12 @@ def run_proposed(fd: FieldData, cfg: ExpCfg, parts: list[WindowPartition],
     psnr = vpsnr(recon, fd.data)
     params_total = sum(st["params"] for st in details)
     total_bytes = params_total * 4 + side_bytes
+    if cfg.budget_frac > 0:
+        assert side_bytes == side_planned, "side-info plan drifted from actual"
+        assert total_bytes <= cfg.budget_frac * fd.data_bytes(), "over byte budget"
     return {"mode": mode_name, "psnr": psnr, "params_total": params_total,
             "budget_B": B, "budget_factor": budget_factor, "per_inr_share": share,
+            "budget_frac": cfg.budget_frac,
             "side_info_bytes": side_bytes, "total_bytes": total_bytes,
             "compression_ratio": fd.data_bytes() / total_bytes,
             "n_inrs": n_inrs, "regions_per_window": [p.n_regions for p in parts],
@@ -304,7 +345,9 @@ def run_experiment(cfg: ExpCfg, log=print) -> dict:
     fd = load_field(cfg.field)
     log(f"[{fd.name}] shape (T,Y,X,2)={fd.shape}, data={fd.data_bytes()/2**20:.2f} MiB, "
         f"B={budget_B(cfg)} params (m={cfg.m_base}, d={cfg.d_base}), "
-        f"model={cfg.model}, device={device}")
+        f"model={cfg.model}, device={device}"
+        + (f", budget_frac={cfg.budget_frac} ({cfg.budget_frac * fd.data_bytes():,.0f} B)"
+           if cfg.budget_frac > 0 else ""))
 
     results = {}
     parts = None
@@ -321,6 +364,10 @@ def run_experiment(cfg: ExpCfg, log=print) -> dict:
         elif mode == "pro_quality":
             # 4B since 2026-07-15 (user spec change); all runs up to and including
             # Verify_tau_1.1 / gerris pilot used 3B -- do not mix the two labels.
+            if cfg.budget_frac > 0:
+                raise ValueError("pro_quality is the 4B quality mode; "
+                                 "budget_frac only applies to baseline/pro_budget/"
+                                 "no_observer (strict-compression protocol)")
             res = run_proposed(fd, cfg, parts, device, 4.0, True, mode, log=log)
         elif mode == "no_observer":
             res = run_proposed(fd, cfg, parts, device, 1.0, False, mode, log=log)

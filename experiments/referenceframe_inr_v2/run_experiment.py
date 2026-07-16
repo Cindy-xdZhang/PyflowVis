@@ -32,6 +32,11 @@ def main():
                     help="FINER first-layer bias U(+-k); default None = repo default")
     ap.add_argument("--m_base", type=int, default=24)
     ap.add_argument("--d_base", type=int, default=4)
+    ap.add_argument("--budget_frac", type=float, default=0.0,
+                    help=">0: strict-compression budget = frac * raw field bytes "
+                         "(mainExp_compress_1.1); baseline width is solved from it "
+                         "(m_base ignored), pro_budget splits it after side info; "
+                         "sizing preview: budget_calc.py")
     ap.add_argument("--k_cell", type=int, default=2)
     ap.add_argument("--tau", type=float, default=0.05)
     ap.add_argument("--absorb_min_pixels", type=int, default=0,
@@ -57,9 +62,11 @@ def main():
     args = ap.parse_args()
 
     assert args.epochs <= 2000, "hard rule: <= 2000 epochs (relaxed from 1000, user 2026-07-15)"
+    assert 0 <= args.budget_frac < 1, "budget_frac must be in [0, 1)"
     cfg = ExpCfg(field=args.field, model=args.model,
                  finer_first_bias_scale=args.finer_first_bias_scale,
                  m_base=args.m_base, d_base=args.d_base,
+                 budget_frac=args.budget_frac,
                  k_cell=args.k_cell, tau=args.tau, alloc=args.alloc,
                  absorb_min_pixels=args.absorb_min_pixels, n_windows=args.n_windows,
                  allow_full_window=args.allow_full_window,
