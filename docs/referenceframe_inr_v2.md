@@ -226,6 +226,11 @@ pro_quality 数字均为 **3B 口径**（引用须注明）；4B 自 Verify_arch
 ξ-bbox/值域/宽度 m_r）。压缩比 = 原始数据字节 / 总字节。"observer 系数代价可忽略"必须由
 数字支撑，不能只是口号。
 
+**严格压缩口径（mainExp_compress_1.1 起，2026-07-16）**：`--budget_frac f` 把预算源从
+B 换成 **f × 原始场 float32 字节**，且约束对象是**总字节（参数×4 + 边信息）**——baseline
+由预算反解宽度 m，proposed 先扣精确边信息再均分，两侧均有超预算断言。规格见 §4.4k，
+尺寸规划工具 `budget_calc.py`。
+
 ### 2.6 诊断量（每区域）
 
 - steadiness gain：var_t(ṽ)/var_t(v)（observed field 的时间方差 / 原场时间方差，越小越接近 steady）；
@@ -258,6 +263,7 @@ pro_quality 数字均为 **3B 口径**（引用须注明）；4B 自 Verify_arch
 | Other_tworotor_1.1 | 探索：双转子合成场（方法理想正例，定义见 §3 T4） | 排队中，`outputs/v23_tworotor.log` |
 | Verify_tau_1.1 | 设计选择验证：τ 敏感性（τ→N→PSNR），pro_quality vs baseline；cylinder τ∈{0.005..0.1}/absorb=64（M=21/14/4/5/3）、boussinesq τ∈{0.1..0.5}/absorb=256（M=24/21/15/7/2），2 seeds/点 | Ibex job 48814029（20 并行任务），`outputs/ibex_tausweep/` |
 | Verify_arch_1.1 | 架构变体 v_MLP0.0 / v_FINER0.0：各架构**自身** baseline vs pro_quality(**4B**)，5 场 × 2 架构 × 2 模式 × 2 种子 = 40 独立任务；**2-seed 均值协议** | §4.4j，`outputs/Verify_arch_1.1/`，Ibex job 见 §4.4j |
+| mainExp_compress_1.1 | 严格压缩口径主实验：总字节（参数+边信息）≤ {5,10,20}% × 原始场字节，各架构（coordnet/mlp）自身 baseline vs pro_budget（分区+RFT），rfc/cylinder2d/boussinesq，72 任务，2-seed 均值 | §4.4k，`outputs/mainExp_compress_1.1/`，Ibex job 48967626 |
 | （非实验）正确性验证套件 / 归一化审计 | validate_rfc.py / audit_normalization.py | §3 / §4.8 无（代码内） |
 
 （已废弃的 v2.0/v2.1/v2.2 recipe 下的运行只留档不编号，见各小节标注。）
@@ -615,6 +621,59 @@ v_FINER0.0（rfc=1e-4；大网两档 lr 如实并列，**不挑臂**；@1e-4 大
    Verify_arch_1.2 专项。
 4. 综合定位：**稳定性选 MLP（方法收益普遍）、峰值质量选 FINER baseline（但其与本方法
    的大 INR 组合暂不可用）**。gerris finer pq 重跑回收后补全此表。
+
+### 4.4k mainExp_compress_1.1：严格压缩口径（总字节 ≤ 5%/10%/20% 原始场，Ibex 部署 2026-07-16，结果待回收）
+
+**动机（用户 2026-07-16 指令）**：压缩任务要求网络明确小于流场，比旧 pro_budget 更严格
+——旧预算 B = baseline 参数量，占原始场字节 ~19-23%（rfc 18.9%、cylinder 22.7%、
+boussinesq 19.4%），且边信息不计入预算上限。本实验改为**总字节硬预算**：
+参数×4 + 边信息 ≤ frac × 原始场 float32 字节，frac ∈ {5%, 10%, 20%}（即 CR ≥
+20×/10×/5×），管线内置断言，超预算即 fail。
+
+**实现（commit 23524b1）**：
+- `budget_calc.py`（规划工具）：给定场（名字查表或 --shape）与 frac，用已验证的闭式参数
+  公式反解宽度 m；proposed 先扣**精确边信息**（cell 标签图 + killing (a,b,c)(t) +
+  每区域 bbox/值域/m_r，口径与 `run_proposed` 逐字节一致）再均分 M 份。**深度 d 冻结为
+  各场 baseline 值**（rfc 4、cyl/bouss 10），预算档只改宽度——避免深度与预算两个变量
+  混淆，保持与全部历史实验可比；`--d_sweep` 可打印宽深权衡的参考表（不改变策略）。
+- `run_experiment.py --budget_frac f`：baseline 由预算反解 m（此时 m_base 失效）；
+  pro_budget 均分 (f×场字节 − 边信息)/4（均分依据 Verify_alloc_1.1 负结果：按像素
+  比例更差）；no_observer 同口径可用（本轮未跑）；pro_quality 与 frac 组合被禁用
+  （语义不同，防标签混淆）。
+
+**协议** = Verify_arch_1.1（用户 2026-07-15 定）：epochs 2000、各架构自身 lr（coordnet
+1e-5 = v2.3 冻结 recipe；mlp 3e-4 = lr 试点选定值）、2 独立种子 {0,7777} 独立任务取
+**均值**、n_windows=2、τ/absorb 取各场记录工作点（rfc 0.05/0、cylinder2d 0.1/0、
+boussinesq 0.5/256 → M=2/5/2）。
+
+**规划尺寸（budget_calc.py 输出；bl = baseline 单网宽度 m，pro = 每区域宽度 m_r）**：
+
+| field | 原始字节 | M | 5% bl/pro | 10% bl/pro | 20% bl/pro |
+|---|---|---|---|---|---|
+| rfc (d=4) | 2,097,152 | 2 | m=12 / 8 | 17 / 12 | 24 / 17 |
+| cylinder2d (d=10) | 26,214,400 | 5 | 29 / 13 | 42 / 18 | 60 / 26 |
+| boussinesq (d=10) | 17,280,000 | 2 | 24 / 16 | 34 / 24 | 48 / 34 |
+
+锚点连续性：rfc 20% baseline（m=24,d=4）与 mainExp_2.3 rfc baseline 配置完全相同；
+cylinder 20% baseline m=60 ≈ 历史 m=64（后者 = 22.7% 预算）——20% 档与历史结果可互为
+sanity check，5%/10% 是全新的更严格压缩区间。
+
+**运行矩阵**：3 场 × 3 frac × 2 架构（coordnet = Coordinate INR baseline，mlp =
+v_MLP0.0）× 2 模式（baseline 直拟合 / pro_budget 分区+RFT）× 2 种子 = **72 独立任务**。
+脚本 `ibex_bash/refframe_v2_compress.sh`，Ibex job **48967626**（array 0-71%32，24h，
+[a100|v100]）。输出 `outputs/mainExp_compress_1.1/{field}_{model}_{mode}_f{frac}_s{seed}/`。
+
+**冒烟验证（本地 RTX3090，20 epochs，无科学意义）**：rfc coordnet f=0.05、mlp f=0.10
+跑通；字节口径与 budget_calc **逐字节一致**（pro f=0.05 总字节 96,340 = 计算器预测值）；
+两侧断言全过；validate_rfc.py 全过（本次改动未触碰 killing/partition/frame）。
+
+**已知风险（读结果时注意）**：
+1. cylinder 20% 的 coordnet baseline（m=60,d=10）处于大 SIREN 双峰区（§4.9④），2-seed
+   协议下可能种子分裂——沿用 §4.4j 的 ⚠ 标注规则（两种子差 >5 dB 时均值慎读）；mlp 侧
+   无此风险（§4.4j 读数 1：残差 ReLU 种子稳定）。
+2. coordnet 5% 档小网（m=8~16）+ lr 1e-5 有"小网低 lr 收敛慢"风险（§4.4b 窗口税同机理，
+   2000 epochs 比历史 1000 翻倍已部分缓解）；baseline 与 pro 对称受影响，架构内对比
+   仍公平，但绝对数字可能是优化受限而非容量受限。
 
 ### 4.5 "窗口为何伤 RFC"归因实验（agent，v2.1 recipe 下）
 

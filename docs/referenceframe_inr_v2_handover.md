@@ -85,6 +85,11 @@ mlp/finer 的**等参消融**（no_observer/单窗诊断）待补——目前其
    均值；lr 试点定 mlp 3e-4 / finer 1e-4，官方 FINER 5e-4 在深骨架坍缩），主文档 §1b/§4.4j。
    **协议变更**：epochs 硬上限放宽到 2000；不再强制各架构 epoch/lr 与 baseline 对齐；种子协议
    2-seed 取均值取代 best-of-k；**pro_quality 预算 3B→4B**（历史数字保持 3B 标注，§2.5）。）
+   （进展 2026-07-16：**严格压缩口径已部署 mainExp_compress_1.1**（Ibex job 48967626，
+   72 任务 = rfc/cylinder2d/boussinesq × 总字节预算 {5,10,20}%×原始场 × {coordnet,mlp} ×
+   {baseline, pro_budget 分区+RFT} × 2 种子取均值）；新工具 `budget_calc.py` 按场字节反解
+   网络尺寸（d 冻结、只调宽度 m，proposed 先扣边信息），管线 `--budget_frac` 带总字节硬断言；
+   主文档 §4.4k。）
 4. **补缺**：Other_tworotor_1.1（双转子理想正例的 INR 实验，队列中断未跑，一条命令可补：
    `python run_experiment.py --field tworotor --tau 0.05 --absorb_min_pixels 64 --m_base 24 --d_base 4 --n_seeds 3`）；
    boussinesq 本地对照的 pro 模式（Ibex 已覆盖，可选）。
