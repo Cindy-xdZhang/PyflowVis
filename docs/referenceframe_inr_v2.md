@@ -264,7 +264,8 @@ B 换成 **f × 原始场 float32 字节**，且约束对象是**总字节（参
 | Verify_tau_1.1 | 设计选择验证：τ 敏感性（τ→N→PSNR），pro_quality vs baseline；cylinder τ∈{0.005..0.1}/absorb=64（M=21/14/4/5/3）、boussinesq τ∈{0.1..0.5}/absorb=256（M=24/21/15/7/2），2 seeds/点 | Ibex job 48814029（20 并行任务），`outputs/ibex_tausweep/` |
 | Verify_arch_1.1 | 架构变体 v_MLP0.0 / v_FINER0.0：各架构**自身** baseline vs pro_quality(**4B**)，5 场 × 2 架构 × 2 模式 × 2 种子 = 40 独立任务；**2-seed 均值协议** | §4.4j，`outputs/Verify_arch_1.1/`，Ibex job 见 §4.4j |
 | mainExp_compress_1.1 | 严格压缩口径主实验：总字节（参数+边信息）≤ {5,10,20}% × 原始场字节，各架构（coordnet/mlp）自身 baseline vs pro_budget（分区+RFT），rfc/cylinder2d/boussinesq，72 任务，2-seed 均值 | §4.4k，`outputs/mainExp_compress_1.1/`，Ibex job 48967626 |
-| Verify_compresswin_1.1 | 压缩口径翻盘 sweep：boussinesq coordnet τ×lr×窗口数（**M≤3 硬约束**）+ rfc coordnet 单窗闭环，5%/10% 预算，baseline 同步 sweep lr，epochs 1000 | §4.4l，`outputs/Verify_compresswin_1.1/`，Ibex job 49000294 |
+| Verify_compresswin_1.1 | 压缩口径翻盘 sweep：boussinesq coordnet τ×lr×窗口数（**M≤3 硬约束**）+ rfc coordnet 单窗闭环，5%/10% 预算，baseline 同步 sweep lr，epochs 1000 | §4.4l，`outputs/Verify_compresswin_1.1/`，Ibex jobs 49000294 + 种子扩展 49023725 |
+| mainExp_compress_1.2 | 2.5% 字节预算档（CR≥40×），修正协议（M≤3 结构 + 场级 lr + 1000ep）：rfc/cylinder2d/boussinesq × {coordnet(2 lr 臂), mlp} × {baseline, pro}，36 任务 | §4.4m，`outputs/mainExp_compress_1.2/`，Ibex job 49025811 |
 | （非实验）正确性验证套件 / 归一化审计 | validate_rfc.py / audit_normalization.py | §3 / §4.8 无（代码内） |
 
 （已废弃的 v2.0/v2.1/v2.2 recipe 下的运行只留档不编号，见各小节标注。）
@@ -823,6 +824,29 @@ rfc（bl vs w1M1）：
 5. **种子扩展（判定 10% 平手 + 收紧 rfc 5%）**：决胜格子各 +3 种子（{1,2,3}）→ 5-seed
    均值：boussinesq {5,10}% × {bl, w2M2}@1e-4 + rfc 5% × {bl, w1M1}@3e-4，18 任务 =
    Ibex job **49023725**（commit 9070c24），结果待回收。
+
+### 4.4m mainExp_compress_1.2：2.5% 预算档（CR≥40×，修正协议；Ibex 部署 2026-07-17，结果待回收）
+
+**任务（用户 2026-07-17）**：压缩任务扩到 2.5% × 原始场字节。协议 = §4.4l 修正后版本，
+**与 §4.4k（mainExp_compress_1.1 的 5-20% 档）不可混排**（那批 lr 固定 1e-5/3e-4、
+2000ep、M 无上限；本批如下）：
+- **M≤3 硬约束 + 各场已验证最优分区结构**：rfc pro = w1M1（单窗 τ=0.05，M=1，与 bl
+  **同宽 m=8**）；cylinder pro = w2M2（2 窗 τ=0.1 **absorb=256**，干跑确认 M=[1,1]=2
+  ——旧工作点 absorb=0 的 M=5 违反 M≤3，故换）；boussinesq pro = w2M2（2 窗 τ=0.5
+  absorb=256，M=2，§4.4l 赢点结构）。
+- **场级 lr（baseline 同臂对称）**：coordnet 每场 2 臂——rfc {1e-4, 3e-4}、cylinder
+  {3e-5, 1e-4}、boussinesq {3e-5, 1e-4}（bouss 3e-4 全臂坍缩已证 §4.4l；cyl 3e-4 坍缩
+  §4.6，均不设）；mlp 单臂 3e-4（各场稳定已证）。
+- epochs 1000、2 种子 {0,7777} 均值、n_seeds=1。
+
+**规划尺寸（budget_calc --fracs 0.025）**：rfc bl/pro 均 m=8（11,426 params，bl 45,744 B）；
+cylinder bl m=21（161,794）/ pro m_r=14×2（每 INR 72,488，side 27,204 B）；boussinesq
+bl m=17（106,430）/ pro m_r=11×2（45,044×2，side 18,780 B）。全部 ≤ 2.5% 预算断言内。
+
+**运行矩阵**：coordnet 3 场 × {bl,pro} × 2 lr × 2 种子 = 24 + mlp 3 场 × {bl,pro} ×
+2 种子 = 12，共 **36 任务** = Ibex job **49025811**（commit b9ee09e，
+`ibex_bash/refframe_v2_compress25.sh`），输出
+`outputs/mainExp_compress_1.2/{field}_{model}_{mode}_f0.025_lr{LR}_s{seed}/`。
 
 用户质疑（正确）：RFC 的 killing observer 时不变，切不切窗口 observer/observed field 都一样，
 结果不该变。归因实验（`outputs/diag_agent_*.log`）：
