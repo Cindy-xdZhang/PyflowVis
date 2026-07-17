@@ -266,6 +266,8 @@ B 换成 **f × 原始场 float32 字节**，且约束对象是**总字节（参
 | mainExp_compress_1.1 | 严格压缩口径主实验：总字节（参数+边信息）≤ {5,10,20}% × 原始场字节，各架构（coordnet/mlp）自身 baseline vs pro_budget（分区+RFT），rfc/cylinder2d/boussinesq，72 任务，2-seed 均值 | §4.4k，`outputs/mainExp_compress_1.1/`，Ibex job 48967626 |
 | Verify_compresswin_1.1 | 压缩口径翻盘 sweep：boussinesq coordnet τ×lr×窗口数（**M≤3 硬约束**）+ rfc coordnet 单窗闭环，5%/10% 预算，baseline 同步 sweep lr，epochs 1000 | §4.4l，`outputs/Verify_compresswin_1.1/`，Ibex jobs 49000294 + 种子扩展 49023725 |
 | mainExp_compress_1.2 | 2.5% 字节预算档（CR≥40×），修正协议（M≤3 结构 + 场级 lr + 1000ep）：rfc/cylinder2d/boussinesq × {coordnet(2 lr 臂), mlp} × {baseline, pro}，36 任务 | §4.4m，`outputs/mainExp_compress_1.2/`，Ibex job 49025811 |
+| Verify_compresswin_1.2 | bouss {2.5,5}% × 中档 lr {3e-5..1e-4} × {bl,w1M1,w2M2} 网格补齐（skip 既有格），3 种子 | §4.4n，`outputs/Verify_compresswin_1.1/`（带 lr/种子后缀），Ibex job 49033283 |
+| Verify_compresswin_1.3 | bouss 2.5%/5% 翻盘：observer 参数化变体（consttrans/constfull/tvfull）× 字节口径 v2（N=1 免标签，pro 等宽 m17）× lr warmup，bl 对称，45 任务 | §4.4o，`outputs/Verify_compresswin_1.3/`，Ibex job 49044332 |
 | （非实验）正确性验证套件 / 归一化审计 | validate_rfc.py / audit_normalization.py | §3 / §4.8 无（代码内） |
 
 （已废弃的 v2.0/v2.1/v2.2 recipe 下的运行只留档不编号，见各小节标注。）
@@ -895,6 +897,97 @@ bl m=17（106,430）/ pro m_r=11×2（45,044×2，side 18,780 B）。全部 ≤ 
    cylinder×SIREN，cylinder×mlp 是否同豁免待用户裁定**。
 4. mlp 在 2.5% 全场大幅低于 coordnet baseline（rfc 40 vs 53、cyl 50 vs 64、bouss 46
    vs 64）——极小网下谱偏置劣势放大，mlp 不是 2.5% 档的竞争架构（但架构内 rfc 仍 +9）。
+
+### 4.4n Verify_compresswin_1.2 结果（bouss {2.5,5}% × 中档 lr 网格，job 49033283，回收 2026-07-17）
+
+**部署 skip 逻辑 bug（如实记录）**：`refframe_v2_compresswin2.sh` 的 J2 检查只按 mode 名
+（pro_budget）匹配 `mainExp_compress_1.2` 的旧目录，未区分结构 —— w1M1@2.5% × lr{1e-4,
+3e-5} × s{0,7777} 共 4 格被 **w2M2 的旧结果错误跳过**（这 4 格只有 s1 数据）。w2M2 侧的
+skip 正确（同配置）。受影响格子由 Verify_compresswin_1.3 的 tv 臂取代（新字节口径），
+残缺数据只留档。
+
+**结果（3-seed {0,7777,1} 均值 [min..max]；bl@1e-4/3e-5 的 2.5% 格与全部 5% 既有格合并
+`Verify_compresswin_1.1/` 与 `mainExp_compress_1.2/` 同协议数据）**：
+
+boussinesq f=2.5%（bl m=17 / w1M1 m_r=16（旧字节口径）/ w2M2 m_r=11×2）：
+
+| lr | bl | w1M1 | w2M2 |
+|---|---|---|---|
+| 3e-5 | 57.82 [54.84..59.36] | 54.02（仅 s1） | 47.45 |
+| 5e-5 | 60.11 [57.03..62.00] | 58.99 [56.42..60.53] | 48.55 |
+| 7e-5 | 61.43 [58.27..63.37] | 59.90 [57.13..61.34] | 51.90 |
+| 1e-4 | **62.85** [59.79..64.96] | 58.33（仅 s1；bl s1=59.79） | 53.93 |
+
+boussinesq f=5%（全臂 m 相同：bl 与 w1M1 均 m=24）：
+
+| lr | bl | w1M1 | w2M2 |
+|---|---|---|---|
+| 3e-5 | 61.19 | 61.45 [61.15..61.77] | 54.47 |
+| 5e-5 | 63.97 | 63.95 [63.71..64.40] | 59.85 |
+| 7e-5 | **66.86** [66.00..68.16] | 65.23 [63.85..66.48] | 61.87 |
+| 1e-4 | 63.83 [56.99..67.73]（5-seed） | 63.97 [57.90..67.79] | 62.65（5-seed） |
+
+**读数（判定：两档均未达标）**：
+1. **2.5%：pro 最优 59.90（w1M1@7e-5）vs bl 最优 62.85（@1e-4），差 −2.95**；每个同 lr
+   配对 w1M1 都输 1.1~1.5。结构性劣势之一：旧字节口径下 w1M1 被边信息（cell 标签图
+   8,588B + q(t) 1,536B ≈ 预算的 2.4%）压到 m_r=16，比 bl（m=17）少 11% 参数。
+2. **5%：pro 最优 65.23（w1M1@7e-5）vs bl 新最优 66.86（@7e-5），差 −1.63**。中档 lr
+   把 bl 的最优臂从 1e-4（63.83，左尾 ⚠）推高到 7e-5（66.86，种子稳）——1.2 网格
+   "中间 lr 稳住 w1M1"的赌注对 pro 生效（65.23 种子稳）但 bl 同步受益更多。
+   注意 **5% 的 w1M1 与 bl 已是等宽（都 m=24）仍输 1.6**：等宽必要但不充分。
+3. w2M2 在两档全 lr 落后 w1M1/bl ⇒ 2 窗切分结构在 ≤5% 预算档淘汰（与 §4.4m 读数 2
+   "切分成本超线性"一致）。
+4. **关键线索（通往 1.3）**：w1M1@1e-4 的好种子（5%：66.21/67.79）已超 bl 最优均值
+   66.86，输在 SIREN 高 lr 坏盆地左尾（s7777=57.90）——高 lr 天花板更高但方差大；
+   中档 lr 稳但天花板低。若能消灭左尾，1e-4 臂直接翻盘。
+
+### 4.4o Verify_compresswin_1.3：单全局 observer 变体 + 字节口径 v2 + lr warmup（Ibex job 49044332，部署 2026-07-17，结果待回收）
+
+**任务（用户 2026-07-17）**：bouss 2.5% 压缩必须打败 coordnet(SIREN) baseline；授权改
+observer（不分时间/空间窗口，单全局 observer）与 lr 等参数；新部署 ≤64 任务。
+
+**干跑诊断（`diag_agent_observer_variants.py`，无训练，本地）**——bouss 单窗全域 killing
+观察者的真实形态：
+
+| 变体 | E/E0 | ξ-bbox 膨胀 | 备注 |
+|---|---|---|---|
+| tv-full（现状 w1M1） | 0.4551 | 1.288 | c(t)=−0.035±0.005、(a,b)≈(−0.02,+0.179)：**本质是常数向上平流** |
+| tv-trans（c=0） | 0.4641 | 1.111 | 去旋转只丢 0.9% 解释能量 |
+| const-full（整窗联合 LS） | 0.4562 | 1.289 | 时变自由度只多解释 0.1% |
+| const-trans（匀速平移帧） | 0.4650 | 1.111 | Taylor 冻结湍流假说形态；边信息 8B |
+
+rfc 锚点（同脚本）：c=−0.997 常数、E/E0=3.3e-4、平移变体正确失败（E/E0=1.0）——变体
+必须按场选；bouss 属"平流主导"，rfc 属"旋转主导"。
+
+**三个修正（全部进 commit 5cb1ebc，validate_rfc T1–T5 双机全过）**：
+1. **字节口径 v2**：N=1 的窗口不存 cell 标签图（常数图，8,588B 纯浪费）；observer 按
+   参数化精确存储（tvfull Tw×3×4 / tvtrans Tw×2×4 / constfull 12B / consttrans 8B，
+   +1B 全局变体标签）⇒ **bouss 2.5% 的 pro 从 m_r=16 升到 m_r=17，与 bl 完全等宽**
+   （rfc 赢点结构）。`budget_calc.py` 同步；管线 side_planned==side_bytes 双侧断言不变。
+2. **observer 参数化变体** `--observer {tvfull,tvtrans,constfull,consttrans}`：从区域
+   已有的 LSQ 充分统计量重解（分区准则仍用 tv-full，不影响 τ-合并语义）；新增
+   `killing2d.solve_killing_trans`（2-DOF）。**validate_rfc 新增 T5**：匀速平移合成场
+   consttrans/tvtrans/constfull 恢复真值（误差 ~1e-3、E/E0=5e-5）+ 旋转场反例
+   （constfull=闭式解、平移变体 E/E0=0.99 正确失败）。
+3. **lr warmup**（`--warmup_frac`，TrainCfg 线性升温后接余弦）：针对 §4.4l/n 的 SIREN
+   高 lr 坏盆地左尾（bl 与 pro 都被 5-16 dB 拖尾），**对 baseline 对称适用**（公平）。
+
+**网格（45 任务 = 15 组合 × 3 种子 {0,7777,1}，`ibex_bash/refframe_v2_compresswin3.sh`，
+job 49044332，6h 墙钟 [a100|v100]；协议 = §4.4l 修正版：coordnet、1000ep、2 窗 bl /
+单窗 M=1 pro、τ=0.5、absorb=256、均值 [min..max] 口径）**：
+
+- 2.5%（9 组合）：bl × {1e-4, 1.5e-4} × wu0.1 + bl 1.5e-4 wu0；ct(consttrans) ×
+  {1e-4, 1.5e-4} × wu0.1 + ct 1e-4 wu0；cf(constfull) 1e-4 wu0.1；tv(tvfull 新口径
+  m=17) × 1e-4 × {wu0, wu0.1}。
+- 5%（6 组合）：{bl, ct} × {7e-5, 1e-4, 1.5e-4} × wu0.1。
+- 归因链设计：ct−tv = observer 常数平移化的贡献；tv(m17)−旧 w1M1(m16) = 等宽的贡献；
+  wu0.1−wu0 = warmup 的贡献；cf−ct = 保留旋转 DOF 的价值。bl 侧同 grid 扫 lr×warmup,
+  判定口径 = 3-seed 均值最优对最优。
+- 既有同协议格子不重跑（bl 2.5%@1e-4 wu0、bl 5%@{7e-5,1e-4} wu0 引自 §4.4n 表）。
+- 任务预算：本轮新部署 45 ≤ 64（用户上限），余 19 留第二波（若 1.5e-4+warmup 仍坍缩
+  或差距未闭合）。
+
+### 4.5 RFC 窗口税归因（v2.1/v2.2 recipe 时期的历史记录，被 §4.4b 引用）
 
 用户质疑（正确）：RFC 的 killing observer 时不变，切不切窗口 observer/observed field 都一样，
 结果不该变。归因实验（`outputs/diag_agent_*.log`）：
