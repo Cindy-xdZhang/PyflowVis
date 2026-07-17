@@ -140,6 +140,31 @@ def solve_killing(AtA: np.ndarray, g: np.ndarray, e0: np.ndarray,
     return q, np.maximum(E, 0.0)
 
 
+def solve_killing_trans(AtA: np.ndarray, g: np.ndarray, e0: np.ndarray,
+                        ridge_rel: float = 1e-12) -> tuple[np.ndarray, np.ndarray]:
+    """Translation-only (2-DOF) observer LS: solve the leading 2x2 block of the
+    Killing system with c fixed to 0. Returns q as (..., 3) with q[..., 2] = 0 so
+    downstream frame integration works unchanged. Same ridge/degenerate handling
+    as solve_killing."""
+    AtA = np.asarray(AtA, dtype=np.float64)
+    g = np.asarray(g, dtype=np.float64)
+    A2 = AtA[..., :2, :2]
+    g2 = g[..., :2]
+    tr = np.trace(A2, axis1=-2, axis2=-1)
+    lam = ridge_rel * (tr / 2.0) + 1e-300
+    M = A2 + lam[..., None, None] * np.eye(2)
+    try:
+        q2 = np.linalg.solve(M, -g2[..., None])[..., 0]
+    except np.linalg.LinAlgError:
+        q2 = np.stack([np.linalg.lstsq(m, -gv, rcond=None)[0]
+                       for m, gv in zip(M.reshape(-1, 2, 2), g2.reshape(-1, 2))])
+        q2 = q2.reshape(g2.shape)
+    E = e0 + np.einsum("...i,...i->...", q2, g2)
+    q = np.zeros(g.shape[:-1] + (3,))
+    q[..., :2] = q2
+    return q, np.maximum(E, 0.0)
+
+
 def region_solve(stats: CellStats, cell_ids: np.ndarray, it0: int, it1: int
                  ) -> tuple[np.ndarray, float, float]:
     """Killing solve for a region = set of flat cell ids, over window [it0, it1).

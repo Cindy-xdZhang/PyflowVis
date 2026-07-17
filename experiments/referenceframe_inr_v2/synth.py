@@ -64,6 +64,22 @@ def true_killing_params(omega0: float, c0) -> tuple[float, float, float]:
     return (-omega0 * float(c0[1]), omega0 * float(c0[0]), -omega0)
 
 
+def compose_translating_frame(s_fn, ab0, xs: np.ndarray, ys: np.ndarray,
+                              ts: np.ndarray) -> np.ndarray:
+    """Steady pattern advected by a uniformly translating frame (Taylor frozen form):
+        v(x, t) = s(x - ab0 * t) + ab0
+    The translation-only observer u = ab0 (a = ab0_x, b = ab0_y, c = 0) steadies it
+    exactly. Returns (T, Y, X, 2)."""
+    a0, b0 = float(ab0[0]), float(ab0[1])
+    Xg, Yg = np.meshgrid(xs, ys)
+    out = np.empty((len(ts), len(ys), len(xs), 2))
+    for i, t in enumerate(ts):
+        s = s_fn(Xg - a0 * float(t), Yg - b0 * float(t))
+        out[i, ..., 0] = s[..., 0] + a0
+        out[i, ..., 1] = s[..., 1] + b0
+    return out
+
+
 def offset_pair_steady(c, d: float = 0.32, sigma: float = 0.24, strength: float = 2.0):
     """A steady pattern with NO rotational symmetry about c: a +swirl at c+(d,0) and a
     -swirl at c-(d,0). (A single gaussian swirl centered at the camera center is

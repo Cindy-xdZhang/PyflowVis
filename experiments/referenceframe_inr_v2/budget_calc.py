@@ -77,14 +77,24 @@ def raw_bytes(shape) -> int:
 
 
 def side_info_bytes(shape, n_inrs: int, n_windows: int = 2, k_cell: int = 2,
-                    use_observer: bool = True) -> int:
+                    use_observer: bool = True, observer: str = "tvfull") -> int:
     """Mirror of pipeline.run_proposed side-info accounting (planning estimate;
-    exact when windows are equal length and regions spread evenly)."""
+    exact when windows are equal length and regions spread evenly).
+
+    Byte-accounting v2 (Verify_compresswin_1.3): windows whose partition has N == 1
+    store NO label map (it is constant); the observer parameterization determines
+    the killing-parameter bytes (tvfull Tw*3*4, tvtrans Tw*2*4, constfull 12,
+    consttrans 8 per region) plus one global variant tag byte. The planning
+    estimate assumes regions spread evenly over windows, so N == 1 per window
+    exactly when n_inrs == n_windows."""
     t, y, x, _ = shape
     n_cells = math.ceil(y / k_cell) * math.ceil(x / k_cell)
-    labels = n_cells * 2 * n_windows                       # uint16 label map / window
+    n_per_window = max(1, n_inrs // n_windows)
+    labels = 0 if n_per_window == 1 else n_cells * 2 * n_windows
     tw = math.ceil(t / n_windows)
-    killing = n_inrs * tw * 3 * 4 if use_observer else 0   # (a,b,c)(t) float32
+    obs_b = {"tvfull": tw * 3 * 4, "tvtrans": tw * 2 * 4,
+             "constfull": 3 * 4, "consttrans": 2 * 4}[observer]
+    killing = n_inrs * obs_b + 1 if use_observer else 0    # + variant tag byte
     per_region = n_inrs * ((4 + 4) * 4 + 2)                # xi bbox + v range + m_r
     return labels + killing + per_region
 
@@ -102,9 +112,10 @@ def plan_baseline(shape, frac: float, d: int) -> dict:
 
 
 def plan_proposed(shape, frac: float, d: int, n_inrs: int, n_windows: int = 2,
-                  k_cell: int = 2, use_observer: bool = True) -> dict:
+                  k_cell: int = 2, use_observer: bool = True,
+                  observer: str = "tvfull") -> dict:
     xb = raw_bytes(shape)
-    side = side_info_bytes(shape, n_inrs, n_windows, k_cell, use_observer)
+    side = side_info_bytes(shape, n_inrs, n_windows, k_cell, use_observer, observer)
     budget_p_total = int((frac * xb - side) // 4)
     share = budget_p_total // n_inrs
     m_r = pick_m_for_budget(share, d)

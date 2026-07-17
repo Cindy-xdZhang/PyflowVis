@@ -79,6 +79,11 @@ class TrainCfg:
     min_steps_per_epoch: int = 64  # v2.3: batch shrinks so steps/epoch >= this
     lr: float = 1e-5
     lr_final: float = 1e-6         # cosine-decay target; == lr disables the schedule
+    warmup_frac: float = 0.0       # >0: first warmup_frac*epochs ramp lr linearly
+                                   # 0 -> lr, then cosine to lr_final. Targets the
+                                   # SIREN high-lr bad-basin left tail (par.4.4l:
+                                   # early-epoch divergence at lr >= 1e-4); applied
+                                   # symmetrically to baseline and proposed.
     grad_clip: float = 1.0         # 0 disables
     weight_decay: float = 1e-6
     betas: tuple = (0.9, 0.999)
@@ -135,9 +140,13 @@ def train_inr(coords_n: np.ndarray, values_n: np.ndarray, m: int, d: int,
 
     t0 = time.time()
     last_mse, best_mse = float("inf"), float("inf")
+    wu = int(cfg.warmup_frac * cfg.epochs)
     for ep in range(cfg.epochs):
-        cur_lr = cfg.lr_final + 0.5 * (cfg.lr - cfg.lr_final) * (
-            1.0 + math.cos(math.pi * ep / max(1, cfg.epochs - 1)))
+        if ep < wu:
+            cur_lr = cfg.lr * (ep + 1) / wu
+        else:
+            cur_lr = cfg.lr_final + 0.5 * (cfg.lr - cfg.lr_final) * (
+                1.0 + math.cos(math.pi * (ep - wu) / max(1, cfg.epochs - 1 - wu)))
         for gparam in opt.param_groups:
             gparam["lr"] = cur_lr
         perm = torch.randperm(n, generator=gen).to(device)

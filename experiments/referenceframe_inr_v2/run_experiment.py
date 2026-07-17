@@ -48,11 +48,21 @@ def main():
                     help=">0: fail if the partition yields more total INRs than this")
     ap.add_argument("--allow_full_window", action="store_true",
                     help="DIAGNOSTIC: permit n_windows=1 (violates the <=T/2 spec rule)")
+    ap.add_argument("--observer", default="tvfull",
+                    choices=["tvfull", "tvtrans", "constfull", "consttrans"],
+                    help="observer parameterization (Verify_compresswin_1.3): "
+                         "tvfull = per-timestep (a,b,c)(t) [historical default]; "
+                         "tvtrans = per-timestep translation, c=0; constfull = one "
+                         "(a,b,c) per (window, region); consttrans = one (a,b), c=0")
     ap.add_argument("--epochs", type=int, default=1000)
     ap.add_argument("--batch_size", type=int, default=32000)
     ap.add_argument("--min_steps_per_epoch", type=int, default=64)
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--lr_final", type=float, default=1e-6)
+    ap.add_argument("--warmup_frac", type=float, default=0.0,
+                    help=">0: linear lr warmup over this fraction of epochs before "
+                         "the cosine decay (targets SIREN high-lr bad basins; apply "
+                         "symmetrically to baseline and proposed)")
     ap.add_argument("--grad_clip", type=float, default=1.0)
     ap.add_argument("--log_every", type=int, default=100,
                     help="epoch-MSE print interval (use a small value for smoke runs)")
@@ -72,9 +82,11 @@ def main():
                  k_cell=args.k_cell, tau=args.tau, alloc=args.alloc,
                  absorb_min_pixels=args.absorb_min_pixels, n_windows=args.n_windows,
                  allow_full_window=args.allow_full_window, max_inrs=args.max_inrs,
+                 observer=args.observer,
                  min_steps_per_epoch=args.min_steps_per_epoch,
                  epochs=args.epochs, batch_size=args.batch_size, lr=args.lr,
-                 lr_final=args.lr_final, grad_clip=args.grad_clip,
+                 lr_final=args.lr_final, warmup_frac=args.warmup_frac,
+                 grad_clip=args.grad_clip,
                  log_every=args.log_every,
                  seed=args.seed, n_seeds=args.n_seeds, device=args.device,
                  out_dir=str(Path(args.out_dir) / args.field),

@@ -26,7 +26,8 @@ for pth in (str(_ROOT), str(_HERE)):
         sys.path.insert(0, pth)
 
 import synth  # noqa: E402
-from killing2d import compute_cell_stats, region_solve  # noqa: E402
+from killing2d import compute_cell_stats, region_solve, solve_killing, \
+    solve_killing_trans  # noqa: E402
 from partition import merge_partition, split_windows  # noqa: E402
 from frame import make_region_samples, scatter_reconstruction, rot  # noqa: E402
 
@@ -182,11 +183,75 @@ def t4_two_rotor():
               f"cL={cL:.3f} (want {-omega1}), cR={cR:.3f} (want {-omega2})")
 
 
+# ---------------------------------------------------------------------------
+def t5_observer_variants():
+    """T5 (Verify_compresswin_1.3): observer parameterization variants.
+
+    Manufactured uniformly-translating field v = s(x - ab0 t) + ab0: the
+    translation-only observer (a, b) = ab0, c = 0 steadies it exactly, so
+      - consttrans / tvtrans must recover ab0 with E/E0 << 1,
+      - constfull must recover (ab0, c ~ 0),
+    and on the T1 rotating-frame field the const-full observer must match the
+    (time-invariant) tv-full solution while translation-only must FAIL (E/E0 ~ 1)
+    -- rotation cannot be explained by translation."""
+    print("T5: observer variants (translation-only / time-constant)")
+    xs = np.linspace(-2, 2, 96)
+    ys = np.linspace(-2, 2, 96)
+    ts = np.linspace(0, 2.0, 48)
+    ab0 = (0.4, -0.25)
+    s_fn = synth.gauss_vortex_steady(-0.3, 0.2, sigma=0.45, strength=1.5)
+    data = synth.compose_translating_frame(s_fn, ab0, xs, ys, ts)
+    dt = float(ts[1] - ts[0])
+    stats = compute_cell_stats(data, xs, ys, dt, k=2, boundary_skip=2)
+    AtA = stats.AtA.sum(axis=(1, 2))
+    g = stats.g.sum(axis=(1, 2))
+    e0 = stats.e0.sum(axis=(1, 2))
+    E0 = float(e0.sum())
+
+    q_ct, _ = solve_killing_trans(AtA.sum(0), g.sum(0), e0.sum())
+    E_ct = float(e0.sum() + q_ct @ g.sum(0))
+    err_ct = np.abs(q_ct[:2] - np.asarray(ab0)).max()
+    check("consttrans recovers (a,b) = ab0", err_ct < 5e-3,
+          f"q=({q_ct[0]:+.4f}, {q_ct[1]:+.4f}) vs {ab0}, err={err_ct:.2e}")
+    check("consttrans steadies the field: E/E0 << 1", E_ct / E0 < 1e-2,
+          f"E/E0={E_ct / E0:.2e}")
+
+    q_tv, E_tv = solve_killing_trans(AtA, g, e0)
+    err_tv = np.abs(q_tv[:, :2] - np.asarray(ab0)).max()
+    check("tvtrans per-timestep (a,b) ~ ab0", err_tv < 1e-2,
+          f"max err={err_tv:.2e}; E/E0={float(E_tv.sum()) / E0:.2e}")
+
+    q_cf, _ = solve_killing(AtA.sum(0), g.sum(0), e0.sum())
+    check("constfull recovers (ab0, c ~ 0)",
+          np.abs(q_cf[:2] - np.asarray(ab0)).max() < 5e-3 and abs(q_cf[2]) < 5e-3,
+          f"q=({q_cf[0]:+.4f}, {q_cf[1]:+.4f}, {q_cf[2]:+.2e})")
+
+    # counter-control on the T1 rotating field: translation-only cannot explain it
+    omega0, c0 = 0.7, (0.3, -0.2)
+    xs2 = np.linspace(-2, 2, 96)
+    ts2 = np.linspace(0, 2 * np.pi, 64)
+    data2 = synth.compose_rotating_frame(synth.four_cell_steady, omega0, c0, xs2, xs2, ts2)
+    st2 = compute_cell_stats(data2, xs2, xs2, float(ts2[1] - ts2[0]), k=2, boundary_skip=2)
+    A2, g2, e2 = st2.AtA.sum(axis=(1, 2)), st2.g.sum(axis=(1, 2)), st2.e0.sum(axis=(1, 2))
+    E0_2 = float(e2.sum())
+    truth = np.array(synth.true_killing_params(omega0, c0))
+    q_cf2, _ = solve_killing(A2.sum(0), g2.sum(0), e2.sum())
+    E_cf2 = float(e2.sum() + q_cf2 @ g2.sum(0))
+    check("rotating field: constfull == closed-form observer",
+          np.abs(q_cf2 - truth).max() < 2e-2 and E_cf2 / E0_2 < 1e-2,
+          f"q={q_cf2.round(4)} vs true={truth.round(4)}, E/E0={E_cf2 / E0_2:.2e}")
+    q_ct2, _ = solve_killing_trans(A2.sum(0), g2.sum(0), e2.sum())
+    E_ct2 = float(e2.sum() + q_ct2 @ g2.sum(0))
+    check("rotating field: translation-only must fail (E/E0 ~ 1)",
+          E_ct2 / E0_2 > 0.5, f"E/E0={E_ct2 / E0_2:.2f}")
+
+
 if __name__ == "__main__":
     t1_manufactured()
     t2_rfc()
     t3_roundtrip()
     t4_two_rotor()
+    t5_observer_variants()
     print()
     if _failures:
         print(f"FAILED: {len(_failures)} check(s): {_failures}")
