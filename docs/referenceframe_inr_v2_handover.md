@@ -1,120 +1,114 @@
-# 交接文档：Reference-Frame 分区 INR 压缩 v2（session 2026-07-12 ~ 07-15）
+# 交接文档：Reference-Frame 分区 INR 压缩 v2（更新至 session 2026-07-16 ~ 07-17）
 
-> 下一个 session 从这里开始读。详细规格/全部数字/出处在
+> 下一个 session 从这里开始读。规格/全部数字/出处在
 > [referenceframe_inr_v2.md](referenceframe_inr_v2.md)（下称"主文档"），本文只讲脉络。
+> 上一版 handover（session 07-12~15 的 v2 重写与 Verify_arch_1.1 部署）见 git 历史
+> `git show 082199b:docs/referenceframe_inr_v2_handover.md` 之前的版本；其"已完成/教训"
+> 均已并入主文档 §1-§4.9，本文不再复述。
 
-## 1. 本 session 的任务
+## 0. 用户定的硬规则（违反 = 返工，全部有明示出处）
 
-用户对之前 session 的代码与结论**全部不信任**，要求：
-1. 重读基础材料（CoordNet 论文 + optimal-connection 的参考系理论文档）；
-2. 检验旧 session 复现的 CoordNet baseline（`CoordNetCompression.py`）；
-3. **完全重写** proposed 方法（τ-合并区域分区 + 每区域 killing observer + pushforward +
-   每区域 INR，对比 baseline），并用 RFC（rotation four center，旋转四涡心解析场——一个
-   steady 场叠加全局旋转相机构成的非定常场）做正确性锚点：任意时间窗口必须得到 N=1。
-4. 中途追加：部署 Ibex 跨机复现验证本地→集群工作流；τ 敏感性实验；最大化并行（种子拆独立任务）。
+1. **验收标准（2026-07-16）**：只接受 cylinder2d 上 proposed 无法提高 coordnet（SIREN）；
+   **其他数据集上 proposed 不得比对应架构的纯 INR baseline 更差**。
+   （cylinder×mlp 是否同豁免未裁定——字面只豁免 SIREN，待问用户。）
+2. **压缩实验总 INR 数 M ≤ 3**（预算/M 太小则每网无拟合能力）；管线 `--max_inrs 3`
+   硬保护，分区超限直接报错。
+3. **"每窗长 ≤ T/2（即 ≥2 窗）"规则已解除**——M=1 需要单窗，`--allow_full_window` 转正。
+4. **压缩实验 epochs 1000 足够**（全局硬上限 ≤2000 仍在，run_experiment.py 断言）。
+5. **种子 ≤3（2026-07-17，"算力不要钱吗"）**：标准组 {0, 7777, 1}，报 均值+[min..max]；
+   不允许靠加种子解决分裂——选稳定臂并如实标注。
+6. 沿用：结论可追溯不许静默翻转；修订必须新旧并列；大改 killing/partition/frame 后必须
+   重跑 validate_rfc.py；epochs 硬上限 2000。
 
-## 2. 已完成
+## 1. 本 session 完成的
 
-### 代码（全部在 `experiments/referenceframe_inr_v2/`，git main 分支）
-- `killing2d.py` 2D killing（刚体）observer 最小二乘（独立重推导，cell 级统计 O(1) 合并）；
-- `partition.py` 自底向上 τ-合并（**残差比准则** ρ=E/E0≤τ）+ 可选小区域吸收（absorb_min_pixels）；
-- `frame.py` 帧积分 + pushforward + 逆变换（训练样本=区域像素的精确 pullback，无插值/无 blend）；
-- `inr.py` 训练（v2.3 冻结 recipe + best-of-k seeds）、预算→网宽闭式公式；
-- `models_alt.py` INR 架构变体 **v_MLP0.0**（残差 ReLU）/ **v_FINER0.0**（FINER 变周期
-  sine），`run_experiment.py --model {coordnet,mlp,finer}` 选择；与 CoordNet 骨架逐层同形
-  ⇒ 参数量公式/预算口径不变（主文档 §1b；仅冒烟验证，无正式数字）；
-- `pipeline.py` 四模式管线（baseline / pro_budget / pro_quality / no_observer 消融）+ 数据加载
-  （`PYFLOWVIS_DATA2D` 环境变量指数据目录）；
-- `validate_rfc.py` 正确性验证套件（T1 闭式解收敛 / T2 RFC N=1 / T3 往返 1e-15 / T4 双转子反例）；
-- `audit_normalization.py` 归一化审计（所有输入链路 [-1,1]、eval==train 坐标）；
-- `viz_partition.py` 分区可视化。
-- Ibex 脚本：`ibex_bash/refframe_v2_repro.sh`（单任务复现）、`refframe_v2_sweep.sh`、
-  `refframe_v2_tausweep.sh`（array 并行，一任务=一(数据集,模式,τ,种子)）。
+### 代码（commits 23524b1 → 082199b，全部在 main）
+- `budget_calc.py`：按流场字节 × frac 反解 CoordNet 骨架 (m,d)（d 冻结只调宽度；
+  proposed 先扣与管线逐字节一致的边信息再均分）。
+- `pipeline.py`/`run_experiment.py`：`--budget_frac`（总字节 = 参数×4+边信息 ≤ frac×场
+  字节，双侧断言；pro_quality 禁用）；`--max_inrs`。
+- Ibex 脚本：`refframe_v2_compress.sh`（5/10/20%）、`refframe_v2_compresswin.sh`
+  （τ×lr×窗口 sweep）、`refframe_v2_compresswin_seedext.sh`、`refframe_v2_compress25.sh`
+  （2.5%）、`refframe_v2_compresswin2.sh`（bouss 网格补齐，跳过已有格）。
 
-### 实验（命名按组内规则，主文档 §4.0 对照表；全部可从日志复算）
-- **mainExp_2.3**：rfc / cylinder2d / boussinesq 四模式，本地 + Ibex 双机；
-- **Verify_window_2.1/2.3**：时间窗口代价归因（单窗诊断）；
-- **Verify_seedstability_1.1**：cylinder baseline 8 独立种子分布（Ibex 并行）；
-- **Verify_alloc_1.1**：预算均分 vs 按像素比例（负结果）；
-- **Verify_tau_1.1**：τ 敏感性 5 点×2 数据集×2 种子（Ibex 20 并行任务）。
+### 实验（全部零失败；出处 = 主文档小节 + outputs 目录 + job 号）
+| 实验 | 内容 | job | 状态 |
+|---|---|---|---|
+| mainExp_compress_1.1（§4.4k） | 5/10/20% × {coordnet,mlp} × {bl,pro} × 3 场，72 任务（旧协议：lr 固定、2000ep、M 无上限） | 48967626 | 已回收 |
+| Verify_compresswin_1.1（§4.4l） | bouss τ×lr×窗口 sweep（M≤3）+ rfc 单窗闭环，120 任务 + 种子扩展 18 | 49000294 / 49023725 | 已回收 |
+| mainExp_compress_1.2（§4.4m） | 2.5% 档修正协议，36 任务 | 49025811 | 已回收 |
+| Verify_compresswin_1.2（§4.4m 读数 2 后续） | bouss {2.5,5}% × lr{3e-5,5e-5,7e-5,1e-4} × {bl,w1M1,w2M2} × 3 种子，超额种子已 scancel | **49033283** | **在跑，待回收** |
+| （附带）Verify_arch_1.1 gerris finer pq 低 lr 重跑回收，§4.4j 表补全 | | 48965055/56 | 已回收 |
 
-### 基础检验
-- CoordNet baseline 逐条对论文核对通过（主文档 §1），参数量闭式公式与实测一致；
-- 验证套件 + 归一化审计在 Windows/RTX3090/cu126 与 Linux/V100|A100/cu118 双平台全过；
-- 本地→Ibex 工作流全链路验证（push→pull→数据路径→sbatch→日志回收）；rfc 六数字双机 ≤0.25 dB。
+## 2. 当前记分板（对照验收标准；证据 = 主文档 §4.4k/l/m）
 
-## 3. 关键发现（详见主文档 §4.9-final，逐条有出处）
+| 场 × coordnet | 2.5% | 5% | 10% |
+|---|---|---|---|
+| rfc | ✓ +11.4（同 lr 全胜） | ✓ +7.75（3-seed；pro 最差种子 > bl 中位） | ✓ +12.2（种子稳） |
+| boussinesq | ✗ −11.9（w2M2；w1M1 在跑） | ✗ −1.61（3-seed；pro 稳但均值低） | ✓ +4.91（3-seed；bl 有坏盆地左尾，pro 极稳） |
+| cylinder2d | 豁免（−7.3） | 豁免 | 豁免 |
 
-**⚠️ 项目叙事修订（2026-07-16，用户定，主文档 §0b）**：Story v1"RFT 提高 SIREN/CoordNet"
-→ Story v2"**RFT 是架构无关的增益模块：任意架构 INR + RFT 有一定提高**"。原因：SIREN 系
-（频域）网络天生擅长 cylinder 类涡街窄带振荡场（FINER 直拟合 73.7 > 一切 pro 配置），在其上
-叠 RFT 提不动；而架构对照显示增益在非频域架构（残差 ReLU）上更普遍（4/5 场胜）。关键缺口：
-mlp/finer 的**等参消融**（no_observer/单窗诊断）待补——目前其增益是 4B-quality 口径。
+- **rfc 全档闭合**，赢点 = **w1M1**（单窗全局 observer，M=1，与 bl 等宽）+ lr 3e-4。
+- **bouss 赢点结构 = w2M2**（2 窗每窗全局 observer）+ lr 1e-4，但只在 10% 达标；
+  5% 差 −1.6，2.5% 因 2 窗切分（m_r=11 vs bl m=17）大输 → 在跑的 1.2 网格赌两点：
+  ①中间 lr（5e-5/7e-5）稳住 w1M1（其 1e-4 好种子 66.2 > bl 均值但分裂）；②2.5% 用
+  w1M1 无切分近等宽（m=16 vs bl 17）。
+- mlp：rfc 全档大胜（+7~+9），bouss/cyl 全输且 2.5% 档 mlp baseline 本身远弱于
+  coordnet（谱偏置），不是压缩口径的竞争架构。
 
-**科学结论**：
-1. **observer 变换核心机制成立**：等参数等步数增益 rfc +5.2~5.4 dB ≫ boussinesq +1.6 > cylinder
-   +0.7~0.8，排序与免训练的 E/E0 指标一致 ⇒ E/E0 是先验适用性判据。RFC N=1 锚点双机验证。
-2. **真实数据首个胜点**：boussinesq τ=0.5（每窗一个全局 observer + 1.5B INR）70.43 >
-   baseline 68.47（quality 口径）。τ 曲线两数据集一致：**收益来自大区域/全局 observer，
-   细粒度切分是净负贡献**。
-3. 固定"≥2 时间窗"规则 = 5-6 dB 优化税（非方法本质）；压缩口径（pro_budget）目前全面落后。
+## 3. 本 session 的方法学发现（写论文/设计实验都要用）
 
-**方法学教训（比数字更值钱）**：
-4. **大 SIREN 双峰不稳定**：m=64,d=10 的 CoordNet 种子间极差 22.4 dB（好盆地≈70 vs 坏盆地
-   49-63），两个真实数据集复现。**大网数字必须 ≥8 独立种子报分布**；本仓库两次"结论翻转"
-   （v2.1→v2.2、本地→Ibex baseline）皆源于此。
-5. **recipe 必须按"步数"思考而非 epochs**：数据集/区域间每 epoch 步数差百倍——v2.0 照搬论文
-   （欠训练 3 个量级）→ v2.1/2.2 高 lr（大网坍缩到均值流吸引子）→ v2.3 自适应 batch
-   （每 INR ≥64 步/epoch）+ lr 1e-5 才两头兼顾。
-6. 增量式合并准则会被"切香肠"击穿（T4 反例抓到，改残差比准则）；按像素比例分配预算会饿死
-   小而剧烈的区域（−4.4 dB，Verify_alloc_1.1 负结果）。
+1. **lr 是此前"压缩口径全输"的主因**：小网最优 lr = bouss 1e-4 / rfc 3e-4，比冻结
+   recipe 的 1e-5 高 6-12 dB；调对后 10% 预算 baseline（69.8）超过历史 22.7% 预算
+   baseline（68.5）⇒ §4.4k 的绝对数字系统性偏低（架构内方向仍有效），论文口径用
+   修正协议数字。
+2. **均值流坍缩是数据依赖的，不是大网专属**：bouss @3e-4 连 m=17/24 都全臂坍缩
+   （23.4-23.7），rfc 同 lr 完全健康 ⇒ lr 必须按（场,规模）选，且稳定性检查要用与
+   部署一致的调度长度（§4.4j 教训 3）。
+3. **切分成本随预算收紧超线性**：bouss w2M2 5%→2.5% 从 −1.6 恶化到 −11.9 ⇒ 最严预算
+   下唯一可行结构是 M=1 无切分（rfc 已证）。
+4. **小网 SIREN 也有坏盆地左尾**（bouss@1e-4 bl：5 种子里 1 个塌 5-16 dB）——曾把
+   2-seed 符号翻两次（§4.4l 修订块，新旧并列）。在 ≤3 种子规则下的对策：报
+   [min..max]、优先选种子稳的臂（pro w2M2/w1M1@低 lr 天然更稳，这本身是卖点：
+   **observed field 训练更稳**，§4.4 也见过）。
+5. 最优窗口结构场依赖：rfc（observer 时不变）单窗；bouss 双窗。自适应窗口数（§4.9⑤b）
+   仍是正确的方法化方向。
 
 ## 4. 下一步（按优先级）
 
-0. **Story v2 的归因链补全（新增，2026-07-16）**：给 v_MLP0.0 / v_FINER0.0 补等参消融
-   （no_observer 同分区同预算、单窗 observed field 诊断，协议照 §4.4b），把"任意架构 +
-   RFT ⇒ 提高"从 quality 口径升级为等参归因；FINER×observed field 稳定化 = Verify_arch_1.2。
-1. **方法修正——自适应窗口数**：时间轴做与空间同构的自底向上合并（RFC 应自动得 1 窗），
-   消除 5-6 dB 窗口税。这是把 §4.9 结论转化为方法改进的最直接一步。
-2. **把"少而大区域"做成正式方法**：τ-合并作为"该场需要几个 observer"的检测器（取小 M 端），
-   而非细分工具；boussinesq 的 70.43 胜点提示"每窗全局 observer"可能是最实用形态。
-3. **压缩口径翻盘的前提**：大网稳定性（初始化/训练方案，如 SIREN 频率调度、warmup、或换
-   FF+ReLU 对照）+ "比例+容量下限"的预算分配。不解决这两个，pro_budget 无法与 baseline 竞争。
-   （进展 2026-07-15：v_MLP0.0 / v_FINER0.0 已部署 **Verify_arch_1.1**（Ibex jobs：baseline
-   48900605 + pro_quality 48901021，40 任务：5 场 × 2 架构 × baseline/pro_quality × 2 种子取
-   均值；lr 试点定 mlp 3e-4 / finer 1e-4，官方 FINER 5e-4 在深骨架坍缩），主文档 §1b/§4.4j。
-   **协议变更**：epochs 硬上限放宽到 2000；不再强制各架构 epoch/lr 与 baseline 对齐；种子协议
-   2-seed 取均值取代 best-of-k；**pro_quality 预算 3B→4B**（历史数字保持 3B 标注，§2.5）。）
-   （进展 2026-07-16：**严格压缩口径已部署 mainExp_compress_1.1**（Ibex job 48967626，
-   72 任务 = rfc/cylinder2d/boussinesq × 总字节预算 {5,10,20}%×原始场 × {coordnet,mlp} ×
-   {baseline, pro_budget 分区+RFT} × 2 种子取均值）；新工具 `budget_calc.py` 按场字节反解
-   网络尺寸（d 冻结、只调宽度 m，proposed 先扣边信息），管线 `--budget_frac` 带总字节硬断言；
-   主文档 §4.4k。）
-4. **补缺**：Other_tworotor_1.1（双转子理想正例的 INR 实验，队列中断未跑，一条命令可补：
-   `python run_experiment.py --field tworotor --tau 0.05 --absorb_min_pixels 64 --m_base 24 --d_base 4 --n_seeds 3`）；
-   boussinesq 本地对照的 pro 模式（Ibex 已覆盖，可选）。
-5. 更多数据集（beads2d、doublegyre2d、pipedcylinder2d、gerris 系列——`pipeline.load_field`
-   已支持 gerris0..7）铺 E/E0→observer 增益的相关性曲线，坐实先验判据。
+1. **回收 Verify_compresswin_1.2（job 49033283）**：按 3-seed 口径出 bouss 5%/2.5% 的
+   最终判定表（同 lr 配对 + 最优对最优）。若 w1M1 中间 lr 仍不达标：向用户汇报"bouss
+   压缩口径的诚实边界 = 10%+"，并问是否接受（validated 的 10% 胜点 + rfc 全胜 + §4.9
+   的 E/E0 先验判据已构成完整故事）。
+2. **cylinder×mlp 豁免问题问用户**（字面标准只豁免 SIREN）。
+3. Story v2 归因链缺口（上一 session 遗留）：mlp/finer 的等参消融（no_observer、单窗
+   observed 诊断）；FINER×observed field 稳定化 = Verify_arch_1.2（lr 线索已有：pq 大
+   INR 3e-5 分裂 / 1e-5 稳，§4.4j 读数 5c）。
+4. 把 2.5-20% 的 rate-distortion 曲线统一到修正协议（20% 档目前只有旧协议数字）。
+5. 更多数据集铺 E/E0→增益相关性（gerris 系列已支持）。
 
-## 5. 交接注意事项（陷阱清单）
+## 5. 陷阱清单（新增项在前，旧项仍有效）
 
-- **凡引用大网络（m≳49）的单次 PSNR 都不可信**，先查该运行的 seed spread（日志里
-  `best-of-k ... spread` 行）；对比实验两侧协议必须相同（per-INR 取优 vs run 级取优有差别）。
-- 改动 `killing2d/partition/frame` 后**必须重跑 `validate_rfc.py`**；改归一化相关代码后重跑
-  `audit_normalization.py`。
-- τ 与 absorb_min_pixels 有交互：absorb=256 会把 cylinder 所有 τ 压成 N=1（cylinder 用 64）。
-- Ibex：数据在 `~/DeepVortex/FLowDataFolder/`（boussinesq.nc 本 session 已上传）；提交前核对
-  **实验用到的每个数据文件**都在；sbatch 脚本保持 LF；种子/模式拆独立 array 任务（用户明确
-  要求，最多 32 卡）；python 失败要 `|| exit 1` 否则 Slurm 谎报 COMPLETED。
-- 本地长队列用后台链 + 磁盘 done 标记文件；Claude 进程重启会杀死后台链，重启后按 done 文件
-  断点续排。
-- 旧目录 `experiments/referenceframe_inr/`（v1）与其文档仅作踩坑参考，**禁止引用其数字**。
+- **种子 ≤3 硬规则**：任何新实验不得超 3 种子；已有 5-seed 数据只作留档（3-seed 复核
+  符号全一致，主文档 §4.4l）。
+- **不同协议数字不可混排**：§4.4k（lr 固定/2000ep/M 无上限）与 §4.4l/m（场级 lr/
+  1000ep/M≤3）是两套口径，引用必须注明；best-of-k 与 2/3-seed 均值也不可混排。
+- bouss@1e-4 的 2-seed 符号不可信（左尾）；报区间。
+- bouss/cyl @3e-4 坍缩；rfc @3e-4 最优——lr 表：rfc {1e-4,3e-4}、bouss {3e-5..1e-4}、
+  cyl {3e-5,1e-4}。
+- `--allow_full_window` 已是正式臂（单窗），但 `--max_inrs 3` 必须一起带上。
+- cylinder M≤3 需 absorb=256（absorb=0 会给 M=5）。
+- Ibex：pull 后核 HEAD+md5；sbatch 脚本保持 LF；python 失败 `|| exit 1`；数据在
+  `$HOME/DeepVortex/FLowDataFolder`（gerris 在 `/ibex/user/zhanx0o/FLowDataFolder`）。
+- 旧目录 `experiments/referenceframe_inr/`（v1）禁止引用。
 
 ## 6. 资产索引
 
-- 主文档（规格+全部结果+出处）：`docs/referenceframe_inr_v2.md`
-- 代码：`experiments/referenceframe_inr_v2/`；日志：其 `outputs/`（本地）+ Ibex
-  `slurm_logs/RFv2*.{out,err}`（jobs 48759543-45, 48810859, 48811329, 48814029）
-- 关键 commits：`3e25405`（v2 初版+Ibex 部署）→ `0186ac6`（像素分配）→ `86136f4`（归一化审计）
-  → `d3c9418`（Ibex 容错修复）→ `0915a18`（τ sweep）
-- 记忆文件：`referenceframe-inr-compression.md`（已同步到 v2.3 状态）
+- 主文档：`docs/referenceframe_inr_v2.md`（本 session 新增 §0 硬规则相关、§4.4k/l/m）
+- 代码：`experiments/referenceframe_inr_v2/`（budget_calc.py 新增）
+- Ibex 输出：`experiments/referenceframe_inr_v2/outputs/{mainExp_compress_1.1,
+  mainExp_compress_1.2, Verify_compresswin_1.1}/`（compresswin_1.2 的新格子也写进
+  Verify_compresswin_1.1/ 目录，靠 lr/种子后缀区分）；日志 `slurm_logs/RFv2{cmp,win,wse,c25,win2}.*`
+- 关键 commits：`23524b1`（严格压缩协议+budget_calc）→ `8e7f05c`（compresswin sweep+max_inrs）
+  → `b9ee09e`（2.5% 档）→ `082199b`（1.2 网格+5-seed 修订记录）
+- 记忆文件：`referenceframe-inr-compression.md`（已同步到本文状态）
