@@ -8,9 +8,11 @@
 
 ## 0. 用户定的硬规则（违反 = 返工，全部有明示出处）
 
-1. **验收标准（2026-07-16）**：只接受 cylinder2d 上 proposed 无法提高 coordnet（SIREN）；
-   **其他数据集上 proposed 不得比对应架构的纯 INR baseline 更差**。
-   （cylinder×mlp 是否同豁免未裁定——字面只豁免 SIREN，待问用户。）
+1. **验收标准（2026-07-16；2026-07-18 补充裁定）**：只接受 cylinder2d 上 proposed 无法
+   提高 coordnet（SIREN）；**其他数据集上 proposed 不得比对应架构的纯 INR baseline 更差**。
+   **豁免仅限 SIREN**（理由：正弦基天然擅长涡街窄带振荡，架构先验强到 RFT 提不动）；
+   **cylinder×mlp 不豁免**——是记分板未达标格（各档 −4~−7，但 M=1 等宽 + consttrans
+   结构未试，涡街匀速平流 ⇒ 共动系准定常，对 mlp 可能是大增益；部署待用户授权）。
 2. **压缩实验总 INR 数 M ≤ 3**（预算/M 太小则每网无拟合能力）；管线 `--max_inrs 3`
    硬保护，分区超限直接报错。
 3. **"每窗长 ≤ T/2（即 ≥2 窗）"规则已解除**——M=1 需要单窗，`--allow_full_window` 转正。
@@ -80,7 +82,8 @@
    最终判定表（同 lr 配对 + 最优对最优）。若 w1M1 中间 lr 仍不达标：向用户汇报"bouss
    压缩口径的诚实边界 = 10%+"，并问是否接受（validated 的 10% 胜点 + rfc 全胜 + §4.9
    的 E/E0 先验判据已构成完整故事）。
-2. **cylinder×mlp 豁免问题问用户**（字面标准只豁免 SIREN）。
+2. **cylinder×mlp 翻盘尝试（裁定后新增，待授权）**：{bl, pro-w1M1×{consttrans,tvfull}}
+   × {2.5%, 5%} × lr 3e-4 × wu0.1 × 3 种子 ≈ 18 任务；物理依据见 §0 规则 1。
 3. Story v2 归因链缺口（上一 session 遗留）：mlp/finer 的等参消融（no_observer、单窗
    observed 诊断）；FINER×observed field 稳定化 = Verify_arch_1.2（lr 线索已有：pq 大
    INR 3e-5 分裂 / 1e-5 稳，§4.4j 读数 5c）。
