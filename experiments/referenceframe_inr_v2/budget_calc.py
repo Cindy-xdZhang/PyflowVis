@@ -130,7 +130,7 @@ def print_field(name: str, shape, fracs, d: int, n_inrs: int | None,
     print(hdr)
     for frac in fracs:
         b = plan_baseline(shape, frac, d)
-        line = (f"{frac * 100:>4.0f}% | {b['budget_bytes']:>11,} | {b['m']:>10} "
+        line = (f"{frac * 100:>4.1f}% | {b['budget_bytes']:>11,} | {b['m']:>10} "
                 f"{b['params']:>9,} {b['total_bytes']:>9,} {b['util']:>5.1%} "
                 f"{b['cr']:>5.1f}x")
         if n_inrs:
