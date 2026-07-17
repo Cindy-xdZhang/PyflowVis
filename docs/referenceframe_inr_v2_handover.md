@@ -1,10 +1,15 @@
-# 交接文档：Reference-Frame 分区 INR 压缩 v2（更新至 session 2026-07-16 ~ 07-17）
+# 交接文档：Reference-Frame 分区 INR 压缩 v2（更新至 session 2026-07-17 ~ 07-18）
 
 > 下一个 session 从这里开始读。规格/全部数字/出处在
 > [referenceframe_inr_v2.md](referenceframe_inr_v2.md)（下称"主文档"），本文只讲脉络。
 > 上一版 handover（session 07-12~15 的 v2 重写与 Verify_arch_1.1 部署）见 git 历史
 > `git show 082199b:docs/referenceframe_inr_v2_handover.md` 之前的版本；其"已完成/教训"
 > 均已并入主文档 §1-§4.9，本文不再复述。
+>
+> **本 session（07-17~18）头条**：boussinesq 压缩三档全部闭合——2.5%
+> proposed 胜 SIREN baseline +0.75（Verify_compresswin_1.3，主文档 §4.4o），5% 统计
+> 平手（+0.002，min +0.28）"不更差"成立，10% 此前已胜。赢点配置 = 单窗单区域
+> **constfull 全局常数 observer** + 字节口径 v2 等宽 + lr warmup。
 
 ## 0. 用户定的硬规则（违反 = 返工，全部有明示出处）
 
@@ -39,24 +44,38 @@
 | mainExp_compress_1.1（§4.4k） | 5/10/20% × {coordnet,mlp} × {bl,pro} × 3 场，72 任务（旧协议：lr 固定、2000ep、M 无上限） | 48967626 | 已回收 |
 | Verify_compresswin_1.1（§4.4l） | bouss τ×lr×窗口 sweep（M≤3）+ rfc 单窗闭环，120 任务 + 种子扩展 18 | 49000294 / 49023725 | 已回收 |
 | mainExp_compress_1.2（§4.4m） | 2.5% 档修正协议，36 任务 | 49025811 | 已回收 |
-| Verify_compresswin_1.2（§4.4m 读数 2 后续） | bouss {2.5,5}% × lr{3e-5,5e-5,7e-5,1e-4} × {bl,w1M1,w2M2} × 3 种子，超额种子已 scancel | **49033283** | **在跑，待回收** |
+| Verify_compresswin_1.2（§4.4n） | bouss {2.5,5}% × lr{3e-5,5e-5,7e-5,1e-4} × {bl,w1M1,w2M2} × 3 种子 | 49033283 | 已回收（两档均未达标；发现 skip-bug） |
+| **Verify_compresswin_1.3（§4.4o）** | observer 变体 + 字节口径 v2 + warmup 三波：wave1 45 任务、wave2 15、wave3 3（合计 63/64 预算） | **49044332 / 49045212 / 49046397** | **已回收：2.5% 胜 +0.75、5% 平手闭合** |
 | （附带）Verify_arch_1.1 gerris finer pq 低 lr 重跑回收，§4.4j 表补全 | | 48965055/56 | 已回收 |
 
-## 2. 当前记分板（对照验收标准；证据 = 主文档 §4.4k/l/m）
+### 本 session（07-17~18）新增代码（commits 5cb1ebc → 0b1ed6d）
+- `killing2d.solve_killing_trans`（2-DOF 平移 LS）；`pipeline --observer
+  {tvfull,tvtrans,constfull,consttrans}`（从区域充分统计量重解，分区准则不变）。
+- **字节口径 v2**：N=1 窗口不存 cell 标签图；observer 按参数化精确存储（const 8-12B）
+  ⇒ bouss 2.5% pro m_r 16→17 与 bl 等宽。`budget_calc.py` 同步。
+- `inr.TrainCfg.warmup_frac` / `--warmup_frac`：线性 lr 升温后接余弦（bl/pro 对称）。
+- `validate_rfc.py` 新增 **T5**（平移场恢复 + 旋转场反例），T1–T5 双机全过。
+- `diag_agent_observer_variants.py`：observer 变体干跑诊断（E/E0 × bbox 膨胀）。
+- Ibex 脚本 `refframe_v2_compresswin3{,b,c}.sh`。
+
+## 2. 当前记分板（对照验收标准；证据 = 主文档 §4.4k/l/m/n/o）
 
 | 场 × coordnet | 2.5% | 5% | 10% |
 |---|---|---|---|
 | rfc | ✓ +11.4（同 lr 全胜） | ✓ +7.75（3-seed；pro 最差种子 > bl 中位） | ✓ +12.2（种子稳） |
-| boussinesq | ✗ −11.9（w2M2；w1M1 在跑） | ✗ −1.61（3-seed；pro 稳但均值低） | ✓ +4.91（3-seed；bl 有坏盆地左尾，pro 极稳） |
-| cylinder2d | 豁免（−7.3） | 豁免 | 豁免 |
+| boussinesq | **✓ +0.75**（cf@1e-4+wu，三臂同超，全口径正，§4.4o） | **✓ 平手 +0.002**（cf@8e-5+wu0.2 67.08 vs bl 67.08；min +0.28；"不更差"成立） | ✓ +4.91（3-seed） |
+| cylinder2d | SIREN 豁免（−7.3）/ **mlp 不豁免未达标（−4.1）** | 同左（−6.8） | 同左（−6.2） |
 
-- **rfc 全档闭合**，赢点 = **w1M1**（单窗全局 observer，M=1，与 bl 等宽）+ lr 3e-4。
-- **bouss 赢点结构 = w2M2**（2 窗每窗全局 observer）+ lr 1e-4，但只在 10% 达标；
-  5% 差 −1.6，2.5% 因 2 窗切分（m_r=11 vs bl m=17）大输 → 在跑的 1.2 网格赌两点：
-  ①中间 lr（5e-5/7e-5）稳住 w1M1（其 1e-4 好种子 66.2 > bl 均值但分裂）；②2.5% 用
-  w1M1 无切分近等宽（m=16 vs bl 17）。
-- mlp：rfc 全档大胜（+7~+9），bouss/cyl 全输且 2.5% 档 mlp baseline 本身远弱于
-  coordnet（谱偏置），不是压缩口径的竞争架构。
+- **rfc + boussinesq 全档闭合**。赢点结构跨场统一：**M=1 单窗单区域全局 observer +
+  与 bl 等宽**；lr 场依赖（rfc 3e-4 / bouss 1e-4 或 8e-5）+ warmup。
+- **bouss 各档最优 pro 配置**：2.5% = constfull@1e-4+wu0.1（64.48）；5% =
+  constfull@8e-5+wu0.2（67.08）；10% = w2M2@1e-4（69.37，§4.4l 旧结构，未用新
+  结构重跑——若要统一故事可补 cf 单窗 @10%，见下一步）。
+- 唯一未达标格 = **cylinder×mlp**（用户 07-18 裁定不豁免）：各档 −4~−7，但从未用
+  "M=1 等宽 + const observer"新结构试过——涡街近匀速平流（Taylor 冻结），共动系下
+  准定常，对无频域先验的 mlp 可能是大增益；**部署待用户授权**。
+- mlp 在 2.5% 档 baseline 本身远弱于 coordnet（谱偏置），不是压缩口径的竞争架构
+  （rfc 架构内仍 +9）。
 
 ## 3. 本 session 的方法学发现（写论文/设计实验都要用）
 
@@ -73,25 +92,49 @@
    2-seed 符号翻两次（§4.4l 修订块，新旧并列）。在 ≤3 种子规则下的对策：报
    [min..max]、优先选种子稳的臂（pro w2M2/w1M1@低 lr 天然更稳，这本身是卖点：
    **observed field 训练更稳**，§4.4 也见过）。
-5. 最优窗口结构场依赖：rfc（observer 时不变）单窗；bouss 双窗。自适应窗口数（§4.9⑤b）
-   仍是正确的方法化方向。
+5. 最优窗口结构场依赖：rfc（observer 时不变）单窗；bouss 双窗（10% 旧结构）→ 本
+   session 后修正：**bouss 在 2.5%/5% 的赢点也是单窗**（constfull 常数 observer），
+   "双窗更优"只在 10% 未复检。自适应窗口数（§4.9⑤b）仍是正确的方法化方向。
+
+### 本 session（07-17~18）新增发现（证据 = 主文档 §4.4o）
+6. **observer 的时变自由度在平流主导场上是纯负担**：bouss 全域 killing 解 = 常数向上
+   平流（c≈−0.035、b≈+0.179，时变只多解释 0.1% 能量，干跑 diag）⇒ constfull（整窗
+   联合 LS 一个 (a,b,c)）**优于逐帧 tvfull**（+0.62@2.5%），且省 1.5KB 边信息。
+7. **保留旋转 DOF 优于纯平移**（cf−ct=+0.45@2.5%）——干跑的"bbox 膨胀成本"顾虑被
+   证伪：ξ-bbox 膨胀 ≤1.3 时对 PSNR 无实害，解释能量优先。
+8. **字节口径 v2 是免费的等宽升级**：N=1 不存标签图 + const observer 8-12B ⇒ 2.5%
+   档 pro m 16→17；等宽是赢的必要条件（5% 等宽仍输过 → 还需 warmup+常数化）。
+9. **lr warmup（0.1~0.2×epochs 线性升温）是高 lr 坏盆地的通用药方**：bl 与 pro 双侧
+   受益（bl@1e-4 左尾治愈 62.85→63.73@2.5%、67.08@5%；ct@1e-4 5% 左尾 58.07→64.64
+   @wu0.2）。**已并入压缩 recipe 推荐**；wu 长度本身是超参（7e-5 下 wu0.1 对 bl 反而
+   微负）。
+10. **pro（observed field）训练稳定性系统性优于 bl**：1.5e-4 下 bl 坍缩（23.65）而
+    全部 pro 臂健康；可写进论文的附带卖点。
 
 ## 4. 下一步（按优先级）
 
-1. **回收 Verify_compresswin_1.2（job 49033283）**：按 3-seed 口径出 bouss 5%/2.5% 的
-   最终判定表（同 lr 配对 + 最优对最优）。若 w1M1 中间 lr 仍不达标：向用户汇报"bouss
-   压缩口径的诚实边界 = 10%+"，并问是否接受（validated 的 10% 胜点 + rfc 全胜 + §4.9
-   的 E/E0 先验判据已构成完整故事）。
-2. **cylinder×mlp 翻盘尝试（裁定后新增，待授权）**：{bl, pro-w1M1×{consttrans,tvfull}}
-   × {2.5%, 5%} × lr 3e-4 × wu0.1 × 3 种子 ≈ 18 任务；物理依据见 §0 规则 1。
-3. Story v2 归因链缺口（上一 session 遗留）：mlp/finer 的等参消融（no_observer、单窗
-   observed 诊断）；FINER×observed field 稳定化 = Verify_arch_1.2（lr 线索已有：pq 大
-   INR 3e-5 分裂 / 1e-5 稳，§4.4j 读数 5c）。
-4. 把 2.5-20% 的 rate-distortion 曲线统一到修正协议（20% 档目前只有旧协议数字）。
-5. 更多数据集铺 E/E0→增益相关性（gerris 系列已支持）。
+1. **cylinder×mlp 翻盘尝试（用户 07-18 裁定后的唯一未达标格，待授权）**：
+   {bl, pro-M=1×{constfull,consttrans}} × {2.5%, 5%} × lr 3e-4 × wu{0.1} × 3 种子
+   ≈ 24 任务；物理依据：涡街近匀速平流（Taylor 冻结），共动系准定常，对无频域先验的
+   mlp 可能是大增益；新工具链（observer 变体+字节口径 v2+warmup）已就绪。
+2. **bouss 10% 用新结构复检**（可选统一故事）：cf 单窗 @10% × {8e-5,1e-4} × wu ×3
+   ≈ 6-9 任务——若胜过 w2M2 的 69.37，三档赢点统一为"单窗 constfull"。
+3. Story v2 归因链缺口（遗留）：mlp/finer 的等参消融（no_observer、单窗 observed
+   诊断）；FINER×observed field 稳定化 = Verify_arch_1.2。
+4. 把 2.5-20% 的 rate-distortion 曲线统一到修正协议（20% 档目前只有旧协议数字；
+   2.5/5% 现在有新结构数字，10% 待复检）。
+5. 更多数据集铺 E/E0→增益相关性（gerris 系列已支持）；E/E0 判据可扩展为
+   "constfull E/E0"（新变体的先验判据口径）。
 
 ## 5. 陷阱清单（新增项在前，旧项仍有效）
 
+- **skip-existing 检查必须匹配完整配置**（observer/结构/窗口数），不能只匹配 mode 名
+  ——compresswin2.sh 的 J2 bug 把 w1M1 格子当成已有的 w2M2 跳过（§4.4n）。
+- **字节口径 v2（commit 5cb1ebc 起）与旧口径不可混排**：新口径 N=1 免标签图、observer
+  按变体存储；旧 w1M1 数字（m=16）是旧口径。对比时以"总字节 ≤ frac×场字节"约束下的
+  PSNR 为准（两代口径都满足约束，公平）。
+- **lr 稳定性边界按（场,预算档,observer）三元组定**：bouss 5% 的 cf@1e-4 左尾治不好
+  （wu0.2 仍 58.5），2.5% 的 cf@1e-4 健康；1.5e-4 对 bl 5% 坍缩、对 ct 健康。
 - **种子 ≤3 硬规则**：任何新实验不得超 3 种子；已有 5-seed 数据只作留档（3-seed 复核
   符号全一致，主文档 §4.4l）。
 - **不同协议数字不可混排**：§4.4k（lr 固定/2000ep/M 无上限）与 §4.4l/m（场级 lr/
@@ -107,11 +150,16 @@
 
 ## 6. 资产索引
 
-- 主文档：`docs/referenceframe_inr_v2.md`（本 session 新增 §0 硬规则相关、§4.4k/l/m）
-- 代码：`experiments/referenceframe_inr_v2/`（budget_calc.py 新增）
+- 主文档：`docs/referenceframe_inr_v2.md`（本 session 新增 §4.4n/§4.4o；§4.5 标题修复）
+- 代码：`experiments/referenceframe_inr_v2/`（observer 变体、字节口径 v2、warmup、T5、
+  diag_agent_observer_variants.py）
 - Ibex 输出：`experiments/referenceframe_inr_v2/outputs/{mainExp_compress_1.1,
-  mainExp_compress_1.2, Verify_compresswin_1.1}/`（compresswin_1.2 的新格子也写进
-  Verify_compresswin_1.1/ 目录，靠 lr/种子后缀区分）；日志 `slurm_logs/RFv2{cmp,win,wse,c25,win2}.*`
-- 关键 commits：`23524b1`（严格压缩协议+budget_calc）→ `8e7f05c`（compresswin sweep+max_inrs）
-  → `b9ee09e`（2.5% 档）→ `082199b`（1.2 网格+5-seed 修订记录）
+  mainExp_compress_1.2, Verify_compresswin_1.1, Verify_compresswin_1.3}/`
+  （compresswin_1.2 的格子在 Verify_compresswin_1.1/ 目录、compresswin_1.3 三波都在
+  Verify_compresswin_1.3/ 目录，靠 arm/lr/wu/种子后缀区分）；日志
+  `slurm_logs/RFv2{cmp,win,wse,c25,win2,win3,win3b,win3c}.*`
+- 关键 commits：`23524b1`（严格压缩协议）→ `8e7f05c`（compresswin sweep+max_inrs）
+  → `b9ee09e`（2.5% 档）→ `082199b`（1.2 网格）→ `acedc4a`（cyl 豁免裁定）→
+  **`5cb1ebc`（observer 变体+字节口径 v2+warmup+T5）** → `9d254e8`/`0b1ed6d`（1.3
+  wave-1/2 结果）→ 本 commit（wave-3 + 全档闭合）
 - 记忆文件：`referenceframe-inr-compression.md`（已同步到本文状态）
