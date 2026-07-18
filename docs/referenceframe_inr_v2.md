@@ -268,6 +268,7 @@ B 换成 **f × 原始场 float32 字节**，且约束对象是**总字节（参
 | mainExp_compress_1.2 | 2.5% 字节预算档（CR≥40×），修正协议（M≤3 结构 + 场级 lr + 1000ep）：rfc/cylinder2d/boussinesq × {coordnet(2 lr 臂), mlp} × {baseline, pro}，36 任务 | §4.4m，`outputs/mainExp_compress_1.2/`，Ibex job 49025811 |
 | Verify_compresswin_1.2 | bouss {2.5,5}% × 中档 lr {3e-5..1e-4} × {bl,w1M1,w2M2} 网格补齐（skip 既有格），3 种子 | §4.4n，`outputs/Verify_compresswin_1.1/`（带 lr/种子后缀），Ibex job 49033283 |
 | Verify_compresswin_1.3 | bouss 2.5%/5% 翻盘：observer 参数化变体（consttrans/constfull/tvfull）× 字节口径 v2（N=1 免标签，pro 等宽 m17）× lr warmup，bl 对称，45 任务 | §4.4o，`outputs/Verify_compresswin_1.3/`，Ibex job 49044332 |
+| Verify_compresswin_1.4 | cylinder×mlp 翻盘（用户 07-18 裁定不豁免后唯一未达标格）：M=1 单窗全局 observer（ct/cf）+ 字节 v2 等宽，2.5/5/10% × mlp@3e-4，22 任务（授权 24，余 2） | §4.4p，`outputs/Verify_compresswin_1.4/`，Ibex job 49084951 |
 | （非实验）正确性验证套件 / 归一化审计 | validate_rfc.py / audit_normalization.py | §3 / §4.8 无（代码内） |
 
 （已废弃的 v2.0/v2.1/v2.2 recipe 下的运行只留档不编号，见各小节标注。）
@@ -1073,6 +1074,27 @@ wu0.2（bl 对称）。全部 5%、3 种子。
    ct 62.77→64.03@2.5%；ct@1e-4 5% 左尾 58.07→64.64@wu0.2），应并入压缩 recipe；
    ④pro（observed field）的训练稳定性系统性优于 bl（1.5e-4 全臂对照），是可写进
    论文的附带卖点。
+
+### 4.4p Verify_compresswin_1.4：cylinder×mlp 翻盘（M=1 全局 observer 迁移；Ibex job 49084951，部署 2026-07-18，结果待回收）
+
+**任务（用户 2026-07-18）**："继续调参部署 至多24个任务 让mlp上也能胜过baseline"——
+cylinder×mlp 是裁定后唯一未达标格（§4.4m 读数 3；旧结构下各档 −4~−7）。本轮 22 任务，
+余 2 留补救。
+
+**设计（把 §4.4o 的 bouss 赢点结构迁移到 cylinder）**：
+- **结构**：nw=1 + τ=0.1 + absorb=256 → **M=1**（干跑+冒烟确认；全域刚体运动解释
+  cylinder 时间能量的 88.6%，E/E0=0.114——比 bouss 的 0.455 好得多，物理依据 =
+  涡街近匀速平流/Taylor 冻结流，共动系里准定常，正中 mlp 谱偏置的软肋）；
+- **字节口径 v2 等宽**：pro 边信息 43 B ⇒ 与 bl 逐档同宽 m=21/29/42（2.5/5/10%）；
+- **observer 臂**：ct（consttrans）为主赌注 + cf（constfull）2.5%/5% 保险（bouss 上
+  cf>ct +0.45）；不跑 tv 对照（归因借用 §4.4o，省任务）；
+- **recipe**：mlp lr 3e-4（各场已证稳定、无坏盆地 ⇒ 不需 warmup）、1000ep、
+  3 种子 {0,7777,1}。
+- **bl 口径**：2.5% 复用 mainExp_compress_1.2 的同协议 bl（s0/s7777）仅补 s1；
+  5%/10% 的 bl 全新 3 种子重跑（§4.4k 的 bl 是 2000ep 不可混排）。
+
+**任务表（22）**：2.5% {ct×3, cf×3, bl 补 s1}；5% {bl×3, ct×3, cf×3}；10% {bl×3, ct×3}。
+脚本 `ibex_bash/refframe_v2_compresswin4.sh`（commit cb3aaf1）。
 
 ### 4.5 RFC 窗口税归因（v2.1/v2.2 recipe 时期的历史记录，被 §4.4b 引用）
 

@@ -113,7 +113,7 @@
 
 ## 4. 下一步（按优先级）
 
-1. **cylinder×mlp 翻盘尝试（用户 07-18 裁定后的唯一未达标格，待授权）**：
+1. **cylinder×mlp 翻盘尝试（用户 07-18 授权 ≤24 任务，已部署 22 = Verify_compresswin_1.4，Ibex job 49084951，主文档 §4.4p；回收待办，余 2 任务可补救）**：
    {bl, pro-M=1×{constfull,consttrans}} × {2.5%, 5%} × lr 3e-4 × wu{0.1} × 3 种子
    ≈ 24 任务；物理依据：涡街近匀速平流（Taylor 冻结），共动系准定常，对无频域先验的
    mlp 可能是大增益；新工具链（observer 变体+字节口径 v2+warmup）已就绪。
