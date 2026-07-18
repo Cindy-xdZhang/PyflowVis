@@ -321,6 +321,31 @@ def run_proposed(fd: FieldData, cfg: ExpCfg, parts: list[WindowPartition],
     # 4-pixel stragglers overfit 256 samples with the same share (MSE 1e-7).
     total_wpix = sum(float((p.labels_pixels == r_i).sum()) * (p.it1 - p.it0)
                      for p in parts for r_i in range(p.n_regions))
+    # capsmall allocation = the par.4.4h lesson "proportional + capacity floor"
+    # made concrete: every region except the largest-by-samples is capped at
+    # n_samples params (an INR with >=1 param/sample only interpolates); the
+    # largest region takes the entire remainder. Motivation (compresswin_1.4
+    # wave 2, cylinder M=2 = [25384, 216] px): uniform starves the wake
+    # (m 29->21) to overfeed a 216-px region; "pixels" starves the obstacle
+    # to m=2 (the par.4.4h failure).
+    share_map = {}
+    if cfg.alloc == "capsmall":
+        pool_total = params_pool if params_pool is not None else int(budget_factor * B)
+        reg_ns = [(w_i, r_i, int((p.labels_pixels == r_i).sum()) * (p.it1 - p.it0))
+                  for w_i, p in enumerate(parts) for r_i in range(p.n_regions)]
+        big = max(reg_ns, key=lambda t: t[2])[:2]
+        spent = 0
+        for w_i, r_i, ns in reg_ns:
+            if (w_i, r_i) == big:
+                continue
+            cap = coordnet_num_params(
+                pick_m_for_budget(min(ns, pool_total // n_inrs), d_r), d_r)
+            share_map[(w_i, r_i)] = cap
+            spent += cap
+        share_map[big] = pool_total - spent
+        log(f"  alloc=capsmall: largest region w{big[0]}r{big[1]} gets "
+            f"{share_map[big]:,} params; {n_inrs - 1} small region(s) capped "
+            f"at <=1 param/sample ({spent:,} total)")
 
     recon = np.full(fd.shape, np.nan)
     details = []
@@ -349,6 +374,8 @@ def run_proposed(fd: FieldData, cfg: ExpCfg, parts: list[WindowPartition],
             if cfg.alloc == "pixels":
                 pool = params_pool if params_pool is not None else budget_factor * B
                 w_share = int(pool * samples.xi.shape[0] / total_wpix)
+            elif cfg.alloc == "capsmall":
+                w_share = share_map[(w_i, r_i)]
             else:
                 w_share = share
             m_r = pick_m_for_budget(w_share, d_r)

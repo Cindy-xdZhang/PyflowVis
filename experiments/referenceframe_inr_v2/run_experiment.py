@@ -41,8 +41,12 @@ def main():
     ap.add_argument("--tau", type=float, default=0.05)
     ap.add_argument("--absorb_min_pixels", type=int, default=0,
                     help=">0: post-merge absorb smaller regions (spec deviation)")
-    ap.add_argument("--alloc", default="uniform", choices=["uniform", "pixels"],
-                    help="per-INR budget split (uniform = spec; pixels = proportional)")
+    ap.add_argument("--alloc", default="uniform",
+                    choices=["uniform", "pixels", "capsmall"],
+                    help="per-INR budget split (uniform = spec; pixels = "
+                         "proportional, par.4.4h negative; capsmall = cap "
+                         "non-largest regions at 1 param/sample, remainder "
+                         "to the largest region)")
     ap.add_argument("--n_windows", type=int, default=2)
     ap.add_argument("--max_inrs", type=int, default=0,
                     help=">0: fail if the partition yields more total INRs than this")
