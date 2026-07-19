@@ -9,9 +9,11 @@
 > **最新头条（07-19，Verify_compresswin_1.4 wave-3，主文档 §4.4p）**：cylinder×mlp
 > 5% 档**首次转正**——mlp lr 探到 1e-3 后 ctM2-capsmall 56.73 vs bl 56.46 =
 > **+0.27，种子配对 3/3 全正**（判弱胜）。lr 是主因：3e-4 读数偏低 ~4 dB 且阶梯
-> 未见顶（1e-3 比 5e-4 还高 2 dB）。2.5%/10% 仍是 @3e-4 旧读数（−0.86/−0.61）未复测；
-> 新授权批还剩 ~12 任务，投放方案待用户裁定（预案 A：1e-3 迁 2.5%/10%；预案 B：
-> 5% 续探 lr {1.5e-3, 2e-3}）。
+> 未见顶（1e-3 比 5e-4 还高 2 dB）。2.5%/10% 仍是 @3e-4 旧读数（−0.86/−0.61）未复测。
+> **用户裁定"A 和 B 都部署"→ wave-4 已上线（job 49121631，24 任务，结果待回收）**：
+> A = {bl,ctM2}×1e-3×{2.5%,10%}×3 种子（攻仅剩两格）；B = 5% 续探 lr
+> {1.5e-3,2e-3}×两臂×3 种子（钉 lr*）。新档 capsmall sizing 已本地冒烟
+> （2.5% m=19/8、10% m=41/8，字节断言过）。
 >
 > 上一条头条（07-17~18）：boussinesq 压缩三档全部闭合——2.5%
 > proposed 胜 SIREN baseline +0.75（Verify_compresswin_1.3，主文档 §4.4o），5% 统计
@@ -121,12 +123,10 @@
 
 ## 4. 下一步（按优先级）
 
-1. **cylinder×mlp 剩余 ~12 任务额度的投放（用户裁定，主文档 §4.4p wave-3 末）**：
-   wave-3 读数介于 spec 两个触发条件之间（lr 有效但阶梯未见顶）——
-   预案 A = {bl,ctM2}×1e-3×{2.5%,10%}×3 种子（12 任务）：赌 1e-3 已够翻两档，直接
-   冲全闭合；预案 B = 5% 续探 {bl,ctM2}×{1.5e-3,2e-3}×3（12 任务）：先钉死 lr*
-   再谈迁移（风险：5% 已弱胜，边际收益可能只是加固）。倾向 A（2.5%/10% 是仅剩
-   未达标格，A 直接攻击记分板；若 A 后仍差 0.2-0.5 再回头探 lr* 也不迟）。
+1. **回收 wave-4（job 49121631，24 任务，主文档 §4.4p wave-4 块）**：A 段读数定
+   2.5%/10% 是否翻正（若 B 段发现更高 lr* 且 A 段未全过线 → 可能需要 lr* 复迁）；
+   B 段注意 2e-3 的稳定性（mlp 首次探此 lr，看种子散布与坍缩迹象）。回收后更新
+   记分板与 §4.4p 判定；若全闭合，压缩故事三场两架构收官。
 2. **bouss 10% 用新结构复检**（可选统一故事）：cf 单窗 @10% × {8e-5,1e-4} × wu ×3
    ≈ 6-9 任务——若胜过 w2M2 的 69.37，三档赢点统一为"单窗 constfull"。
 3. Story v2 归因链缺口（遗留）：mlp/finer 的等参消融（no_observer、单窗 observed
@@ -169,7 +169,7 @@
   （compresswin_1.2 的格子在 Verify_compresswin_1.1/ 目录、compresswin_1.3 三波都在
   Verify_compresswin_1.3/ 目录、compresswin_1.4 三波都在 Verify_compresswin_1.4/
   目录，靠 arm/lr/wu/种子后缀区分）；日志
-  `slurm_logs/RFv2{cmp,win,wse,c25,win2,win3,win3b,win3c,win4,win4b,win4c}.*`
+  `slurm_logs/RFv2{cmp,win,wse,c25,win2,win3,win3b,win3c,win4,win4b,win4c,win4d}.*`
 - 关键 commits：`23524b1`（严格压缩协议）→ `8e7f05c`（compresswin sweep+max_inrs）
   → `b9ee09e`（2.5% 档）→ `082199b`（1.2 网格）→ `acedc4a`（cyl 豁免裁定）→
   **`5cb1ebc`（observer 变体+字节口径 v2+warmup+T5）** → `9d254e8`/`0b1ed6d`（1.3
