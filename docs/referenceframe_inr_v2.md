@@ -268,7 +268,7 @@ B 换成 **f × 原始场 float32 字节**，且约束对象是**总字节（参
 | mainExp_compress_1.2 | 2.5% 字节预算档（CR≥40×），修正协议（M≤3 结构 + 场级 lr + 1000ep）：rfc/cylinder2d/boussinesq × {coordnet(2 lr 臂), mlp} × {baseline, pro}，36 任务 | §4.4m，`outputs/mainExp_compress_1.2/`，Ibex job 49025811 |
 | Verify_compresswin_1.2 | bouss {2.5,5}% × 中档 lr {3e-5..1e-4} × {bl,w1M1,w2M2} 网格补齐（skip 既有格），3 种子 | §4.4n，`outputs/Verify_compresswin_1.1/`（带 lr/种子后缀），Ibex job 49033283 |
 | Verify_compresswin_1.3 | bouss 2.5%/5% 翻盘：observer 参数化变体（consttrans/constfull/tvfull）× 字节口径 v2（N=1 免标签，pro 等宽 m17）× lr warmup，bl 对称，45 任务 | §4.4o，`outputs/Verify_compresswin_1.3/`，Ibex job 49044332 |
-| Verify_compresswin_1.4 | cylinder×mlp 翻盘（用户 07-18 裁定不豁免后唯一未达标格）：M=1 单窗全局 observer（ct/cf）+ 字节 v2 等宽，2.5/5/10% × mlp@3e-4，22 任务（授权 24，余 2） | §4.4p，`outputs/Verify_compresswin_1.4/`，Ibex job 49084951 |
+| Verify_compresswin_1.4 | cylinder×mlp 翻盘（用户 07-18 裁定不豁免后唯一未达标格）：wave-1 M=1 单窗全局 observer（ct/cf）+ 字节 v2 等宽 2.5/5/10%（22 任务）；wave-2 5% M=2 障碍物分离 + capsmall（2 任务，24/24 用满）；wave-3（新授权批）5% mlp lr 探索 {5e-4,1e-3}（12 任务）→ **5% @lr1e-3 弱胜 +0.27，配对 3/3 正** | §4.4p，`outputs/Verify_compresswin_1.4/`，Ibex jobs 49084951 / 49088664 / 49106108 |
 | （非实验）正确性验证套件 / 归一化审计 | validate_rfc.py / audit_normalization.py | §3 / §4.8 无（代码内） |
 
 （已废弃的 v2.0/v2.1/v2.2 recipe 下的运行只留档不编号，见各小节标注。）
@@ -1147,6 +1147,35 @@ commit 5fbd720，结果待回收）**：探 **mlp 的 lr**——全项目最大�
 MSE 仍在降 8-13%/200ep（余弦尾部压制）⇒ 更高 lr 在 1000ep 内买到更多有效步。
 对称网格：{bl, ctM2-capsmall} × lr {5e-4, 1e-3} × 3 种子 @5%。剩余 ~12 任务额度等
 读数后定向投放（若 lr* 出现 → {bl,ctM2}×lr* 迁移 2.5%/10%；若 lr 无效 → 如实报边界）。
+
+**Wave-3 结果（2026-07-19 回收，12/12 零失败；3-seed 均值 [min..max]，出处 job
+49106108 + `outputs/Verify_compresswin_1.4/*_lr{5e-4,1e-3}_*`）**：
+
+| lr | bl | ctM2-capsmall | Δ均值 | 种子配对（s0/s7777/s1） |
+|---|---|---|---|---|
+| 3e-4（wave-1/2 留档） | 52.80 [51.90..53.50] | 52.60 [52.00..53.20]（2-seed） | −0.20 | +1.30 / −1.50 / — |
+| 5e-4 | 54.50 [53.78..55.14] | 54.29 [54.08..54.51] | −0.22 | +0.30 / −0.63 / −0.32 |
+| 1e-3 | 56.46 [56.10..56.75] | **56.73 [56.58..56.82]** | **+0.27** | **+0.06 / +0.04 / +0.72（3/3 全正）** |
+
+**读数**：
+1. **lr 假设完全验证**：mlp@cylinder 最优 lr 远高于沿用的 3e-4——两臂随 lr 单调上升
+   （@1e-3 相对 3e-4：bl +3.66、ctM2 +4.13 dB），且 1e-3 比 5e-4 还高 ~2 dB ⇒
+   **lr 阶梯未见顶**，1.5e-3/2e-3 未探。
+2. **cylinder×mlp 5% 首次转正**：@1e-3 ctM2 均值 +0.27，**种子配对 3/3 全正**，
+   pro min（56.58）> bl 中位（56.52），pro 种子散布 0.24 vs bl 0.66 ⇒ 判**弱胜**
+   （强于 bouss 5% 的 +0.002 平手，弱于 bouss 2.5% 的 +0.75）。
+3. **pro 相对优势随 lr 上升**（−0.20 → −0.22 → +0.27）：与 §4.4o 发现 10（observed
+   field 训练更稳）一致——高 lr 下 bl 种子散布放大而 ctM2 收窄。
+4. 字节口径不变（capsmall m=28/8，总字节 ≤ 预算，wave-2 冒烟已验；lr 不改字节）。
+
+**判定修订（新旧并列）**：此前（24/24 用满后）"5% 统计平手 −0.20，1.4 未完全闭合"
+→ 现在 **"5% @lr1e-3 弱胜 +0.27（配对 3/3 正）"**。变化原因 = mlp 的 lr=3e-4 来自
+rfc 100ep 试点、从未在 cylinder 验证，读数系统性偏低 ~4 dB（与 §4.4l 教训"lr 是
+压缩口径全输主因"同构，coordnet 侧当时是 6-12 dB）。旧数字按 lr=3e-4 口径留档不废
+（同协议不同 lr，引用需注明）。**2.5%/10% 的 −0.86/−0.61 仍是 @3e-4 旧读数**，未在
+高 lr 下复测。剩余 ~12 任务额度的两个预案（A：1e-3 迁移 2.5%/10%，12 任务；
+B：5% 续探 lr {1.5e-3, 2e-3}，12 任务）——读数介于触发条件之间（lr 有效但未见顶），
+投放待用户裁定。
 
 ### 4.5 RFC 窗口税归因（v2.1/v2.2 recipe 时期的历史记录，被 §4.4b 引用）
 

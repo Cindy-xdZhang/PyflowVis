@@ -1,4 +1,4 @@
-# 交接文档：Reference-Frame 分区 INR 压缩 v2（更新至 session 2026-07-17 ~ 07-18）
+# 交接文档：Reference-Frame 分区 INR 压缩 v2（更新至 session 2026-07-19）
 
 > 下一个 session 从这里开始读。规格/全部数字/出处在
 > [referenceframe_inr_v2.md](referenceframe_inr_v2.md)（下称"主文档"），本文只讲脉络。
@@ -6,7 +6,14 @@
 > `git show 082199b:docs/referenceframe_inr_v2_handover.md` 之前的版本；其"已完成/教训"
 > 均已并入主文档 §1-§4.9，本文不再复述。
 >
-> **本 session（07-17~18）头条**：boussinesq 压缩三档全部闭合——2.5%
+> **最新头条（07-19，Verify_compresswin_1.4 wave-3，主文档 §4.4p）**：cylinder×mlp
+> 5% 档**首次转正**——mlp lr 探到 1e-3 后 ctM2-capsmall 56.73 vs bl 56.46 =
+> **+0.27，种子配对 3/3 全正**（判弱胜）。lr 是主因：3e-4 读数偏低 ~4 dB 且阶梯
+> 未见顶（1e-3 比 5e-4 还高 2 dB）。2.5%/10% 仍是 @3e-4 旧读数（−0.86/−0.61）未复测；
+> 新授权批还剩 ~12 任务，投放方案待用户裁定（预案 A：1e-3 迁 2.5%/10%；预案 B：
+> 5% 续探 lr {1.5e-3, 2e-3}）。
+>
+> 上一条头条（07-17~18）：boussinesq 压缩三档全部闭合——2.5%
 > proposed 胜 SIREN baseline +0.75（Verify_compresswin_1.3，主文档 §4.4o），5% 统计
 > 平手（+0.002，min +0.28）"不更差"成立，10% 此前已胜。赢点配置 = 单窗单区域
 > **constfull 全局常数 observer** + 字节口径 v2 等宽 + lr warmup。
@@ -64,16 +71,17 @@
 |---|---|---|---|
 | rfc | ✓ +11.4（同 lr 全胜） | ✓ +7.75（3-seed；pro 最差种子 > bl 中位） | ✓ +12.2（种子稳） |
 | boussinesq | **✓ +0.75**（cf@1e-4+wu，三臂同超，全口径正，§4.4o） | **✓ 平手 +0.002**（cf@8e-5+wu0.2 67.08 vs bl 67.08；min +0.28；"不更差"成立） | ✓ +4.91（3-seed） |
-| cylinder2d | SIREN 豁免 / mlp ✗ −0.86（1.4 后） | SIREN 豁免 / mlp **≈平手 −0.20**（M=2 capsmall，噪声内） | SIREN 豁免 / mlp ✗ −0.61 |
+| cylinder2d | SIREN 豁免 / mlp ✗ −0.86（@lr3e-4，高 lr 未测） | SIREN 豁免 / mlp **✓ 弱胜 +0.27**（@lr1e-3，ctM2-capsmall，配对 3/3 正，wave-3） | SIREN 豁免 / mlp ✗ −0.61（@lr3e-4，高 lr 未测） |
 
 - **rfc + boussinesq 全档闭合**。赢点结构跨场统一：**M=1 单窗单区域全局 observer +
   与 bl 等宽**；lr 场依赖（rfc 3e-4 / bouss 1e-4 或 8e-5）+ warmup。
 - **bouss 各档最优 pro 配置**：2.5% = constfull@1e-4+wu0.1（64.48）；5% =
   constfull@8e-5+wu0.2（67.08）；10% = w2M2@1e-4（69.37，§4.4l 旧结构，未用新
   结构重跑——若要统一故事可补 cf 单窗 @10%，见下一步）。
-- 唯一未达标格 = **cylinder×mlp**（用户 07-18 裁定不豁免）：各档 −4~−7，但从未用
-  "M=1 等宽 + const observer"新结构试过——涡街近匀速平流（Taylor 冻结），共动系下
-  准定常，对无频域先验的 mlp 可能是大增益；**部署待用户授权**。
+- **cylinder×mlp 现状（1.4 三波后，§4.4p）**：结构迁移（M=1 全局 observer）消掉旧差距
+  −4~−7 的九成；wave-3 发现 mlp 的 lr=3e-4 从未在 cylinder 验证、系统性偏低 ~4 dB，
+  @1e-3 后 **5% 档转正 +0.27（配对 3/3 全正）**。剩余未达标 = 2.5%/10% 两档，且都是
+  @3e-4 旧读数——高 lr 复测是最直接的翻盘路径（剩 ~12 任务额度，待用户裁定投放）。
 - mlp 在 2.5% 档 baseline 本身远弱于 coordnet（谱偏置），不是压缩口径的竞争架构
   （rfc 架构内仍 +9）。
 
@@ -113,10 +121,12 @@
 
 ## 4. 下一步（按优先级）
 
-1. **cylinder×mlp（Verify_compresswin_1.4 已收官，24/24 任务，jobs 49084951+49088664，主文档 §4.4p）**：M=1 结构消掉旧差距九成；5% M=2+capsmall 达统计平手（−0.20 噪声内），2.5/10% 仍 −0.6~−0.9；全闭合需新授权，或按「两架构共同边界场」写入故事——待用户裁定。原设计留档：
-   {bl, pro-M=1×{constfull,consttrans}} × {2.5%, 5%} × lr 3e-4 × wu{0.1} × 3 种子
-   ≈ 24 任务；物理依据：涡街近匀速平流（Taylor 冻结），共动系准定常，对无频域先验的
-   mlp 可能是大增益；新工具链（observer 变体+字节口径 v2+warmup）已就绪。
+1. **cylinder×mlp 剩余 ~12 任务额度的投放（用户裁定，主文档 §4.4p wave-3 末）**：
+   wave-3 读数介于 spec 两个触发条件之间（lr 有效但阶梯未见顶）——
+   预案 A = {bl,ctM2}×1e-3×{2.5%,10%}×3 种子（12 任务）：赌 1e-3 已够翻两档，直接
+   冲全闭合；预案 B = 5% 续探 {bl,ctM2}×{1.5e-3,2e-3}×3（12 任务）：先钉死 lr*
+   再谈迁移（风险：5% 已弱胜，边际收益可能只是加固）。倾向 A（2.5%/10% 是仅剩
+   未达标格，A 直接攻击记分板；若 A 后仍差 0.2-0.5 再回头探 lr* 也不迟）。
 2. **bouss 10% 用新结构复检**（可选统一故事）：cf 单窗 @10% × {8e-5,1e-4} × wu ×3
    ≈ 6-9 任务——若胜过 w2M2 的 69.37，三档赢点统一为"单窗 constfull"。
 3. Story v2 归因链缺口（遗留）：mlp/finer 的等参消融（no_observer、单窗 observed
@@ -154,12 +164,15 @@
 - 代码：`experiments/referenceframe_inr_v2/`（observer 变体、字节口径 v2、warmup、T5、
   diag_agent_observer_variants.py）
 - Ibex 输出：`experiments/referenceframe_inr_v2/outputs/{mainExp_compress_1.1,
-  mainExp_compress_1.2, Verify_compresswin_1.1, Verify_compresswin_1.3}/`
+  mainExp_compress_1.2, Verify_compresswin_1.1, Verify_compresswin_1.3,
+  Verify_compresswin_1.4}/`
   （compresswin_1.2 的格子在 Verify_compresswin_1.1/ 目录、compresswin_1.3 三波都在
-  Verify_compresswin_1.3/ 目录，靠 arm/lr/wu/种子后缀区分）；日志
-  `slurm_logs/RFv2{cmp,win,wse,c25,win2,win3,win3b,win3c}.*`
+  Verify_compresswin_1.3/ 目录、compresswin_1.4 三波都在 Verify_compresswin_1.4/
+  目录，靠 arm/lr/wu/种子后缀区分）；日志
+  `slurm_logs/RFv2{cmp,win,wse,c25,win2,win3,win3b,win3c,win4,win4b,win4c}.*`
 - 关键 commits：`23524b1`（严格压缩协议）→ `8e7f05c`（compresswin sweep+max_inrs）
   → `b9ee09e`（2.5% 档）→ `082199b`（1.2 网格）→ `acedc4a`（cyl 豁免裁定）→
   **`5cb1ebc`（observer 变体+字节口径 v2+warmup+T5）** → `9d254e8`/`0b1ed6d`（1.3
-  wave-1/2 结果）→ 本 commit（wave-3 + 全档闭合）
+  wave-1/2 结果）→ `6980f36`（1.3 收官 + bouss 全档闭合）→ `cb3aaf1`/`189c304`/
+  `5fbd720`（1.4 三波部署）→ 本 commit（1.4 wave-3 结果：cyl×mlp 5% @lr1e-3 转正）
 - 记忆文件：`referenceframe-inr-compression.md`（已同步到本文状态）
