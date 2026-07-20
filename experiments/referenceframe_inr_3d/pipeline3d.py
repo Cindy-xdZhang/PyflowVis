@@ -36,7 +36,8 @@ for pth in (str(_ROOT), str(_HERE), str(_V2)):
 import torch  # noqa: E402
 
 from killing3d import compute_cell_stats_3d  # noqa: E402
-from partition3d import merge_partition_3d, split_windows, WindowPartition3D  # noqa: E402
+from partition3d import (merge_partition_3d, single_region_partition,  # noqa: E402
+                         split_windows, WindowPartition3D)
 from frame3d import make_region_samples_3d, scatter_reconstruction_3d  # noqa: E402
 from killing3d import solve_killing_3d, solve_killing_trans_3d  # noqa: E402
 from inr import (TrainCfg, MinMax, train_inr_best_of_seeds, eval_inr, vpsnr,  # noqa: E402
@@ -278,8 +279,11 @@ def compute_partitions_3d(fd: FieldData3D, cfg: ExpCfg3D, log=print
                             allow_full=cfg.allow_full_window)
     parts = []
     for (it0, it1) in windows:
-        part = merge_partition_3d(stats, it0, it1, cfg.tau,
-                                  absorb_min_pixels=cfg.absorb_min_pixels)
+        if cfg.tau < 0:     # M=1 fast path (tau=-1 == whole domain, no merge)
+            part = single_region_partition(stats, it0, it1)
+        else:
+            part = merge_partition_3d(stats, it0, it1, cfg.tau,
+                                      absorb_min_pixels=cfg.absorb_min_pixels)
         parts.append(part)
         rr = [f"N={part.n_regions}" +
               (f" (absorbed {part.n_absorbed})" if part.n_absorbed else "")]

@@ -216,6 +216,27 @@ def merge_partition_3d(stats: CellStats3D, it0: int, it1: int, tau: float,
                              merge_log=merge_log, n_absorbed=n_absorbed)
 
 
+def single_region_partition(stats: CellStats3D, it0: int, it1: int
+                            ) -> WindowPartition3D:
+    """M=1 fast path: the whole domain as one region, no merge walk.  Same
+    result as tau >= 1 (rho < 1 always, so everything merges) but O(1) instead
+    of a ~20-minute 2000-cell agglomeration on deltaWing-sized grids.  Use for
+    the single-window single-region structure (the 2D winning configuration)."""
+    nCz, nCy, nCx = stats.n_cells
+    AtA = stats.AtA[it0:it1].sum(axis=(1, 2, 3))
+    g = stats.g[it0:it1].sum(axis=(1, 2, 3))
+    e0 = stats.e0[it0:it1].sum(axis=(1, 2, 3))
+    q, E = solve_killing_3d(AtA, g, e0)
+    reg = Region3D(cells=list(range(nCz * nCy * nCx)), AtA=AtA, g=g, e0=e0,
+                   npix=float(stats.npix.sum()), q=q, E=float(E.sum()),
+                   E0=float(e0.sum()))
+    labels_cells = np.zeros((nCz, nCy, nCx), dtype=np.int32)
+    labels_pixels = np.zeros((stats.Z, stats.Y, stats.X), dtype=np.int32)
+    return WindowPartition3D(it0=it0, it1=it1, tau=-1.0,
+                             labels_cells=labels_cells,
+                             labels_pixels=labels_pixels, regions=[reg])
+
+
 def split_windows(T: int, n_windows: int, allow_full: bool = False
                   ) -> list[tuple[int, int]]:
     """Contiguous near-equal windows; n_windows=1 requires allow_full (same rule

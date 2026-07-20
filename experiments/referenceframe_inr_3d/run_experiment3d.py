@@ -40,7 +40,9 @@ def main():
     ap.add_argument("--k_cell", type=int, default=4,
                     help="cell edge (k^3 voxels/cell); stats memory ~ "
                          "T*nCells*288 B")
-    ap.add_argument("--tau", type=float, default=0.05)
+    ap.add_argument("--tau", type=float, default=0.05,
+                    help="merge tolerance; NEGATIVE (use --tau=-1) = M=1 fast "
+                         "path: whole domain as one region, no merge walk")
     ap.add_argument("--absorb_min_pixels", type=int, default=0,
                     help=">0: post-merge absorb regions smaller than this many "
                          "VOXELS (spec deviation, logged)")
