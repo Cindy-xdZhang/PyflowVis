@@ -107,5 +107,22 @@ baseline m=66(反解自预算)41.85 dB / pro-M1-consttrans 42.15 dB,字节
 
 **读数与下一步**:E/E0 判据预测 deltaWing 上 RFT 增益小/平手——这本身是
 "判据 3D 外推是否成立"的检验数据点(2D 故事的核心判据推广);若要 3D 正例
-(可刚体解释场)需另配数据集。首个正式实验(压缩记分板 s2x2 档 + mlp lr
-probe)设计待用户裁定规模与取向。
+(可刚体解释场)需另配数据集。**用户 2026-07-20 裁定:"直接部署 A"**(deltaWing
+记分板,s2x2 档先行)。
+
+### 4.2 Verify_rft3d_1.1 wave-1:deltaWing s2x2 5% 记分板(Ibex job 49161181,部署 2026-07-20,结果待回收)
+
+**任务表(18)**:{bl, ctM1} × mlp × lr {5e-4, 1e-3, 2e-3} × 3 种子 {0,7777,1} @
+deltawing_s2x2 5%。脚本 `ibex_bash/refframe_3d_v1.sh`(commit 3d7f6f2)。
+
+- **结构**:ctM1 = 单窗单区域 consttrans(tau=-1 快路径;E/E0 干跑显示分区/
+  时变/旋转 DOF 均不加分,ct 边信息最小 63 B,与 bl 等宽 m=66);
+- **lr probe 对称**:2D 教训 lr 是最大杠杆且 mlp 阶梯在 cylinder 到 1.5-2e-3
+  才见顶,3D 场(样本 50 倍、m=66)lr* 未知 ⇒ {5e-4, 1e-3, 2e-3} 双臂对称;
+- **步数协议**:max_steps_per_epoch=64 × 1000ep = 64k 步(与 2D recipe 同量级;
+  s2x2 全扫 331 步/epoch 会 5 倍超时);
+- **预期与判定口径**:E/E0=0.70 ⇒ 预期小增益/平手;记分板标准沿用 2D
+  ("proposed 不得比同架构 baseline 更差",bouss 5% 的 +0.002 平手先例适用);
+  无论正负,与 E/E0 判据的一致性单独记录(判据 3D 外推结论);
+- 部署前核查:Ibex HEAD=3d7f6f2 一致、deltaWing s2x2 在 Ibex 加载 shape 一致、
+  脚本 LF。留用额度:cf 臂 / 2.5%/10% 档 / 全量档,等 wave-1 读数定向投放。
