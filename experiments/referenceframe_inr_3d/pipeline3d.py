@@ -74,18 +74,27 @@ class FieldData3D:
         return int(np.prod(self.data.shape)) * 4   # stored as float32 on disk
 
 
-def load_deltawing(stride_t: int = 1, stride_xyz: int = 1,
-                   t_max: int = 0) -> FieldData3D:
-    """deltaWing_mag0_3reesampled.nc: (T,Z,Y,X) = (171, 55, 314, 55), vars
-    u/v/w + coordinate vectors x/y/z/t.  Optional integer strides downsample
-    time / all three space axes (protocol note: strided runs are their own
-    dataset variant -- never mix numbers across strides)."""
+# name -> filename of standard-layout (tdim,zdim,ydim,xdim) u/v/w NetCDF files
+NC_FILES = {
+    "deltawing": "deltaWing_mag0_3reesampled.nc",
+    "halfcyl160": "halfcylinderRe160Resampled.nc",
+    "halfcyl640": "halfcylinderRe640resampled.nc",
+    "smoke": "SmokeBuoyancy80_239.nc",
+}
+
+
+def load_nc_3d(name: str, stride_t: int = 1, stride_xyz: int = 1,
+               t_max: int = 0) -> FieldData3D:
+    """Standard-layout loader: vars u/v/w over (tdim, zdim, ydim, xdim) plus
+    coordinate vectors x/y/z/t.  Optional integer strides downsample time / all
+    three space axes (protocol note: strided runs are their own dataset variant
+    -- never mix numbers across strides)."""
     from netCDF4 import Dataset
-    fn = DATA_DIR_3D / "deltaWing_mag0_3reesampled.nc"
+    fn = DATA_DIR_3D / NC_FILES[name]
     if not fn.exists():
         raise FileNotFoundError(
             f"dataset file not found: {fn} -- set the PYFLOWVIS_DATA3D env var "
-            f"to the folder holding deltaWing_mag0_3reesampled.nc")
+            f"to the folder holding {NC_FILES[name]}")
     ds = Dataset(str(fn))
     st, sxyz = int(stride_t), int(stride_xyz)
     tsl = slice(0, int(t_max) if t_max else None, st)
@@ -100,7 +109,6 @@ def load_deltawing(stride_t: int = 1, stride_xyz: int = 1,
     zs = np.asarray(ds.variables["z"][ssl], dtype=np.float64)
     ts = np.asarray(ds.variables["t"][tsl], dtype=np.float64)
     ds.close()
-    name = "deltawing"
     if st > 1 or sxyz > 1 or t_max:
         name += f"_s{st}x{sxyz}" + (f"_t{t_max}" if t_max else "")
     return FieldData3D(name=name, data=data, xs=xs, ys=ys, zs=zs, ts=ts)
@@ -108,8 +116,8 @@ def load_deltawing(stride_t: int = 1, stride_xyz: int = 1,
 
 def load_field_3d(name: str, stride_t: int = 1, stride_xyz: int = 1,
                   t_max: int = 0) -> FieldData3D:
-    if name == "deltawing":
-        return load_deltawing(stride_t, stride_xyz, t_max)
+    if name in NC_FILES:
+        return load_nc_3d(name, stride_t, stride_xyz, t_max)
     if name == "rot3d":            # synthetic smoke/validation field
         import synth3d
         xs = ys = zs = np.linspace(-2, 2, 48 // max(stride_xyz, 1))

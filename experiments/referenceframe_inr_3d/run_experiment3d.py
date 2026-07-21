@@ -23,7 +23,8 @@ from pipeline3d import ExpCfg3D, run_experiment_3d  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser(description="Reference-frame partition INR 3D")
-    ap.add_argument("--field", default="deltawing", help="deltawing | rot3d")
+    ap.add_argument("--field", default="deltawing",
+                    help="deltawing | halfcyl160 | halfcyl640 | smoke | rot3d")
     ap.add_argument("--modes", default="baseline,pro_budget")
     ap.add_argument("--model", default="coordnet",
                     choices=["coordnet", "mlp", "finer"])
