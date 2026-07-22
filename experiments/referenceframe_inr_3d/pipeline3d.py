@@ -151,6 +151,7 @@ class ExpCfg3D:
     n_windows: int = 1
     allow_full_window: bool = True
     observer: str = "tvfull"    # tvfull | tvtrans | constfull | consttrans
+    observer_clamp: float = 0.0  # >0 (tvtrans): clamp |t_vec| to k x median
     boundary_skip: int = 2
     epochs: int = 1000
     batch_size: int = 32000
@@ -259,14 +260,40 @@ def observer_stored_bytes_3d(observer: str, tw: int) -> int:
             "constfull": 6 * 4, "consttrans": 3 * 4}[observer]
 
 
-def resolve_observer_3d(reg, observer: str):
+def resolve_observer_3d(reg, observer: str, clamp_k: float = 0.0, log=None):
     """Re-solve one region's observer under the requested parameterization from
-    its window-sliced sufficient statistics.  Returns (q (Tw,6), E_variant)."""
+    its window-sliced sufficient statistics.  Returns (q (Tw,6), E_variant,
+    n_clamped).
+
+    clamp_k > 0 (tvtrans only): frames whose |t_vec| exceeds clamp_k x the
+    median |t_vec| are rescaled onto that cap (direction kept).  Guards against
+    pathological per-frame solves (halfcyl160 frame 0: |t_vec|=223 vs median
+    0.70 -> observed value range x82 -> MinMax normalization crushes the
+    signal, job 49256875).  E is recomputed at the clamped, now non-optimal q
+    with the full quadratic E(q) = e0 + 2 q.g + q'AtA q per frame."""
     if observer == "tvfull":
-        return reg.q, reg.E
+        return reg.q, reg.E, 0
     if observer == "tvtrans":
         q, E = solve_killing_trans_3d(reg.AtA, reg.g, reg.e0)
-        return q, float(E.sum())
+        n_clamped = 0
+        if clamp_k > 0:
+            tn = np.linalg.norm(q[:, :3], axis=1)
+            med = float(np.median(tn))
+            cap = clamp_k * med
+            hot = tn > cap
+            n_clamped = int(hot.sum())
+            if n_clamped and med > 0:
+                q = q.copy()
+                q[hot, :3] *= (cap / tn[hot])[:, None]
+                q3, A3, g3 = q[:, :3], reg.AtA[:, :3, :3], reg.g[:, :3]
+                E = np.maximum(
+                    reg.e0 + 2.0 * np.einsum("ti,ti->t", q3, g3)
+                    + np.einsum("ti,tij,tj->t", q3, A3, q3), 0.0)
+                if log:
+                    log(f"    tvtrans clamp k={clamp_k:g}: |t| med={med:.3f} "
+                        f"cap={cap:.3f}, clamped frames "
+                        f"{np.nonzero(hot)[0].tolist()}")
+        return q, float(E.sum()), n_clamped
     Tw = reg.AtA.shape[0]
     if observer == "constfull":
         qc, _ = solve_killing_3d(reg.AtA.sum(0), reg.g.sum(0), reg.e0.sum())
@@ -275,7 +302,7 @@ def resolve_observer_3d(reg, observer: str):
     else:
         raise ValueError(f"unknown observer '{observer}'")
     E = float(reg.e0.sum() + qc @ reg.g.sum(0))
-    return np.tile(qc, (Tw, 1)), max(E, 0.0)
+    return np.tile(qc, (Tw, 1)), max(E, 0.0), 0
 
 
 def compute_partitions_3d(fd: FieldData3D, cfg: ExpCfg3D, log=print
@@ -358,10 +385,11 @@ def run_proposed(fd: FieldData3D, cfg: ExpCfg3D, parts: list[WindowPartition3D],
             side_bytes += part.labels_cells.size * 2
         for r_i, reg in enumerate(part.regions):
             if use_observer:
-                q, E_obs = resolve_observer_3d(reg, cfg.observer)
+                q, E_obs, n_clamped = resolve_observer_3d(
+                    reg, cfg.observer, clamp_k=cfg.observer_clamp, log=log)
                 side_bytes += observer_stored_bytes_3d(cfg.observer, Tw)
             else:
-                q, E_obs = np.zeros_like(reg.q), reg.E0
+                q, E_obs, n_clamped = np.zeros_like(reg.q), reg.E0, 0
             pix_mask = part.labels_pixels == r_i
             samples = make_region_samples_3d(fd.data, fd.xs, fd.ys, fd.zs,
                                              fd.dt, pix_mask, part.it0,
@@ -398,6 +426,8 @@ def run_proposed(fd: FieldData3D, cfg: ExpCfg3D, parts: list[WindowPartition3D],
                        "E_over_E0": reg.E / max(reg.E0, 1e-300),
                        "E_obs_over_E0": E_obs / max(reg.E0, 1e-300),
                        "observer": cfg.observer if use_observer else "none",
+                       "observer_clamp": cfg.observer_clamp,
+                       "clamped_frames": n_clamped,
                        "use_observer": use_observer})
             details.append(st)
 

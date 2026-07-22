@@ -290,6 +290,35 @@ PSNR 挤死在 34.390**(ct@1e-4 s0=34.389837 vs s1=34.389841,差 4e-6 dB;
 污染,修复前不进判据记分板;"hc160≥hc640>smoke>deltawing" 强形式排序
 **待修复重验,当前证据不足以判其真伪**。
 
-**下一波草案(待拍板)**:① tvtrans 稳健化(AtA ridge 或 |t_vec| 中位数
+**下一波(用户 2026-07-22 "全部都做"→ §4.3.2)**:① tvtrans 稳健化(中位
 夹持)+ 本地验证 q(t);② hc160/smoke pro × {consttrans, tvtrans-fixed}
-重跑;③ hc640 {bl,pro} × lr {1e-3, 2e-3} 上探补格;合计 ~30 任务一波钉死。
+重跑;③ hc640 {bl,pro} × lr {1e-3, 2e-3} 上探补格。
+
+### 4.3.2 Verify_rft3d_1.1 fix wave(部署 2026-07-22,51 任务,
+ibex_bash/refframe_3d_v1f_fixwave.sh)
+
+**tvtrans 稳健化实现**(pipeline3d `resolve_observer_3d` 新参
+`clamp_k`,CLI `--observer_clamp`,默认 0=off 保持旧语义):逐帧解出
+t_vec 后,|t_vec(t)| > k×median 的帧按范数缩放到上限(方向保留);夹持后
+q 非最优,E 用全二次型 E(q)=e0+2q·g+qᵀAtAq 逐帧重算;json 记
+`observer_clamp`/`clamped_frames`。**k=3 干跑验证**(本地,走部署同路径):
+
+| 场 | 夹持帧 | vtil 值域放大 | E/E0 | z/y-bbox |
+|---|---|---|---|---|
+| hc160 | [0,1,2,3](223→2.10)| 82.4×→**1.51×** | 0.1373→0.1375(无损)| z 11.8×→3.9×(积分位移残留)|
+| smoke | 6 帧(cap 2.82)| 1.06→0.96 | 0.5205→0.5237 | y 1.56× 不变(真实平流)|
+
+验证:validate_rft3d T1/T2/T3/T5 全过(T3 往返 3.55e-15 不变;本次未动
+killing/partition/frame 模块);hc160 s2x2 8ep 三臂冒烟:bl 29.98 /
+**pro-ct 30.10(修复后与 bl 持平)** / pro-tvr(clamp3) 23.98——tvr 残留
+伤(值域 1.51× + z-bbox 3.9×)欠训练下明显,1000ep 能否站住即 tvr 臂的
+实验内容。
+
+**任务表(17 行 × 3 种子 = 51;全量、mlp、f=0.05、1000ep;arm 命名
+proct=pro+consttrans,protvr=pro+tvtrans+clamp3)**:
+- hc160(24):bl×{1e-3,2e-3}、proct×{5e-4,1e-3,2e-3}、protvr×{5e-4,1e-3,2e-3}
+  ——bl 5e-4 时仍在涨(53.0→53.7),按 2D "pro 相对优势随 lr 升" 上探;
+- hc640(12):bl×{1e-3,2e-3}、proct×{1e-3,2e-3}——补峰后才能判 −0.15;
+- smoke(15):bl×2e-4、proct×{3e-4,2e-4}、protvr×{3e-4,2e-4}——峰在
+  3e-4 向下探。
+判据读数规则不变:各场最优对最优,3-seed 均值 [min..max]。

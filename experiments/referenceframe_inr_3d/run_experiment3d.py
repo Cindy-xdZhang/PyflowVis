@@ -58,6 +58,10 @@ def main():
                     action="store_false")
     ap.add_argument("--observer", default="tvfull",
                     choices=["tvfull", "tvtrans", "constfull", "consttrans"])
+    ap.add_argument("--observer_clamp", type=float, default=0.0,
+                    help=">0 (tvtrans only): clamp per-frame |t_vec| to k x "
+                         "median (robustness vs pathological frame solves; "
+                         "0 = off, legacy behavior)")
     ap.add_argument("--epochs", type=int, default=1000)
     ap.add_argument("--batch_size", type=int, default=32000)
     ap.add_argument("--min_steps_per_epoch", type=int, default=64)
@@ -89,6 +93,7 @@ def main():
                    n_windows=args.n_windows,
                    allow_full_window=args.allow_full_window,
                    max_inrs=args.max_inrs, observer=args.observer,
+                   observer_clamp=args.observer_clamp,
                    epochs=args.epochs, batch_size=args.batch_size,
                    min_steps_per_epoch=args.min_steps_per_epoch,
                    max_steps_per_epoch=args.max_steps_per_epoch,
