@@ -294,8 +294,8 @@ PSNR 挤死在 34.390**(ct@1e-4 s0=34.389837 vs s1=34.389841,差 4e-6 dB;
 夹持)+ 本地验证 q(t);② hc160/smoke pro × {consttrans, tvtrans-fixed}
 重跑;③ hc640 {bl,pro} × lr {1e-3, 2e-3} 上探补格。
 
-### 4.3.2 Verify_rft3d_1.1 fix wave(部署 2026-07-22,51 任务,
-ibex_bash/refframe_3d_v1f_fixwave.sh)
+### 4.3.2 Verify_rft3d_1.1 fix wave(部署 2026-07-23,**job 49331988**
+51 任务,ibex_bash/refframe_3d_v1f_fixwave.sh,commit 7b2135e)
 
 **tvtrans 稳健化实现**(pipeline3d `resolve_observer_3d` 新参
 `clamp_k`,CLI `--observer_clamp`,默认 0=off 保持旧语义):逐帧解出
